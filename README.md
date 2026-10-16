@@ -302,7 +302,7 @@ Map how they are set up on the table in the layout editor:
 ros2 run robogame_sim arena_editor
 ```
 
-It opens http://localhost:8765 in the browser (only this computer can
+It opens http://localhost:8766 in the browser (only this computer can
 reach it; `--port` and `--no-browser` change that). Pick a module (keys 1
 to 5) and click or drag on the grid, which is seen from above with +x to
 the right and +y up, each square drawn with its tile's four peg holes.
@@ -322,7 +322,7 @@ no robot can get onto from the floor or that is too narrow to drive on. A robot 
 clear of every edge, so platforms and ramps have to be at least two
 modules wide. Name the layout and Save, and it is written to
 `src/robogame_sim/layouts/NAME.json`, one module per line so it diffs
-well. `http://localhost:8765/#NAME` opens a saved one directly.
+well. `http://localhost:8766/#NAME` opens a saved one directly.
 
 Layouts made for the old 9 x 9 grid of 5 inch modules still open, with a
 warning; pick 12 x 12 under Grid to grow one about the middle and Save.

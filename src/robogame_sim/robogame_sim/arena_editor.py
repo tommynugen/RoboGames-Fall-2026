@@ -1,9 +1,9 @@
 """Browser editor for arena layouts.
 
     ros2 run robogame_sim arena_editor
-    ros2 run robogame_sim arena_editor --port 8766 --no-browser
+    ros2 run robogame_sim arena_editor --port 8767 --no-browser
 
-Serves a page on http://localhost:8765 where the arena's modules, 1 and 2
+Serves a page on http://localhost:8766 where the arena's modules, 1 and 2
 inch platforms, ramps, walls and the thwomp, are placed on the floor grid
 as they are set up on the table, and turned to face the way they do. Layouts are saved as JSON into the
 workspace's src/robogame_sim/layouts, where sim.launch.py layout:=NAME and
@@ -94,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main(args=None):
     parser = argparse.ArgumentParser(description="Arena layout editor")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--no-browser", action="store_true",
                         help="do not open a browser window")
     # ros2 run can pass --ros-args, which this does not use.
