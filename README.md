@@ -154,20 +154,39 @@ The launch refuses a hunter that the controller is also driving, and any
 misspelt argument (`controler:=joy` would otherwise quietly start no
 controller).
 
-The hunter turns toward where the target will be 0.4 s from now (at most
-15 cm ahead, never past the walls), slows as its heading error grows, and
-turns on the spot if the target is more than about 57 degrees off its
-nose. It stops with its fingertips `clearance` (3 cm) short of the target.
-The arm reaches 15 cm past the centre, so the stopping distance depends on
-which way the target faces: 0.33 m between centres head on, about 0.22 m
-from behind. If it ends up too close, it backs off. If either pose is
-older than 0.5 s, it stops. Speeds, gains and lead time are parameters
-(see the top of `chase_node.py`).
+The hunter predicts where the target is going. From the target's poses it
+measures its speed and turn rate, assumes it keeps both, and so follows a
+robot driving an arc round the arc rather than off its tangent. Along that
+path it finds the earliest point it can reach in time, counting its own
+turning and driving at `intercept_speed` (0.25 m/s), and heads there. A
+target that is still or close is aimed at directly, a fast or far one is
+led by up to `prediction_horizon` (1.5 s), and predicted points stay off
+the walls. Once it has caught up, the hunter adds the target's speed to its
+own so it keeps pace instead of trailing, fading that out over the last
+2 cm so a target that stops is not run into.
 
-Checked headless: robots spawned 0.70 m apart and facing each other, the
-hunter closed to 0.339 m and held. Robot 2 was then driven on a curve at
-0.15 m/s and 0.8 rad/s for 8 s. The hunter turned, followed and settled
-0.23 m behind it. The maths is covered by `test/test_chase.py`.
+Forward speed falls off with heading error, and the hunter turns on the
+spot if its aim point is more than about 57 degrees off its nose. It stops
+with its fingertips `clearance` (3 cm) short of the target. The arm reaches
+15 cm past the centre, so the stopping distance depends on which way the
+target faces: 0.33 m between centres head on, about 0.22 m from behind. If
+it ends up too close, it backs off. If either pose is older than 0.5 s, it
+stops. Speeds, gains and the prediction are parameters (see the top of
+`chase_node.py`).
+
+Checked headless on 2026-10-16, robot 2 steered round a 0.3 m orbit of the
+arena from the start, robot 1 hunting it from 0.7 m away. Gap is distance
+past the stopping distance, measured after the first 5 s:
+
+| Target | Before prediction | With prediction |
+| --- | --- | --- |
+| 0.15 m/s | reached 1.9 s, gap 6.2 cm, engaged 4% | reached 1.7 s, gap 1.0 cm, engaged 100% |
+| 0.22 m/s | reached 2.2 s, gap 8.5 cm, engaged 0% | reached 1.3 s, gap 0.9 cm, engaged 100% |
+| 0.22 m/s, 3 s go 2 s stop | gap 5.6 cm, engaged 45% | gap 0.6 cm, engaged 100%, closest -0.2 cm |
+
+Before, the hunter sat behind the target and never caught it. A still
+target is still approached and held 1 cm outside the stopping distance. The
+maths is covered by `test/test_chase.py`.
 
 ## Tests
 

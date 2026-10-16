@@ -42,23 +42,99 @@ def test_backs_off_when_too_close():
     assert -0.15 <= linear < 0
 
 
-def test_tracker_estimates_velocity_and_leads():
+def driving_tracker(x, y, yaw, speed, turn_rate, steps=20, dt=0.05):
+    """A tracker fed a target driving a steady arc, ending at x, y, yaw."""
+    points = []
+
+    for _ in range(steps + 1):
+        points.append((x, y, yaw))
+        mid = yaw - turn_rate * dt / 2
+        x -= speed * dt * math.cos(mid)
+        y -= speed * dt * math.sin(mid)
+        yaw -= turn_rate * dt
+
     tracker = TargetTracker(smoothing=1.0)
-    tracker.update(0.0, 0.0, 0.0)
-    tracker.update(0.01, 0.0, 0.1)
-    assert abs(tracker.vx - 0.1) < 1e-9
 
-    x, y = tracker.predict(lead_time=0.5, max_lead=1.0)
-    assert abs(x - 0.06) < 1e-9 and y == 0.0
+    for index, (px, py, pyaw) in enumerate(reversed(points)):
+        tracker.update(px, py, index * dt, pyaw)
+
+    return tracker
 
 
-def test_lead_is_capped_and_kept_off_walls():
-    tracker = TargetTracker(smoothing=1.0)
-    tracker.update(0.4, 0.0, 0.0)
-    tracker.update(0.42, 0.0, 0.01)
+def test_tracker_measures_speed_and_turn_rate():
+    tracker = driving_tracker(0.0, 0.0, 0.0, 0.2, 0.8)
+    assert abs(tracker.speed - 0.2) < 1e-3
+    assert abs(tracker.turn_rate - 0.8) < 1e-6
+    assert abs(tracker.vx - 0.2) < 1e-3 and abs(tracker.vy) < 1e-3
 
-    x, _ = tracker.predict(lead_time=1.0, max_lead=0.15)
+
+def test_tracker_sees_reversing_as_negative_speed():
+    tracker = driving_tracker(0.0, 0.0, 0.0, -0.15, 0.0)
+    assert abs(tracker.speed + 0.15) < 1e-6
+
+
+def test_prediction_follows_a_straight_line():
+    tracker = driving_tracker(0.0, 0.0, 0.0, 0.1, 0.0)
+    x, y = tracker.predict(1.0)
+    assert abs(x - 0.1) < 1e-6 and abs(y) < 1e-6
+
+
+def test_prediction_follows_an_arc():
+    # Radius 0.25 anticlockwise: a quarter turn ends 0.25 ahead, 0.25 left.
+    tracker = driving_tracker(0.0, 0.0, 0.0, 0.2, 0.8)
+    x, y = tracker.predict(math.pi / 2 / 0.8)
+    assert abs(x - 0.25) < 1e-3 and abs(y - 0.25) < 1e-3
+
+
+def test_prediction_stays_off_the_walls():
+    tracker = driving_tracker(0.4, 0.0, 0.0, 0.2, 0.0)
+    x, _ = tracker.predict(2.0)
     assert x == 0.44
+
+
+def test_still_target_is_aimed_at_directly():
+    tracker = TargetTracker()
+    tracker.update(0.3, 0.1, 0.0)
+    x, y, seconds = tracker.intercept(
+        0.0, 0.0, 0.0, 0.1, 0.25, 1.5, 1.5)
+    assert (x, y, seconds) == (0.3, 0.1, 0.0)
+
+
+def test_crossing_target_is_met_ahead_of_where_it_is():
+    # Target 0.4 m ahead, crossing left to right at 0.15 m/s.
+    tracker = driving_tracker(0.4, 0.2, -math.pi / 2, 0.15, 0.0)
+    x, y, seconds = tracker.intercept(
+        0.0, 0.0, 0.0, 0.1, 0.25, 1.5, 1.5)
+    assert 0.0 < seconds < 1.5
+    assert abs(x - 0.4) < 1e-6 and y < 0.2
+    assert abs(y - (0.2 - 0.15 * seconds)) < 1e-6
+
+
+def test_target_out_of_reach_is_aimed_at_the_horizon():
+    tracker = driving_tracker(0.0, 0.0, 0.0, 0.2, 0.0)
+    _, _, seconds = tracker.intercept(
+        -0.4, 0.0, 0.0, 0.1, 0.05, 1.5, 1.0)
+    assert seconds == 1.0
+
+
+def test_keeps_up_with_a_target_driving_away():
+    # 3 cm past the standoff behind a target pulling away at 0.2 m/s.
+    linear, _, _ = chase_command(
+        0, 0, 0, 0.15, 0, 0.15, target_vx=0.2, **ARGS)
+    assert abs(linear - (1.2 * 0.03 + 0.2)) < 1e-9
+
+
+def test_speed_matching_fades_out_at_the_standoff():
+    # Right at the standoff, so a target that stops is not run into.
+    linear, _, _ = chase_command(
+        0, 0, 0, 0.12, 0, 0.12, target_vx=0.2, **ARGS)
+    assert linear == 0.0
+
+
+def test_backs_off_from_the_target_even_when_aiming_past_it():
+    linear, _, _ = chase_command(
+        0, 0, 0, 0.4, 0, 0.05, target_vx=0.2, **ARGS)
+    assert linear < 0
 
 
 def test_footprint_reaches_to_fingertips_in_front():

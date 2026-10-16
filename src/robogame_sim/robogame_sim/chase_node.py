@@ -4,7 +4,9 @@
         -p hunter_id:=1 -p target_id:=2 -p use_sim_time:=true
 
 Reads /model/robot_N/odometry for the hunter and the target, the arena
-camera's stand-in, and publishes /robot_<hunter>/cmd_vel. The hunter stops
+camera's stand-in, and publishes /robot_<hunter>/cmd_vel. From the target's
+poses it works out its speed and turn rate, predicts its path, and heads
+for the earliest point on it the hunter can reach in time. The hunter stops
 with its fingertips clearance metres short of the target, allowing for
 both arms, keeps facing it, and follows when it moves. If either pose goes
 stale the hunter is stopped.
@@ -42,8 +44,12 @@ class ChaseNode(Node):
             "linear_gain": 1.2,
             "angular_gain": 3.0,
             "turn_in_place": 1.0,
-            "lead_time": 0.4,
-            "max_lead": 0.15,
+            # How far ahead the target's path is predicted, and the speed
+            # the hunter counts on making when working out where it can
+            # meet the target. A bit under max_linear_speed, since it
+            # rarely drives flat out.
+            "prediction_horizon": 1.5,
+            "intercept_speed": 0.25,
             "pose_timeout": 0.5,
             "rate": 20.0,
         }
@@ -115,15 +121,18 @@ class ChaseNode(Node):
 
         x, y, yaw = self.hunter_pose
         distance = math.hypot(self.target.x - x, self.target.y - y)
-        aim_x, aim_y = self.target.predict(p["lead_time"], p["max_lead"])
         standoff = standoff_distance(
             x, y, self.target.x, self.target.y, self.target.yaw,
             p["clearance"])
+        aim_x, aim_y, _ = self.target.intercept(
+            x, y, yaw, standoff, p["intercept_speed"],
+            p["max_angular_speed"], p["prediction_horizon"])
 
         linear, angular, _ = chase_command(
             x, y, yaw, aim_x, aim_y, distance,
             standoff, p["max_linear_speed"], p["max_angular_speed"],
-            p["linear_gain"], p["angular_gain"], p["turn_in_place"])
+            p["linear_gain"], p["angular_gain"], p["turn_in_place"],
+            self.target.vx, self.target.vy)
 
         engaged = distance < standoff + 0.03
         if engaged != self.engaged:

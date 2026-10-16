@@ -1,7 +1,8 @@
 """Steering maths for chase_node, kept free of ROS so it can be tested.
 
-The hunter aims at where the target will be a moment from now, turns
-toward that point and drives until it is a set distance from the target.
+The hunter predicts where the target is going from its speed and turn rate,
+finds the earliest point on that path it can get to in time, and heads for
+it, matching the target's speed once it has caught up.
 """
 
 import math
@@ -22,10 +23,13 @@ ARM_REACH = SHOULDER[0] + UPPER_ARM_LENGTH + FOREARM_LENGTH + FINGER_LENGTH
 FOOTPRINT_BACK = CHASSIS[0] / 2
 FOOTPRINT_SIDE = WHEEL_Y + WHEEL_WIDTH / 2
 
-# Arena walls are at +-0.5 m. Aim points are kept this far inside them, so
-# leading a target that runs along a wall does not send the hunter into it.
+# Arena walls are at +-0.5 m. Predicted points are kept this far inside
+# them, since the target cannot drive through a wall and the hunter should
+# not be sent into one.
 ARENA_HALF = 0.5
 WALL_MARGIN = 0.06
+
+KEEP_UP_FADE = 0.02
 
 
 def normalize_angle(angle):
@@ -43,42 +47,90 @@ def yaw_from_quaternion(q):
 
 
 class TargetTracker:
-    """Smoothed target position and velocity from timestamped poses."""
+    """Smoothed target position, speed and turn rate from timestamped poses.
+
+    The target is taken to keep its current speed and turn rate, so a robot
+    driving an arc is predicted along that arc rather than off its tangent.
+    """
 
     def __init__(self, smoothing=0.3):
         self.smoothing = smoothing
         self.x = self.y = None
         self.yaw = 0.0
-        self.vx = self.vy = 0.0
+        self.speed = 0.0
+        self.turn_rate = 0.0
         self.stamp = None
 
-    def update(self, x, y, stamp, yaw=0.0):
-        self.yaw = yaw
+    @property
+    def vx(self):
+        return self.speed * math.cos(self.yaw)
 
+    @property
+    def vy(self):
+        return self.speed * math.sin(self.yaw)
+
+    def update(self, x, y, stamp, yaw=0.0):
         if self.stamp is not None:
             dt = stamp - self.stamp
 
             if dt <= 0.0:
                 return
 
+            # Speed is measured along the heading half way through the
+            # step, so a target driving backwards has a negative speed.
+            turned = normalize_angle(yaw - self.yaw)
+            mid_yaw = self.yaw + turned / 2
+            speed = ((x - self.x) * math.cos(mid_yaw)
+                     + (y - self.y) * math.sin(mid_yaw)) / dt
+
             a = self.smoothing
-            self.vx = (1 - a) * self.vx + a * (x - self.x) / dt
-            self.vy = (1 - a) * self.vy + a * (y - self.y) / dt
+            self.speed = (1 - a) * self.speed + a * speed
+            self.turn_rate = (1 - a) * self.turn_rate + a * turned / dt
 
-        self.x, self.y, self.stamp = x, y, stamp
+        self.x, self.y, self.yaw, self.stamp = x, y, yaw, stamp
 
-    def predict(self, lead_time, max_lead):
-        """Where the target will be in lead_time seconds, at most max_lead
-        metres from where it is now, and kept inside the walls."""
-        dx, dy = self.vx * lead_time, self.vy * lead_time
-        lead = math.hypot(dx, dy)
+    def predict(self, seconds):
+        """Where the target will be in seconds, kept inside the walls."""
+        v, w, yaw = self.speed, self.turn_rate, self.yaw
 
-        if lead > max_lead:
-            dx, dy = dx * max_lead / lead, dy * max_lead / lead
+        if abs(w) < 1e-3:
+            x = self.x + v * seconds * math.cos(yaw)
+            y = self.y + v * seconds * math.sin(yaw)
+        else:
+            end_yaw = yaw + w * seconds
+            x = self.x + v / w * (math.sin(end_yaw) - math.sin(yaw))
+            y = self.y + v / w * (math.cos(yaw) - math.cos(end_yaw))
 
         limit = ARENA_HALF - WALL_MARGIN
-        return (clamp(self.x + dx, -limit, limit),
-                clamp(self.y + dy, -limit, limit))
+        return clamp(x, -limit, limit), clamp(y, -limit, limit)
+
+    def intercept(self, hunter_x, hunter_y, hunter_yaw, standoff,
+                  hunter_speed, hunter_turn_rate, horizon, step=0.05):
+        """The earliest point on the target's predicted path that the
+        hunter can reach in time, and how many seconds ahead it is.
+
+        Reaching a point means getting within standoff of it, at
+        hunter_speed once turned toward it at hunter_turn_rate. If no point
+        within horizon seconds can be reached, the one at horizon is used.
+        """
+        seconds = 0.0
+
+        if abs(self.speed) < 1e-3:
+            x, y = self.predict(0.0)
+            return x, y, 0.0
+
+        while True:
+            x, y = self.predict(seconds)
+            distance = math.hypot(x - hunter_x, y - hunter_y)
+            turn = abs(normalize_angle(
+                math.atan2(y - hunter_y, x - hunter_x) - hunter_yaw))
+            needed = (max(0.0, distance - standoff) / hunter_speed
+                      + turn / hunter_turn_rate)
+
+            if needed <= seconds or seconds >= horizon:
+                return x, y, seconds
+
+            seconds = min(horizon, seconds + step)
 
 
 def footprint_extent(bearing):
@@ -102,29 +154,44 @@ def standoff_distance(hunter_x, hunter_y, target_x, target_y, target_yaw,
     return ARM_REACH + footprint_extent(bearing) + clearance
 
 
-def chase_command(hunter_x, hunter_y, hunter_yaw, aim_x, aim_y, distance,
-                  standoff, max_linear, max_angular,
-                  linear_gain, angular_gain, turn_in_place):
+def chase_command(hunter_x, hunter_y, hunter_yaw, aim_x, aim_y,
+                  target_distance, standoff, max_linear, max_angular,
+                  linear_gain, angular_gain, turn_in_place,
+                  target_vx=0.0, target_vy=0.0):
     """Twist (linear, angular) for the hunter.
 
-    distance is to the target itself, aim_x and aim_y the predicted point.
-    Forward speed falls off with heading error, so the hunter curves in on
-    a moving target, and it turns on the spot past turn_in_place radians.
-    Too close, it backs off at up to half speed.
+    aim_x and aim_y are where the hunter means to meet the target, and
+    target_distance is to where the target is now. The hunter drives to
+    stop standoff short of the aim point, plus the target's own velocity
+    along the hunter's heading so it keeps up rather than trailing. Forward
+    speed falls off with heading error, so the hunter curves in, and it
+    turns on the spot past turn_in_place radians. Closer than standoff to
+    the target itself, it backs off at up to half speed.
     """
     heading_error = normalize_angle(
         math.atan2(aim_y - hunter_y, aim_x - hunter_x) - hunter_yaw)
 
     angular = clamp(angular_gain * heading_error, -max_angular, max_angular)
 
-    gap = distance - standoff
+    aim_gap = math.hypot(aim_x - hunter_x, aim_y - hunter_y) - standoff
+    target_gap = target_distance - standoff
+    keep_up = (target_vx * math.cos(hunter_yaw)
+               + target_vy * math.sin(hunter_yaw))
 
-    # A small dead band, so the hunter sits still at the standoff instead
-    # of rocking back and forth on pose noise.
-    if abs(gap) < 0.01 or abs(heading_error) > turn_in_place:
+    # Matching the target's speed fades out over the last KEEP_UP_FADE
+    # metres, so if the target stops the hunter is not carried into it.
+    keep_up *= clamp(target_gap / KEEP_UP_FADE, 0.0, 1.0)
+
+    if target_gap < 0.0:
+        linear = linear_gain * target_gap
+    elif abs(heading_error) > turn_in_place:
+        linear = 0.0
+    elif abs(aim_gap) < 0.01 and abs(keep_up) < 0.01:
+        # A small dead band, so the hunter sits still at the standoff
+        # instead of rocking back and forth on pose noise.
         linear = 0.0
     else:
-        linear = linear_gain * gap * math.cos(heading_error)
+        linear = (linear_gain * aim_gap + keep_up) * math.cos(heading_error)
 
     linear = clamp(linear, -max_linear / 2, max_linear)
 
