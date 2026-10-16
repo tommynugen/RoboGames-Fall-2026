@@ -1,4 +1,4 @@
-# Robogame Gazebo sim (private test)
+# Robogame testing fork: Gazebo sim (private test)
 
 A private workspace for trying Gazebo with the ROBOGAME-2.0 nodes. It lives
 outside every git checkout and has no remote, so nothing here reaches
@@ -56,7 +56,7 @@ sudo apt install ros-lyrical-ros-gz
 Then build:
 
 ```
-cd ~/robogame-sim
+cd ~/Documents/PlatformIO/Projects/robogame-testing-fork
 source /opt/ros/lyrical/setup.bash
 colcon build --symlink-install
 source install/setup.bash
