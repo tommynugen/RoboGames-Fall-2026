@@ -7,6 +7,10 @@
     ros2 launch robogame_sim sim.launch.py autonomy:=true
     ros2 launch robogame_sim sim.launch.py robots:=1,2 chase:=1,2
     ros2 launch robogame_sim sim.launch.py drive_model:=firmware gui:=false
+    ros2 launch robogame_sim sim.launch.py layout:=my_setup
+
+layout names an arena layout made with arena_editor (or a path to one), and
+the world is built from it; cad uses the Onshape export as it is.
 
 Each robot listens on /robot_N/cmd_vel and /robot_N/arm_command, the same
 topics microcontroller_node takes, so do not run the BLE bridge alongside.
@@ -36,7 +40,9 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ros_gz_sim.actions import GzServer
 
+from robogame_sim import arena_layout
 from robogame_sim.robot_sdf import robot_sdf
+from robogame_sim.terrain import Terrain
 
 WORLD_NAME = "robogame_arena"
 
@@ -94,7 +100,7 @@ def package_exists(name):
 
 LAUNCH_ARGUMENTS = (
     "robots", "gui", "drive_model", "controller", "joy_device_id",
-    "motion_device", "autonomy", "chase",
+    "motion_device", "autonomy", "chase", "layout",
 )
 
 
@@ -132,6 +138,22 @@ def launch_setup(context):
 
     share = get_package_share_directory("robogame_sim")
     world = os.path.join(share, "worlds", f"{WORLD_NAME}.sdf")
+    layout_name = LaunchConfiguration("layout").perform(context)
+
+    if layout_name == "cad":
+        layout_path = ""
+        ground = Terrain.from_sdf(os.path.join(
+            share, "models", arena_layout.CAD_MODEL, "model.sdf"))
+    else:
+        layout_path = arena_layout.find_layout(layout_name)
+        layout = arena_layout.load(layout_path)
+        ground = arena_layout.terrain(layout)
+        world = arena_layout.write_world(layout, world, ground)
+
+        for problem in arena_layout.check(layout, ground):
+            print(f"[sim.launch] layout {layout_name}: {problem['type']} at "
+                  f"col {problem['col']}, row {problem['row']}: "
+                  f"{problem['message']}")
 
     # GzServer runs the server inside a ROS process, so Ctrl-C stops it.
     # Through gz_sim.launch.py the ruby gz wrapper is stopped instead, and
@@ -158,6 +180,9 @@ def launch_setup(context):
     for index, robot_id in enumerate(robot_ids):
         robot = f"robot_{robot_id}"
         x, y, yaw = spawn_pose(index, len(robot_ids))
+        # Spawn on top of whatever is there, not inside it.
+        under = ground.height_at(x, y)
+        z = SPAWN_HEIGHT + (0.0 if math.isnan(under) else max(0.0, under))
 
         actions.append(Node(
             package="ros_gz_sim",
@@ -168,7 +193,7 @@ def launch_setup(context):
                 "-world", WORLD_NAME,
                 "-name", robot,
                 "-string", robot_sdf(robot_id),
-                "-x", f"{x:.3f}", "-y", f"{y:.3f}", "-z", str(SPAWN_HEIGHT),
+                "-x", f"{x:.3f}", "-y", f"{y:.3f}", "-z", f"{z:.3f}",
                 "-Y", f"{yaw:.3f}",
             ],
         ))
@@ -283,6 +308,7 @@ def launch_setup(context):
             parameters=[{
                 "hunter_id": chase[0],
                 "target_id": chase[1],
+                "layout": layout_path,
                 "use_sim_time": True,
             }],
         ))
@@ -323,5 +349,9 @@ def generate_launch_description():
             "chase", default_value="",
             description="HUNTER,TARGET, e.g. 1,2, starts chase_node so the "
                         "first robot drives after the second"),
+        DeclareLaunchArgument(
+            "layout", default_value="default",
+            description="Arena layout from arena_editor, by name or path; "
+                        "cad uses the Onshape export as it is"),
         OpaqueFunction(function=launch_setup),
     ])

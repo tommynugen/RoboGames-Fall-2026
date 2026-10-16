@@ -23,10 +23,10 @@ ARM_REACH = SHOULDER[0] + UPPER_ARM_LENGTH + FOREARM_LENGTH + FINGER_LENGTH
 FOOTPRINT_BACK = CHASSIS[0] / 2
 FOOTPRINT_SIDE = WHEEL_Y + WHEEL_WIDTH / 2
 
-# Arena walls are at +-0.5 m. Predicted points are kept this far inside
-# them, since the target cannot drive through a wall and the hunter should
-# not be sent into one.
-ARENA_HALF = 0.5
+# The floor tiles end at +-0.5715 m, 9 modules of 0.127 m, with no walls.
+# Predicted points are kept this far inside the edge, since a target is
+# not going to drive off it and the hunter should not be sent over it.
+ARENA_HALF = 4.5 * 0.127
 WALL_MARGIN = 0.06
 
 KEEP_UP_FADE = 0.02
@@ -117,7 +117,8 @@ class TargetTracker:
         seconds = 0.0
 
         if abs(self.speed) < 1e-3:
-            x, y = self.predict(0.0)
+            # A still target is aimed at where it is, edge or not.
+            x, y = self.x, self.y
             return x, y, 0.0
 
         while True:

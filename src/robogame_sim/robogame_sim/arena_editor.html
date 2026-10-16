@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arena Layout Editor</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --ink: #1d2433;
+    --muted: #5d6677;
+    --line: #d9dde4;
+    --accent: #2f5fb4;
+    --accent-ink: #ffffff;
+    --floor: #c9cbcf;
+    --floor-line: #b3b6bc;
+    --platform: #3b61b4;
+    --platform-edge: #2a4a8f;
+    --ramp-low: #d6e9f6;
+    --ramp-high: #7fb3dd;
+    --ramp-arrow: #1f3f78;
+    --bad: #d23c3c;
+    --bad-soft: #fbe9e9;
+    --good: #2e8b57;
+    --ghost: rgba(47, 95, 180, 0.35);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d;
+      --panel: #1c2028;
+      --ink: #e6e9ef;
+      --muted: #9aa3b2;
+      --line: #2e3440;
+      --accent: #6d97e6;
+      --accent-ink: #0d1117;
+      --floor: #4a4e57;
+      --floor-line: #3c4048;
+      --platform: #4f78cf;
+      --platform-edge: #33589f;
+      --ramp-low: #a9c9e3;
+      --ramp-high: #5d93c4;
+      --ramp-arrow: #0f2650;
+      --bad: #f06b6b;
+      --bad-soft: #3a2224;
+      --good: #5cc28a;
+      --ghost: rgba(109, 151, 230, 0.4);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+    --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+    --floor: #4a4e57; --floor-line: #3c4048; --platform: #4f78cf;
+    --platform-edge: #33589f; --ramp-low: #a9c9e3; --ramp-high: #5d93c4;
+    --ramp-arrow: #0f2650; --bad: #f06b6b; --bad-soft: #3a2224;
+    --good: #5cc28a; --ghost: rgba(109, 151, 230, 0.4); color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+    padding: 12px 20px; background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 650; }
+  .field { display: flex; align-items: center; gap: 6px; }
+  .field label { color: var(--muted); font-size: 13px; }
+  select, input[type=text] {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  input[type=text] { width: 150px; }
+  button {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); font-weight: 600;
+  }
+  #status { color: var(--muted); font-size: 13px; margin-left: auto; }
+  #status.dirty { color: var(--bad); }
+  #status.saved { color: var(--good); }
+
+  main {
+    display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px;
+    padding: 20px; max-width: 1180px; margin: 0 auto;
+  }
+  @media (max-width: 860px) {
+    main { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+  }
+  .board-wrap {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px;
+  }
+  #board { width: 100%; height: auto; display: block; touch-action: none;
+           user-select: none; }
+  #board .cell { cursor: pointer; }
+  .caption { color: var(--muted); font-size: 12.5px; margin: 8px 4px 0; }
+
+  aside { display: flex; flex-direction: column; gap: 14px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px;
+  }
+  .panel h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 650;
+  }
+  .tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .tool {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 8px 4px;
+  }
+  .tool[aria-pressed=true] {
+    border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .tool svg { width: 30px; height: 30px; }
+  .tool kbd { color: var(--muted); }
+  kbd {
+    font: 11px ui-monospace, monospace; border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 4px; padding: 0 4px;
+  }
+  .rotate-row {
+    display: flex; align-items: center; gap: 10px; margin-top: 10px;
+  }
+  .rotate-row svg { width: 34px; height: 34px; flex: none; }
+  .help { margin: 10px 0 0; padding-left: 18px; color: var(--muted);
+          font-size: 13px; }
+  .help li { margin: 2px 0; }
+
+  #problems { list-style: none; margin: 0; padding: 0; }
+  #problems li {
+    padding: 7px 9px; border-radius: 6px; background: var(--bad-soft);
+    margin-bottom: 6px; font-size: 13px; cursor: default;
+  }
+  #problems li b { color: var(--bad); font-weight: 650; }
+  #problems .ok { background: none; color: var(--good); padding-left: 0; }
+  .summary { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+  pre {
+    margin: 0; padding: 9px; background: var(--bg); border-radius: 6px;
+    border: 1px solid var(--line); white-space: pre-wrap;
+    word-break: break-all; font: 12px/1.5 ui-monospace, monospace;
+  }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0;
+          overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Arena layout</h1>
+  <div class="field">
+    <label for="saved">Open</label>
+    <select id="saved"></select>
+  </div>
+  <div class="field">
+    <label for="name">Name</label>
+    <input id="name" type="text" value="default" spellcheck="false"
+           autocomplete="off">
+  </div>
+  <button id="save" class="primary" title="Ctrl+S">Save</button>
+  <button id="clear" title="Remove every platform and ramp">Clear</button>
+  <button id="undo" title="Ctrl+Z">Undo</button>
+  <span id="status"></span>
+</header>
+
+<main>
+  <section class="board-wrap">
+    <svg id="board" role="img" aria-label="Arena grid"></svg>
+    <p class="caption">Seen from above. Each square is one 12.7 cm module
+      with a floor tile under it. Arrows point uphill.</p>
+  </section>
+
+  <aside>
+    <div class="panel">
+      <h2>Place</h2>
+      <div class="tools">
+        <button class="tool" data-tool="platform" aria-pressed="true">
+          <svg viewBox="0 0 30 30"><rect x="3" y="3" width="24" height="24"
+            rx="2" fill="var(--platform)" stroke="var(--platform-edge)"
+            stroke-width="2"/></svg>
+          Platform <kbd>1</kbd>
+        </button>
+        <button class="tool" data-tool="ramp" aria-pressed="false">
+          <svg viewBox="0 0 30 30" id="tool-ramp"></svg>
+          Ramp <kbd>2</kbd>
+        </button>
+        <button class="tool" data-tool="erase" aria-pressed="false">
+          <svg viewBox="0 0 30 30"><rect x="3" y="3" width="24" height="24"
+            rx="2" fill="var(--floor)"/><path d="M9 9l12 12M21 9L9 21"
+            stroke="var(--bad)" stroke-width="2.5"
+            stroke-linecap="round"/></svg>
+          Floor <kbd>3</kbd>
+        </button>
+      </div>
+      <div class="rotate-row">
+        <svg viewBox="0 0 34 34" id="new-ramp"></svg>
+        <div>
+          <div>New ramps rise toward <b id="facing">+y</b></div>
+          <button id="rotate" style="margin-top:4px">Rotate <kbd>R</kbd>
+          </button>
+        </div>
+      </div>
+      <ul class="help">
+        <li>Click or drag to place.</li>
+        <li>Click a ramp to turn it a quarter turn; <kbd>R</kbd> turns the
+          one under the pointer.</li>
+        <li>Right-click to clear a square.</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <h2>Checks</h2>
+      <ul id="problems"></ul>
+      <div class="summary" id="summary"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Run it</h2>
+      <pre id="command"></pre>
+      <div class="row"><button id="copy">Copy</button></div>
+      <p class="note" id="folder"></p>
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+
+const NS = "http://www.w3.org/2000/svg";
+const CELL = 60;
+const PAD = 30;
+const FACING = { 0: "+y", 90: "-x", 180: "-y", 270: "+x" };
+
+let size = 9;
+let modules = new Map();          // "col,row" -> {type, col, row, rotation}
+let tool = "platform";
+let newRotation = 0;
+let hover = null;
+let problems = [];
+let highlighted = null;
+let history = [];
+let savedSnapshot = "";
+let painting = false;
+let paintedThisStroke = new Set();
+
+const board = document.getElementById("board");
+const statusEl = document.getElementById("status");
+const nameEl = document.getElementById("name");
+const savedEl = document.getElementById("saved");
+
+const key = (c, r) => `${c},${r}`;
+const snapshot = () => JSON.stringify(layout());
+
+function layout() {
+  const list = [...modules.values()].map(m => m.type === "ramp"
+    ? { type: "ramp", col: m.col, row: m.row, rotation: m.rotation }
+    : { type: m.type, col: m.col, row: m.row });
+  list.sort((a, b) => a.row - b.row || a.col - b.col);
+  return { size, modules: list };
+}
+
+function setLayout(data) {
+  size = data.size || 9;
+  modules = new Map();
+  for (const m of data.modules || []) {
+    modules.set(key(m.col, m.row), { rotation: 0, ...m });
+  }
+}
+
+function remember() {
+  history.push(snapshot());
+  if (history.length > 200) history.shift();
+}
+
+function changed() {
+  render();
+  updateStatus();
+  scheduleCheck();
+}
+
+function updateStatus(text, kind) {
+  if (text) {
+    statusEl.textContent = text;
+    statusEl.className = kind || "";
+    return;
+  }
+  const dirty = snapshot() !== savedSnapshot;
+  statusEl.textContent = dirty ? "Unsaved changes" : "Saved";
+  statusEl.className = dirty ? "dirty" : "saved";
+}
+
+// -- drawing ---------------------------------------------------------------
+
+function el(name, attrs = {}, parent) {
+  const node = document.createElementNS(NS, name);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (parent) parent.appendChild(node);
+  return node;
+}
+
+function defs(svg, id) {
+  const d = el("defs", {}, svg);
+  const g = el("linearGradient", { id, x1: 0, y1: 1, x2: 0, y2: 0 }, d);
+  el("stop", { offset: "0%", "stop-color": "var(--ramp-low)" }, g);
+  el("stop", { offset: "100%", "stop-color": "var(--ramp-high)" }, g);
+}
+
+// A ramp drawn rising toward screen up, then turned. The world's rotation
+// is anticlockwise seen from above, which is anticlockwise on screen too
+// since +y is drawn up, so SVG's clockwise rotate takes the negative.
+function drawRamp(parent, x, y, s, rotation, gradient, opacity = 1) {
+  const g = el("g", {
+    transform: `rotate(${-rotation} ${x + s / 2} ${y + s / 2})`,
+    opacity,
+  }, parent);
+  el("rect", { x: x + 1, y: y + 1, width: s - 2, height: s - 2, rx: 2,
+               fill: `url(#${gradient})` }, g);
+  el("rect", { x: x + 1, y: y + 1, width: s - 2, height: s * 0.08,
+               fill: "var(--platform-edge)", opacity: 0.55 }, g);
+  const cx = x + s / 2;
+  for (const t of [0.62, 0.38]) {
+    el("path", {
+      d: `M${cx - s * 0.2} ${y + s * (t + 0.12)} L${cx} ${y + s * t} ` +
+         `L${cx + s * 0.2} ${y + s * (t + 0.12)}`,
+      fill: "none", stroke: "var(--ramp-arrow)", "stroke-width": s * 0.07,
+      "stroke-linecap": "round", "stroke-linejoin": "round",
+    }, g);
+  }
+  return g;
+}
+
+function drawPlatform(parent, x, y, s, opacity = 1) {
+  el("rect", { x: x + 1, y: y + 1, width: s - 2, height: s - 2, rx: 2,
+               fill: "var(--platform)", stroke: "var(--platform-edge)",
+               "stroke-width": s * 0.05, opacity }, parent);
+}
+
+function cellXY(col, row) {
+  return [PAD + col * CELL, PAD + (size - 1 - row) * CELL];
+}
+
+function render() {
+  const total = PAD * 2 + size * CELL;
+  board.setAttribute("viewBox", `0 0 ${total} ${total}`);
+  board.replaceChildren();
+  defs(board, "rampFill");
+
+  const bad = new Map();
+  for (const p of problems) {
+    const k = key(p.col, p.row);
+    bad.set(k, [...(bad.get(k) || []), p.message]);
+  }
+
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      const [x, y] = cellXY(col, row);
+      const k = key(col, row);
+      const g = el("g", { class: "cell", "data-col": col, "data-row": row },
+                   board);
+      el("rect", { x, y, width: CELL, height: CELL, fill: "var(--floor)",
+                   stroke: "var(--floor-line)", "stroke-width": 1 }, g);
+
+      const m = modules.get(k);
+      if (m && m.type === "platform") drawPlatform(g, x, y, CELL);
+      if (m && m.type === "ramp") drawRamp(g, x, y, CELL, m.rotation,
+                                           "rampFill");
+
+      if (hover && hover.col === col && hover.row === row && !painting) {
+        if (tool === "platform" && !(m && m.type === "platform")) {
+          drawPlatform(g, x, y, CELL, 0.45);
+        } else if (tool === "ramp" && !(m && m.type === "ramp")) {
+          drawRamp(g, x, y, CELL, newRotation, "rampFill", 0.5);
+        }
+        el("rect", { x: x + 1.5, y: y + 1.5, width: CELL - 3,
+                     height: CELL - 3, fill: "none",
+                     stroke: tool === "erase" ? "var(--bad)" : "var(--accent)",
+                     "stroke-width": 3, rx: 3 }, g);
+      }
+
+      if (bad.has(k)) {
+        const strong = highlighted === k;
+        el("rect", { x: x + 2, y: y + 2, width: CELL - 4, height: CELL - 4,
+                     fill: "none", stroke: "var(--bad)", rx: 3,
+                     "stroke-width": strong ? 5 : 3,
+                     "stroke-dasharray": strong ? "" : "6 4" }, g);
+        const title = el("title", {}, g);
+        title.textContent = bad.get(k).join("\n");
+      }
+    }
+  }
+
+  // Axes and grid numbers.
+  const label = (text, x, y, anchor = "middle") => {
+    const t = el("text", { x, y, "text-anchor": anchor, "font-size": 13,
+                           fill: "var(--muted)",
+                           "dominant-baseline": "middle" }, board);
+    t.textContent = text;
+  };
+  for (let i = 0; i < size; i++) {
+    label(i, PAD + i * CELL + CELL / 2, PAD + size * CELL + 14);
+    label(i, PAD - 14, PAD + (size - 1 - i) * CELL + CELL / 2);
+  }
+  label("col  →  +x", PAD + size * CELL / 2, PAD - 14);
+  const t = el("text", { "font-size": 13, fill: "var(--muted)",
+    "text-anchor": "middle", "dominant-baseline": "middle",
+    transform: `translate(${PAD + size * CELL + 14} ${PAD + size * CELL / 2})
+                rotate(-90)` }, board);
+  t.textContent = "row  →  +y";
+
+  drawToolIcons();
+}
+
+function drawToolIcons() {
+  for (const [id, rotation, s] of [["tool-ramp", 0, 30],
+                                   ["new-ramp", newRotation, 34]]) {
+    const svg = document.getElementById(id);
+    svg.replaceChildren();
+    defs(svg, `${id}-fill`);
+    drawRamp(svg, 2, 2, s - 4, rotation, `${id}-fill`);
+  }
+  document.getElementById("facing").textContent = FACING[newRotation];
+}
+
+// -- editing ---------------------------------------------------------------
+
+function cellFrom(event) {
+  const g = event.target.closest && event.target.closest(".cell");
+  if (!g) return null;
+  return { col: +g.dataset.col, row: +g.dataset.row };
+}
+
+function apply(cell, erase, stroke) {
+  const k = key(cell.col, cell.row);
+  const m = modules.get(k);
+
+  if (erase || tool === "erase") {
+    if (m) modules.delete(k);
+    return !!m;
+  }
+  if (tool === "platform") {
+    if (m && m.type === "platform") return false;
+    modules.set(k, { type: "platform", col: cell.col, row: cell.row });
+    return true;
+  }
+  // Ramp: a click on a ramp turns it, anywhere else places one.
+  if (m && m.type === "ramp") {
+    if (stroke) return false;
+    m.rotation = (m.rotation + 90) % 360;
+    newRotation = m.rotation;
+    return true;
+  }
+  modules.set(k, { type: "ramp", col: cell.col, row: cell.row,
+                   rotation: newRotation });
+  return true;
+}
+
+board.addEventListener("pointerdown", event => {
+  const cell = cellFrom(event);
+  if (!cell) return;
+  event.preventDefault();
+  const erase = event.button === 2;
+  remember();
+  painting = true;
+  paintedThisStroke = new Set([key(cell.col, cell.row)]);
+  board.setPointerCapture(event.pointerId);
+  board.dataset.erase = erase ? "1" : "";
+  if (apply(cell, erase, false)) changed(); else history.pop();
+});
+
+board.addEventListener("pointermove", event => {
+  const target = document.elementFromPoint(event.clientX, event.clientY);
+  const cell = target ? cellFrom({ target }) : null;
+  const moved = (cell && (!hover || hover.col !== cell.col ||
+                          hover.row !== cell.row)) || (!cell && hover);
+  hover = cell;
+
+  if (painting && cell) {
+    const k = key(cell.col, cell.row);
+    if (!paintedThisStroke.has(k)) {
+      paintedThisStroke.add(k);
+      if (apply(cell, board.dataset.erase === "1", true)) {
+        changed();
+        return;
+      }
+    }
+  }
+  if (moved) render();
+});
+
+const endStroke = () => { painting = false; render(); };
+board.addEventListener("pointerup", endStroke);
+board.addEventListener("pointercancel", endStroke);
+board.addEventListener("pointerleave", () => {
+  if (!painting) { hover = null; render(); }
+});
+board.addEventListener("contextmenu", event => event.preventDefault());
+
+function setTool(name) {
+  tool = name;
+  for (const b of document.querySelectorAll(".tool")) {
+    b.setAttribute("aria-pressed", b.dataset.tool === name);
+  }
+  render();
+}
+
+for (const b of document.querySelectorAll(".tool")) {
+  b.addEventListener("click", () => setTool(b.dataset.tool));
+}
+
+function rotate() {
+  const m = hover && modules.get(key(hover.col, hover.row));
+  if (m && m.type === "ramp") {
+    remember();
+    m.rotation = (m.rotation + 90) % 360;
+    newRotation = m.rotation;
+    changed();
+  } else {
+    newRotation = (newRotation + 90) % 360;
+    render();
+  }
+}
+
+document.getElementById("rotate").addEventListener("click", rotate);
+
+function undo() {
+  if (!history.length) return;
+  setLayout(JSON.parse(history.pop()));
+  changed();
+}
+
+document.getElementById("undo").addEventListener("click", undo);
+
+document.getElementById("clear").addEventListener("click", () => {
+  if (!modules.size) return;
+  remember();
+  modules.clear();
+  changed();
+});
+
+document.addEventListener("keydown", event => {
+  if (event.target === nameEl) {
+    if (event.key === "Enter") save();
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+    event.preventDefault();
+    save();
+  } else if ((event.ctrlKey || event.metaKey) &&
+             event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    undo();
+  } else if (event.key === "1") setTool("platform");
+  else if (event.key === "2") setTool("ramp");
+  else if (event.key === "3") setTool("erase");
+  else if (event.key.toLowerCase() === "r") rotate();
+});
+
+// -- server ----------------------------------------------------------------
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    headers: { "Content-Type": "application/json" }, ...options });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.error || response.statusText);
+  return body;
+}
+
+let checkTimer = null;
+let checkSerial = 0;
+
+function scheduleCheck() {
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(runCheck, 250);
+}
+
+async function runCheck() {
+  const serial = ++checkSerial;
+  try {
+    const result = await api("/api/check", {
+      method: "POST", body: JSON.stringify(layout()) });
+    if (serial !== checkSerial) return;
+    problems = result.problems;
+  } catch (error) {
+    problems = [];
+    updateStatus(`Check failed: ${error.message}`, "dirty");
+  }
+  showProblems();
+  render();
+}
+
+function showProblems() {
+  const list = document.getElementById("problems");
+  list.replaceChildren();
+  if (!problems.length) {
+    const li = document.createElement("li");
+    li.className = "ok";
+    li.textContent = "Every platform can be reached and every ramp driven.";
+    list.appendChild(li);
+  }
+  for (const p of problems) {
+    const li = document.createElement("li");
+    const b = document.createElement("b");
+    b.textContent = `${p.type[0].toUpperCase()}${p.type.slice(1)} at ` +
+                    `${p.col}, ${p.row}`;
+    li.append(b, `: ${p.message}.`);
+    li.addEventListener("mouseenter", () => {
+      highlighted = key(p.col, p.row); render(); });
+    li.addEventListener("mouseleave", () => { highlighted = null; render(); });
+    list.appendChild(li);
+  }
+  const counts = { platform: 0, ramp: 0 };
+  for (const m of modules.values()) counts[m.type]++;
+  document.getElementById("summary").textContent =
+    `${counts.platform} platform${counts.platform === 1 ? "" : "s"}, ` +
+    `${counts.ramp} ramp${counts.ramp === 1 ? "" : "s"}.`;
+}
+
+function updateCommand() {
+  const name = nameEl.value.trim() || "default";
+  document.getElementById("command").textContent =
+    `ros2 launch robogame_sim sim.launch.py layout:=${name} ` +
+    `robots:=1,2 chase:=1,2`;
+}
+
+nameEl.addEventListener("input", updateCommand);
+
+document.getElementById("copy").addEventListener("click", async () => {
+  const text = document.getElementById("command").textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    updateStatus("Command copied", "saved");
+  } catch {
+    updateStatus("Select the command and copy it by hand", "dirty");
+  }
+});
+
+async function refreshSaved(selected) {
+  const { layouts, folder } = await api("/api/layouts");
+  savedEl.replaceChildren();
+  for (const name of layouts) {
+    const option = document.createElement("option");
+    option.value = option.textContent = name;
+    savedEl.appendChild(option);
+  }
+  if (selected) savedEl.value = selected;
+  document.getElementById("folder").textContent =
+    `Layouts are saved in ${folder}. The sim reads them from there, so ` +
+    `there is no need to rebuild after saving.`;
+  return layouts;
+}
+
+async function openLayout(name) {
+  const data = await api(`/api/layouts/${encodeURIComponent(name)}`);
+  setLayout(data);
+  history = [];
+  nameEl.value = name;
+  savedSnapshot = snapshot();
+  updateCommand();
+  changed();
+}
+
+savedEl.addEventListener("change", async () => {
+  const name = savedEl.value;
+  if (snapshot() !== savedSnapshot &&
+      !confirm("Discard unsaved changes and open " + name + "?")) {
+    savedEl.value = nameEl.value;
+    return;
+  }
+  try { await openLayout(name); } catch (error) {
+    updateStatus(error.message, "dirty");
+  }
+});
+
+async function save() {
+  const name = nameEl.value.trim();
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(name)) {
+    updateStatus("Names are letters, digits, - and _ only", "dirty");
+    nameEl.focus();
+    return;
+  }
+  try {
+    const result = await api(`/api/layouts/${encodeURIComponent(name)}`, {
+      method: "PUT", body: JSON.stringify(layout()) });
+    savedSnapshot = snapshot();
+    problems = result.problems;
+    await refreshSaved(name);
+    showProblems();
+    render();
+    updateStatus(`Saved ${name}.json`, "saved");
+    updateCommand();
+  } catch (error) {
+    updateStatus(`Not saved: ${error.message}`, "dirty");
+  }
+}
+
+document.getElementById("save").addEventListener("click", save);
+
+window.addEventListener("beforeunload", event => {
+  if (snapshot() !== savedSnapshot) event.preventDefault();
+});
+
+(async function start() {
+  render();
+  updateCommand();
+  try {
+    const layouts = await refreshSaved();
+    const asked = decodeURIComponent(location.hash.slice(1));
+    const first = layouts.includes(asked) ? asked
+      : layouts.includes("default") ? "default" : layouts[0];
+    if (first) {
+      savedEl.value = first;
+      await openLayout(first);
+    } else {
+      savedSnapshot = snapshot();
+      changed();
+    }
+  } catch (error) {
+    updateStatus(`Cannot reach the editor server: ${error.message}`,
+                 "dirty");
+  }
+})();
+</script>
+</body>
+</html>

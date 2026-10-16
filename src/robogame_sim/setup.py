@@ -8,12 +8,14 @@ setup(
     name=package_name,
     version='0.0.1',
     packages=find_packages(exclude=['test']),
+    package_data={package_name: ['arena_editor.html']},
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
         ('share/' + package_name + '/worlds', glob('worlds/*.sdf')),
+        ('share/' + package_name + '/layouts', glob('layouts/*.json')),
         ('share/' + package_name + '/models/robogame_arena_cad',
             glob('models/robogame_arena_cad/model.*')),
         ('share/' + package_name + '/models/robogame_arena_cad/meshes',
@@ -31,6 +33,7 @@ setup(
             'robot_sdf = robogame_sim.robot_sdf:main',
             'racing_teleop = robogame_sim.racing_teleop:main',
             'chase_node = robogame_sim.chase_node:main',
+            'arena_editor = robogame_sim.arena_editor:main',
         ],
     },
 )
