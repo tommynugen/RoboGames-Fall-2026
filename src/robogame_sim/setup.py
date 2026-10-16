@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'sim_firmware = robogame_sim.sim_firmware:main',
             'robot_sdf = robogame_sim.robot_sdf:main',
+            'racing_teleop = robogame_sim.racing_teleop:main',
         ],
     },
 )

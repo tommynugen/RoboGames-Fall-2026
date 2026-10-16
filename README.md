@@ -74,11 +74,37 @@ ros2 launch robogame_sim sim.launch.py gui:=false         # no window
 ros2 launch robogame_sim sim.launch.py drive_model:=firmware
 ```
 
-Drive with a PS4 controller, through the real `controller_input`:
+Drive with a PS4 or PS5 controller, like a racing game:
 
 ```
 ros2 launch robogame_sim sim.launch.py controller:=joy
 ```
+
+| | Stick mode | Wheel mode |
+| --- | --- | --- |
+| R2 | throttle | throttle |
+| L2 | reverse | reverse |
+| Steer | left stick | roll the controller like a steering wheel |
+| Shoulder | Triangle / Cross | tip the controller up / down, or Triangle / Cross |
+| Elbow | Circle / Square | Circle / Square |
+| Gripper | R1 open, L1 close | R1 open, L1 close |
+| Share | | re-centre the wheel |
+
+Options switches mode, and `/robot_N/steering_mode` says which is on. Wheel
+mode takes the way the controller is held when it starts as straight ahead
+and level, rolling 45 degrees is full lock, and tipping 20 degrees moves the
+shoulder. Both triggers are proportional, and as in a car, steering while
+reversing swings the back of the robot that way. With no throttle the
+stick spins the robot in place.
+
+This is `racing_teleop` in this package, not the repo's `controller_input`,
+so a sync does not undo it. It reads `/robot_N/joy` from `joy_node` and the
+controller's motion sensor from its own `/dev/input/jsN` ("... Motion
+Sensors"), found by itself or set with `motion_device:=/dev/input/js2`. If
+the wheel steers or tips the arm the wrong way, add
+`-p wheel_steer_inverted:=true` or `-p wheel_arm_inverted:=true`, and
+`-p wheel_debug:=true` logs the angles. The repo's controls are still there
+as `controller:=classic`.
 
 Or from the keyboard, in a second terminal:
 
@@ -107,8 +133,8 @@ ros2 topic pub --once /robot_1/goal geometry_msgs/msg/Point "{x: 0.2, y: 0.3}"
 cd src/robogame_sim && python3 -m pytest test
 ```
 
-These check the firmware maths against motors.cpp and arm.cpp, and that the
-robot model is valid XML. Print a robot's SDF with `ros2 run robogame_sim
+These check the firmware maths against motors.cpp and arm.cpp, the racing
+controls and steering wheel maths, and that the robot model is valid XML. Print a robot's SDF with `ros2 run robogame_sim
 robot_sdf 2`, and check it with `gz sdf -k` once Gazebo is installed.
 
 ## Checked in Gazebo

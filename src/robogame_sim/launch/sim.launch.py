@@ -3,6 +3,7 @@
     ros2 launch robogame_sim sim.launch.py
     ros2 launch robogame_sim sim.launch.py robots:=1,2,3
     ros2 launch robogame_sim sim.launch.py controller:=joy
+    ros2 launch robogame_sim sim.launch.py controller:=classic
     ros2 launch robogame_sim sim.launch.py autonomy:=true
     ros2 launch robogame_sim sim.launch.py drive_model:=firmware gui:=false
 
@@ -160,10 +161,37 @@ def launch_setup(context):
     has_arena_perception = package_exists("arena_perception")
 
     if controller == "joy":
+        robot = f"robot_{first_robot}"
+
+        actions.append(Node(
+            package="joy",
+            executable="joy_node",
+            namespace=robot,
+            output="screen",
+            parameters=[{
+                "device_id": int(LaunchConfiguration(
+                    "joy_device_id").perform(context)),
+                "deadzone": 0.05,
+                "autorepeat_rate": 20.0,
+            }],
+        ))
+        actions.append(Node(
+            package="robogame_sim",
+            executable="racing_teleop",
+            namespace=robot,
+            output="screen",
+            parameters=[{
+                "robot_id": first_robot,
+                "motion_device": LaunchConfiguration(
+                    "motion_device").perform(context),
+            }],
+        ))
+    elif controller == "classic":
         if not has_arena_perception:
             raise RuntimeError(
-                "controller:=joy needs arena_perception in this workspace, "
-                "run scripts/sync_arena_perception.sh and build again")
+                "controller:=classic needs arena_perception in this "
+                "workspace, run scripts/sync_arena_perception.sh and build "
+                "again")
 
         actions.append(IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
@@ -176,7 +204,8 @@ def launch_setup(context):
             }.items(),
         ))
     elif controller != "none":
-        raise RuntimeError(f"controller must be none or joy, not {controller}")
+        raise RuntimeError(
+            f"controller must be none, joy or classic, not {controller}")
 
     if autonomy:
         if not has_arena_perception:
@@ -208,11 +237,17 @@ def generate_launch_description():
                         "mixing and stall floor"),
         DeclareLaunchArgument(
             "controller", default_value="none",
-            description="joy starts joy_node and controller_input for the "
-                        "first robot"),
+            description="joy drives the first robot with racing_teleop "
+                        "(R2 throttle, L2 reverse, Options for wheel "
+                        "steering), classic with the repo's "
+                        "controller_input"),
         DeclareLaunchArgument(
             "joy_device_id", default_value="0",
             description="Joystick index for controller:=joy"),
+        DeclareLaunchArgument(
+            "motion_device", default_value="",
+            description="Motion sensor js device for wheel steering, found "
+                        "by itself when empty"),
         DeclareLaunchArgument(
             "autonomy", default_value="false",
             description="true starts arena_perception autonomy_node, which "
