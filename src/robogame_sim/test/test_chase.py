@@ -1,7 +1,9 @@
 import math
 
 from robogame_sim.chase import (
+    ARENA_HALF,
     ARM_REACH,
+    WALL_MARGIN,
     TargetTracker,
     chase_command,
     follow_command,
@@ -90,7 +92,7 @@ def test_prediction_follows_an_arc():
 def test_prediction_stays_off_the_edge():
     tracker = driving_tracker(0.4, 0.0, 0.0, 0.2, 0.0)
     x, _ = tracker.predict(2.0)
-    assert abs(x - (0.5715 - 0.06)) < 1e-9
+    assert abs(x - (ARENA_HALF - WALL_MARGIN)) < 1e-9
 
 
 def test_still_target_near_the_edge_is_aimed_at_where_it_is():

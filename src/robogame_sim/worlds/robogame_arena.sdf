@@ -39,7 +39,7 @@
 
     <!--
       The arena modules from the Onshape MODULES part studio, written by
-      scripts/export_onshape_arena.py: 1.143 m of floor tiles with their
+      scripts/export_onshape_arena.py: 1.219 m of floor tiles with their
       top at z = 0, and the platforms and ramps in the middle. No walls.
     -->
     <include>

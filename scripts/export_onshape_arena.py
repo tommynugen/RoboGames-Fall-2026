@@ -7,9 +7,10 @@ Reads the API keys from ~/.config/onshape/keys.env (ONSHAPE_ACCESS_KEY and
 ONSHAPE_SECRET_KEY, or the same names in the environment), downloads every
 distinct part of the MODULES part studio once as an STL in metres, and
 writes src/robogame_sim/models/robogame_arena_cad with one visual per
-module, placed where MAIN ASSEMBLY puts it. The quadrant plates, the camera
-frame and the hardware are left out. Run it again after changing the CAD,
-then rebuild.
+module, placed where MAIN ASSEMBLY puts it. Parts the assembly does not
+place are exported too, since the arena editor's layouts are built from
+them. The quadrant plates, the camera frame and the hardware are left out.
+Run it again after changing the CAD, then rebuild.
 
 The model is moved so the middle of the floor tiles is at the origin and
 their top at z = 0, which is where the robots spawn. Modules away from the
@@ -162,22 +163,28 @@ def main():
     os.makedirs(mesh_dir)
 
     # One STL per part and configuration, shared by all its instances.
+    # Every part of the studio is exported, placed or not, since
+    # arena_layout builds layouts out of any of them.
     parts = {}
     appearances = {}
+    studio = f"/d/{DOCUMENT}/w/{WORKSPACE}/e/{MODULES}"
+    library = [
+        {"elementId": MODULES, "partId": p["partId"], "name": p["name"]}
+        for p in json.loads(get(f"/parts{studio}"))
+    ]
+    placed_instances = [
+        i for i in root["instances"]
+        if i["type"] == "Part" and not i["suppressed"]
+        and i["elementId"] == MODULES and i["documentId"] == DOCUMENT
+    ]
 
-    for instance in root["instances"]:
-        if (instance["type"] != "Part" or instance["suppressed"]
-                or instance["elementId"] != MODULES
-                or instance["documentId"] != DOCUMENT):
-            continue
-
+    for instance in library + placed_instances:
         config = instance.get("fullConfiguration", "default")
         key = (instance["elementId"], instance["partId"], config)
 
         if key in parts:
             continue
 
-        studio = f"/d/{DOCUMENT}/w/{WORKSPACE}/e/{MODULES}"
         name = instance["name"].rsplit(" <", 1)[0]
         slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
@@ -254,14 +261,12 @@ def main():
 
     elements = []
     skipped = []
-    used = set()
 
     for index, (instance, part, transform, world) in enumerate(placed):
         if not inside(world):
             skipped.append(instance["name"])
             continue
 
-        used.add(part["slug"])
         where = pose(transform, shift)
         name = re.sub(r"[^A-Za-z0-9]+", "_", instance["name"]).strip("_")
         mesh = (f"<geometry><mesh><uri>meshes/{part['slug']}.stl</uri>"
@@ -294,9 +299,6 @@ def main():
             f"        <pose>{where}</pose>\n"
             f"        {geometry}\n"
             f"      </collision>")
-
-    for slug in {p["slug"] for p in parts.values()} - used:
-        os.remove(os.path.join(mesh_dir, slug + ".stl"))
 
     open(os.path.join(MODEL_DIR, "model.sdf"), "w").write(
         '<?xml version="1.0" ?>\n'

@@ -15,15 +15,22 @@
     --accent-ink: #ffffff;
     --floor: #c9cbcf;
     --floor-line: #b3b6bc;
+    --peg: #a9adb4;
     --platform: #3b61b4;
     --platform-edge: #2a4a8f;
+    --platform2: #22396e;
+    --platform2-edge: #142447;
+    --platform2-ink: #c9d6f2;
     --ramp-low: #d6e9f6;
     --ramp-high: #7fb3dd;
     --ramp-arrow: #1f3f78;
+    --wall: #fafafa;
+    --wall-edge: #6b7280;
+    --thwomp: #e0a43a;
+    --thwomp-edge: #7a4e09;
     --bad: #d23c3c;
     --bad-soft: #fbe9e9;
     --good: #2e8b57;
-    --ghost: rgba(47, 95, 180, 0.35);
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -37,25 +44,35 @@
       --accent-ink: #0d1117;
       --floor: #4a4e57;
       --floor-line: #3c4048;
+      --peg: #3a3e46;
       --platform: #4f78cf;
       --platform-edge: #33589f;
+      --platform2: #2c4a8c;
+      --platform2-edge: #1a2f5c;
+      --platform2-ink: #d5e0f7;
       --ramp-low: #a9c9e3;
       --ramp-high: #5d93c4;
       --ramp-arrow: #0f2650;
+      --wall: #e9ebef;
+      --wall-edge: #1d2129;
+      --thwomp: #e8ad45;
+      --thwomp-edge: #5c3a05;
       --bad: #f06b6b;
       --bad-soft: #3a2224;
       --good: #5cc28a;
-      --ghost: rgba(109, 151, 230, 0.4);
       color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
     --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
     --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
-    --floor: #4a4e57; --floor-line: #3c4048; --platform: #4f78cf;
-    --platform-edge: #33589f; --ramp-low: #a9c9e3; --ramp-high: #5d93c4;
-    --ramp-arrow: #0f2650; --bad: #f06b6b; --bad-soft: #3a2224;
-    --good: #5cc28a; --ghost: rgba(109, 151, 230, 0.4); color-scheme: dark;
+    --floor: #4a4e57; --floor-line: #3c4048; --peg: #3a3e46;
+    --platform: #4f78cf; --platform-edge: #33589f; --platform2: #2c4a8c;
+    --platform2-edge: #1a2f5c; --platform2-ink: #d5e0f7;
+    --ramp-low: #a9c9e3; --ramp-high: #5d93c4; --ramp-arrow: #0f2650;
+    --wall: #e9ebef; --wall-edge: #1d2129; --thwomp: #e8ad45;
+    --thwomp-edge: #5c3a05; --bad: #f06b6b; --bad-soft: #3a2224;
+    --good: #5cc28a; color-scheme: dark;
   }
 
   * { box-sizing: border-box; }
@@ -84,6 +101,8 @@
     cursor: pointer;
   }
   button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button:disabled:hover { border-color: var(--line); }
   button.primary {
     background: var(--accent); color: var(--accent-ink);
     border-color: var(--accent); font-weight: 600;
@@ -93,8 +112,8 @@
   #status.saved { color: var(--good); }
 
   main {
-    display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px;
-    padding: 20px; max-width: 1180px; margin: 0 auto;
+    display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 20px;
+    padding: 20px; max-width: 1220px; margin: 0 auto;
   }
   @media (max-width: 860px) {
     main { grid-template-columns: minmax(0, 1fr); padding: 16px; }
@@ -107,6 +126,7 @@
            user-select: none; }
   #board .cell { cursor: pointer; }
   .caption { color: var(--muted); font-size: 12.5px; margin: 8px 4px 0; }
+  .caption.warn { color: var(--bad); }
 
   aside { display: flex; flex-direction: column; gap: 14px; }
   .panel {
@@ -120,7 +140,7 @@
   .tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .tool {
     display: flex; flex-direction: column; align-items: center; gap: 4px;
-    padding: 8px 4px;
+    padding: 8px 4px; font-size: 13px;
   }
   .tool[aria-pressed=true] {
     border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
@@ -170,8 +190,13 @@
     <input id="name" type="text" value="default" spellcheck="false"
            autocomplete="off">
   </div>
+  <div class="field">
+    <label for="size">Grid</label>
+    <select id="size" title="Squares along each side, resized about the
+middle"></select>
+  </div>
   <button id="save" class="primary" title="Ctrl+S">Save</button>
-  <button id="clear" title="Remove every platform and ramp">Clear</button>
+  <button id="clear" title="Remove every module">Clear</button>
   <button id="undo" title="Ctrl+Z">Undo</button>
   <span id="status"></span>
 </header>
@@ -179,44 +204,27 @@
 <main>
   <section class="board-wrap">
     <svg id="board" role="img" aria-label="Arena grid"></svg>
-    <p class="caption">Seen from above. Each square is one 12.7 cm module
-      with a floor tile under it. Arrows point uphill.</p>
+    <p class="caption" id="caption"></p>
   </section>
 
   <aside>
     <div class="panel">
       <h2>Place</h2>
-      <div class="tools">
-        <button class="tool" data-tool="platform" aria-pressed="true">
-          <svg viewBox="0 0 30 30"><rect x="3" y="3" width="24" height="24"
-            rx="2" fill="var(--platform)" stroke="var(--platform-edge)"
-            stroke-width="2"/></svg>
-          Platform <kbd>1</kbd>
-        </button>
-        <button class="tool" data-tool="ramp" aria-pressed="false">
-          <svg viewBox="0 0 30 30" id="tool-ramp"></svg>
-          Ramp <kbd>2</kbd>
-        </button>
-        <button class="tool" data-tool="erase" aria-pressed="false">
-          <svg viewBox="0 0 30 30"><rect x="3" y="3" width="24" height="24"
-            rx="2" fill="var(--floor)"/><path d="M9 9l12 12M21 9L9 21"
-            stroke="var(--bad)" stroke-width="2.5"
-            stroke-linecap="round"/></svg>
-          Floor <kbd>3</kbd>
-        </button>
-      </div>
+      <div class="tools" id="tools"></div>
       <div class="rotate-row">
-        <svg viewBox="0 0 34 34" id="new-ramp"></svg>
+        <svg viewBox="0 0 34 34" id="preview"></svg>
         <div>
-          <div>New ramps rise toward <b id="facing">+y</b></div>
+          <div id="facing"></div>
           <button id="rotate" style="margin-top:4px">Rotate <kbd>R</kbd>
           </button>
         </div>
       </div>
       <ul class="help">
         <li>Click or drag to place.</li>
-        <li>Click a ramp to turn it a quarter turn; <kbd>R</kbd> turns the
-          one under the pointer.</li>
+        <li>Click a ramp, wall or thwomp with its own tool to turn it a
+          quarter turn; <kbd>R</kbd> turns the one under the pointer.</li>
+        <li>Walls and the thwomp peg in on the side of the square they
+          face, an inch from the middle.</li>
         <li>Right-click to clear a square.</li>
       </ul>
     </div>
@@ -244,7 +252,26 @@ const CELL = 60;
 const PAD = 30;
 const FACING = { 0: "+y", 90: "-x", 180: "-y", 270: "+x" };
 
-let size = 9;
+// Replaced by /api/modules, which measures the exported CAD meshes.
+let info = {
+  module: 0.1016, size: 12, peg_line: 0.0254,
+  types: {
+    platform: { label: '1" platform', turns: false, mount: "square" },
+    platform_2: { label: '2" platform', turns: false, mount: "square" },
+    ramp: { label: "ramp", turns: true, mount: "square" },
+    wall: { label: "wall", turns: true, mount: "side", depth: 0.0254,
+            height: 0.0508 },
+    thwomp: { label: "thwomp", turns: true, mount: "side", depth: 0.0254,
+              height: 0.1524 },
+  },
+};
+const TOOLS = [
+  ["platform", '1" platform'], ["platform_2", '2" platform'],
+  ["ramp", "Ramp"], ["wall", "Wall"], ["thwomp", "Thwomp"],
+  ["erase", "Floor"],
+];
+
+let size = info.size;
 let modules = new Map();          // "col,row" -> {type, col, row, rotation}
 let tool = "platform";
 let newRotation = 0;
@@ -260,20 +287,23 @@ const board = document.getElementById("board");
 const statusEl = document.getElementById("status");
 const nameEl = document.getElementById("name");
 const savedEl = document.getElementById("saved");
+const sizeEl = document.getElementById("size");
 
 const key = (c, r) => `${c},${r}`;
 const snapshot = () => JSON.stringify(layout());
+const turns = type => !!(info.types[type] && info.types[type].turns);
+const label = type => (info.types[type] || { label: type }).label;
 
 function layout() {
-  const list = [...modules.values()].map(m => m.type === "ramp"
-    ? { type: "ramp", col: m.col, row: m.row, rotation: m.rotation }
+  const list = [...modules.values()].map(m => turns(m.type)
+    ? { type: m.type, col: m.col, row: m.row, rotation: m.rotation }
     : { type: m.type, col: m.col, row: m.row });
   list.sort((a, b) => a.row - b.row || a.col - b.col);
   return { size, modules: list };
 }
 
 function setLayout(data) {
-  size = data.size || 9;
+  size = data.size || info.size;
   modules = new Map();
   for (const m of data.modules || []) {
     modules.set(key(m.col, m.row), { rotation: 0, ...m });
@@ -311,23 +341,34 @@ function el(name, attrs = {}, parent) {
   return node;
 }
 
-function defs(svg, id) {
+// The ramp's gradient and the thwomp's stripes, ids starting with prefix.
+function defs(svg, prefix) {
   const d = el("defs", {}, svg);
-  const g = el("linearGradient", { id, x1: 0, y1: 1, x2: 0, y2: 0 }, d);
+  const g = el("linearGradient", { id: `${prefix}-ramp`, x1: 0, y1: 1,
+                                   x2: 0, y2: 0 }, d);
   el("stop", { offset: "0%", "stop-color": "var(--ramp-low)" }, g);
   el("stop", { offset: "100%", "stop-color": "var(--ramp-high)" }, g);
+  const p = el("pattern", { id: `${prefix}-stripes`, width: 6, height: 6,
+                            patternUnits: "userSpaceOnUse",
+                            patternTransform: "rotate(45)" }, d);
+  el("rect", { width: 6, height: 6, fill: "var(--thwomp)" }, p);
+  el("rect", { width: 2.5, height: 6, fill: "var(--thwomp-edge)",
+               opacity: 0.55 }, p);
 }
 
-// A ramp drawn rising toward screen up, then turned. The world's rotation
+// A module drawn as it is at rotation 0, then turned. The world's rotation
 // is anticlockwise seen from above, which is anticlockwise on screen too
 // since +y is drawn up, so SVG's clockwise rotate takes the negative.
-function drawRamp(parent, x, y, s, rotation, gradient, opacity = 1) {
-  const g = el("g", {
-    transform: `rotate(${-rotation} ${x + s / 2} ${y + s / 2})`,
-    opacity,
+function turned(parent, x, y, s, rotation, opacity) {
+  return el("g", {
+    transform: `rotate(${-rotation} ${x + s / 2} ${y + s / 2})`, opacity,
   }, parent);
+}
+
+function drawRamp(parent, x, y, s, rotation, prefix, opacity = 1) {
+  const g = turned(parent, x, y, s, rotation, opacity);
   el("rect", { x: x + 1, y: y + 1, width: s - 2, height: s - 2, rx: 2,
-               fill: `url(#${gradient})` }, g);
+               fill: `url(#${prefix}-ramp)` }, g);
   el("rect", { x: x + 1, y: y + 1, width: s - 2, height: s * 0.08,
                fill: "var(--platform-edge)", opacity: 0.55 }, g);
   const cx = x + s / 2;
@@ -339,13 +380,64 @@ function drawRamp(parent, x, y, s, rotation, gradient, opacity = 1) {
       "stroke-linecap": "round", "stroke-linejoin": "round",
     }, g);
   }
-  return g;
 }
 
 function drawPlatform(parent, x, y, s, opacity = 1) {
   el("rect", { x: x + 1, y: y + 1, width: s - 2, height: s - 2, rx: 2,
                fill: "var(--platform)", stroke: "var(--platform-edge)",
                "stroke-width": s * 0.05, opacity }, parent);
+}
+
+function drawPlatform2(parent, x, y, s, opacity = 1) {
+  const g = el("g", { opacity }, parent);
+  el("rect", { x: x + 1, y: y + 1, width: s - 2, height: s - 2, rx: 2,
+               fill: "var(--platform2)", stroke: "var(--platform2-edge)",
+               "stroke-width": s * 0.05 }, g);
+  el("rect", { x: x + s * 0.18, y: y + s * 0.18, width: s * 0.64,
+               height: s * 0.64, rx: 2, fill: "none",
+               stroke: "var(--platform2-ink)", "stroke-width": s * 0.03,
+               opacity: 0.5 }, g);
+  const t = el("text", { x: x + s / 2, y: y + s / 2, "font-size": s * 0.36,
+                         "font-weight": 700, fill: "var(--platform2-ink)",
+                         "text-anchor": "middle",
+                         "dominant-baseline": "central" }, g);
+  t.textContent = "2";
+}
+
+// A wall or thwomp on the peg line of the side it faces, to scale.
+function drawSide(parent, x, y, s, type, rotation, prefix, opacity = 1) {
+  const part = info.types[type];
+  const scale = s / info.module;
+  const depth = Math.max((part.depth || 0.0254) * scale, 3);
+  const middle = y + s / 2 - info.peg_line * scale;
+  const g = turned(parent, x, y, s, rotation, opacity);
+  const thwomp = type === "thwomp";
+  el("rect", { x: x + 1.5, y: middle - depth / 2, width: s - 3,
+               height: depth, rx: 1.5,
+               fill: thwomp ? `url(#${prefix}-stripes)` : "var(--wall)",
+               stroke: thwomp ? "var(--thwomp-edge)" : "var(--wall-edge)",
+               "stroke-width": thwomp ? 2 : 1.5 }, g);
+}
+
+function drawPegs(parent, x, y, s) {
+  const scale = s / info.module;
+  const off = info.peg_line * scale;
+  for (const dx of [-off, off]) {
+    for (const dy of [-off, off]) {
+      el("circle", { cx: x + s / 2 + dx, cy: y + s / 2 + dy,
+                     r: Math.max(s * 0.03, 1), fill: "var(--peg)" }, parent);
+    }
+  }
+}
+
+function drawModule(parent, type, x, y, s, rotation, prefix, opacity = 1) {
+  if (type === "platform") drawPlatform(parent, x, y, s, opacity);
+  else if (type === "platform_2") drawPlatform2(parent, x, y, s, opacity);
+  else if (type === "ramp") drawRamp(parent, x, y, s, rotation, prefix,
+                                     opacity);
+  else if (type === "wall" || type === "thwomp") {
+    drawSide(parent, x, y, s, type, rotation, prefix, opacity);
+  }
 }
 
 function cellXY(col, row) {
@@ -356,7 +448,7 @@ function render() {
   const total = PAD * 2 + size * CELL;
   board.setAttribute("viewBox", `0 0 ${total} ${total}`);
   board.replaceChildren();
-  defs(board, "rampFill");
+  defs(board, "board");
 
   const bad = new Map();
   for (const p of problems) {
@@ -374,15 +466,12 @@ function render() {
                    stroke: "var(--floor-line)", "stroke-width": 1 }, g);
 
       const m = modules.get(k);
-      if (m && m.type === "platform") drawPlatform(g, x, y, CELL);
-      if (m && m.type === "ramp") drawRamp(g, x, y, CELL, m.rotation,
-                                           "rampFill");
+      if (!m || info.types[m.type].mount === "side") drawPegs(g, x, y, CELL);
+      if (m) drawModule(g, m.type, x, y, CELL, m.rotation, "board");
 
       if (hover && hover.col === col && hover.row === row && !painting) {
-        if (tool === "platform" && !(m && m.type === "platform")) {
-          drawPlatform(g, x, y, CELL, 0.45);
-        } else if (tool === "ramp" && !(m && m.type === "ramp")) {
-          drawRamp(g, x, y, CELL, newRotation, "rampFill", 0.5);
+        if (tool !== "erase" && !(m && m.type === tool)) {
+          drawModule(g, tool, x, y, CELL, newRotation, "board", 0.5);
         }
         el("rect", { x: x + 1.5, y: y + 1.5, width: CELL - 3,
                      height: CELL - 3, fill: "none",
@@ -396,42 +485,112 @@ function render() {
                      fill: "none", stroke: "var(--bad)", rx: 3,
                      "stroke-width": strong ? 5 : 3,
                      "stroke-dasharray": strong ? "" : "6 4" }, g);
-        const title = el("title", {}, g);
-        title.textContent = bad.get(k).join("\n");
       }
+
+      const tip = [m ? `${label(m.type)} at ${col}, ${row}`
+                     : `Floor at ${col}, ${row}`, ...(bad.get(k) || [])];
+      el("title", {}, g).textContent = tip.join("\n");
     }
   }
 
   // Axes and grid numbers.
-  const label = (text, x, y, anchor = "middle") => {
-    const t = el("text", { x, y, "text-anchor": anchor, "font-size": 13,
+  const text = (content, x, y) => {
+    const t = el("text", { x, y, "text-anchor": "middle", "font-size": 13,
                            fill: "var(--muted)",
                            "dominant-baseline": "middle" }, board);
-    t.textContent = text;
+    t.textContent = content;
   };
   for (let i = 0; i < size; i++) {
-    label(i, PAD + i * CELL + CELL / 2, PAD + size * CELL + 14);
-    label(i, PAD - 14, PAD + (size - 1 - i) * CELL + CELL / 2);
+    text(i, PAD + i * CELL + CELL / 2, PAD + size * CELL + 14);
+    text(i, PAD - 14, PAD + (size - 1 - i) * CELL + CELL / 2);
   }
-  label("col  →  +x", PAD + size * CELL / 2, PAD - 14);
+  text("col  →  +x", PAD + size * CELL / 2, PAD - 14);
   const t = el("text", { "font-size": 13, fill: "var(--muted)",
     "text-anchor": "middle", "dominant-baseline": "middle",
     transform: `translate(${PAD + size * CELL + 14} ${PAD + size * CELL / 2})
                 rotate(-90)` }, board);
   t.textContent = "row  →  +y";
 
-  drawToolIcons();
+  drawPanel();
 }
 
-function drawToolIcons() {
-  for (const [id, rotation, s] of [["tool-ramp", 0, 30],
-                                   ["new-ramp", newRotation, 34]]) {
-    const svg = document.getElementById(id);
+// The tool buttons, the rotation preview, the size picker and the caption.
+function drawPanel() {
+  for (const [type] of TOOLS) {
+    const svg = document.getElementById(`tool-${type}`);
+    if (!svg || type === "erase") continue;
     svg.replaceChildren();
-    defs(svg, `${id}-fill`);
-    drawRamp(svg, 2, 2, s - 4, rotation, `${id}-fill`);
+    defs(svg, `tool-${type}`);
+    el("rect", { x: 2, y: 2, width: 26, height: 26, rx: 2,
+                 fill: "var(--floor)" }, svg);
+    drawModule(svg, type, 2, 2, 26, turns(type) ? newRotation : 0,
+               `tool-${type}`);
   }
-  document.getElementById("facing").textContent = FACING[newRotation];
+
+  const preview = document.getElementById("preview");
+  preview.replaceChildren();
+  defs(preview, "preview");
+  el("rect", { x: 2, y: 2, width: 30, height: 30, rx: 2,
+               fill: "var(--floor)" }, preview);
+  drawModule(preview, turns(tool) ? tool : "ramp", 2, 2, 30, newRotation,
+             "preview", turns(tool) ? 1 : 0.4);
+
+  const facing = document.getElementById("facing");
+  const way = FACING[newRotation];
+  if (tool === "ramp") facing.innerHTML = `New ramps rise toward <b>${way}</b>`;
+  else if (turns(tool)) {
+    facing.innerHTML = `New ${tool}s stand on the <b>${way}</b> side`;
+  } else facing.innerHTML = `Ramps, walls and thwomps face <b>${way}</b>`;
+
+  if (+sizeEl.value !== size) sizeEl.value = size;
+
+  const caption = document.getElementById("caption");
+  const inches = (info.module / 0.0254).toFixed(0);
+  if (size === info.size) {
+    caption.className = "caption";
+    caption.textContent = `Seen from above. Each square is one ` +
+      `${(info.module * 100).toFixed(2)} cm (${inches} inch) module with ` +
+      `a floor tile under it, and its four peg holes. Arrows point uphill.`;
+  } else {
+    caption.className = "caption warn";
+    caption.textContent = `This layout is ${size} × ${size}, but the ` +
+      `arena is ${info.size} × ${info.size} squares of ${inches} inches. ` +
+      `Pick ${info.size} under Grid to resize it about the middle.`;
+  }
+}
+
+function buildTools() {
+  const tools = document.getElementById("tools");
+  tools.replaceChildren();
+  TOOLS.forEach(([type, name], i) => {
+    const b = document.createElement("button");
+    b.className = "tool";
+    b.dataset.tool = type;
+    b.setAttribute("aria-pressed", type === tool);
+    b.title = type === "erase" ? "Clear squares back to the floor tile"
+                               : `Place a ${label(type)}`;
+    const svg = el("svg", { viewBox: "0 0 30 30", id: `tool-${type}` }, b);
+    if (type === "erase") {
+      el("rect", { x: 3, y: 3, width: 24, height: 24, rx: 2,
+                   fill: "var(--floor)" }, svg);
+      el("path", { d: "M9 9l12 12M21 9L9 21", stroke: "var(--bad)",
+                   "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
+    }
+    const kbd = document.createElement("kbd");
+    kbd.textContent = i + 1;
+    b.append(svg, name, kbd);
+    b.addEventListener("click", () => setTool(type));
+    tools.appendChild(b);
+  });
+
+  sizeEl.replaceChildren();
+  for (let n = 3; n <= 25; n++) {
+    const option = document.createElement("option");
+    option.value = n;
+    option.textContent = `${n} × ${n}` + (n === info.size ? " (arena)" : "");
+    sizeEl.appendChild(option);
+  }
+  sizeEl.value = size;
 }
 
 // -- editing ---------------------------------------------------------------
@@ -450,19 +609,14 @@ function apply(cell, erase, stroke) {
     if (m) modules.delete(k);
     return !!m;
   }
-  if (tool === "platform") {
-    if (m && m.type === "platform") return false;
-    modules.set(k, { type: "platform", col: cell.col, row: cell.row });
-    return true;
-  }
-  // Ramp: a click on a ramp turns it, anywhere else places one.
-  if (m && m.type === "ramp") {
-    if (stroke) return false;
+  // A click on a module of the tool's kind turns it, if it turns.
+  if (m && m.type === tool) {
+    if (stroke || !turns(tool)) return false;
     m.rotation = (m.rotation + 90) % 360;
     newRotation = m.rotation;
     return true;
   }
-  modules.set(k, { type: "ramp", col: cell.col, row: cell.row,
+  modules.set(k, { type: tool, col: cell.col, row: cell.row,
                    rotation: newRotation });
   return true;
 }
@@ -516,13 +670,9 @@ function setTool(name) {
   render();
 }
 
-for (const b of document.querySelectorAll(".tool")) {
-  b.addEventListener("click", () => setTool(b.dataset.tool));
-}
-
 function rotate() {
   const m = hover && modules.get(key(hover.col, hover.row));
-  if (m && m.type === "ramp") {
+  if (m && turns(m.type)) {
     remember();
     m.rotation = (m.rotation + 90) % 360;
     newRotation = m.rotation;
@@ -534,6 +684,30 @@ function rotate() {
 }
 
 document.getElementById("rotate").addEventListener("click", rotate);
+
+// Grows or shrinks the grid about its middle, so modules stay where they
+// are on the table as far as whole squares allow.
+function resize(next) {
+  if (next === size) return;
+  const shift = Math.floor((next - size) / 2);
+  const moved = [...modules.values()].map(m => ({
+    ...m, col: m.col + shift, row: m.row + shift }));
+  const kept = moved.filter(m => m.col >= 0 && m.row >= 0 &&
+                                 m.col < next && m.row < next);
+  const lost = moved.length - kept.length;
+  if (lost && !confirm(`${lost} module${lost === 1 ? " is" : "s are"} ` +
+                       `off a ${next} × ${next} grid and will be removed. ` +
+                       `Resize?`)) {
+    sizeEl.value = size;
+    return;
+  }
+  remember();
+  size = next;
+  modules = new Map(kept.map(m => [key(m.col, m.row), m]));
+  changed();
+}
+
+sizeEl.addEventListener("change", () => resize(+sizeEl.value));
 
 function undo() {
   if (!history.length) return;
@@ -555,6 +729,7 @@ document.addEventListener("keydown", event => {
     if (event.key === "Enter") save();
     return;
   }
+  if (event.target === sizeEl || event.target === savedEl) return;
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
     save();
@@ -562,10 +737,9 @@ document.addEventListener("keydown", event => {
              event.key.toLowerCase() === "z") {
     event.preventDefault();
     undo();
-  } else if (event.key === "1") setTool("platform");
-  else if (event.key === "2") setTool("ramp");
-  else if (event.key === "3") setTool("erase");
-  else if (event.key.toLowerCase() === "r") rotate();
+  } else if (/^[1-9]$/.test(event.key) && TOOLS[+event.key - 1]) {
+    setTool(TOOLS[+event.key - 1][0]);
+  } else if (event.key.toLowerCase() === "r") rotate();
 });
 
 // -- server ----------------------------------------------------------------
@@ -613,7 +787,8 @@ function showProblems() {
   for (const p of problems) {
     const li = document.createElement("li");
     const b = document.createElement("b");
-    b.textContent = `${p.type[0].toUpperCase()}${p.type.slice(1)} at ` +
+    const name = label(p.type);
+    b.textContent = `${name[0].toUpperCase()}${name.slice(1)} at ` +
                     `${p.col}, ${p.row}`;
     li.append(b, `: ${p.message}.`);
     li.addEventListener("mouseenter", () => {
@@ -621,11 +796,16 @@ function showProblems() {
     li.addEventListener("mouseleave", () => { highlighted = null; render(); });
     list.appendChild(li);
   }
-  const counts = { platform: 0, ramp: 0 };
-  for (const m of modules.values()) counts[m.type]++;
+  const counts = new Map();
+  for (const m of modules.values()) {
+    counts.set(m.type, (counts.get(m.type) || 0) + 1);
+  }
+  const parts = TOOLS.filter(([type]) => counts.has(type)).map(([type]) => {
+    const n = counts.get(type);
+    return `${n} ${label(type)}${n === 1 ? "" : "s"}`;
+  });
   document.getElementById("summary").textContent =
-    `${counts.platform} platform${counts.platform === 1 ? "" : "s"}, ` +
-    `${counts.ramp} ramp${counts.ramp === 1 ? "" : "s"}.`;
+    parts.length ? `${parts.join(", ")}.` : "Nothing on the floor yet.";
 }
 
 function updateCommand() {
@@ -713,6 +893,14 @@ window.addEventListener("beforeunload", event => {
 });
 
 (async function start() {
+  try {
+    info = await api("/api/modules");
+    size = info.size;
+  } catch (error) {
+    updateStatus(`No module sizes from the server: ${error.message}`,
+                 "dirty");
+  }
+  buildTools();
   render();
   updateCommand();
   try {

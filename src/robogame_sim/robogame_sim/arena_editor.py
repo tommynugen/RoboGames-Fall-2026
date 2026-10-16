@@ -3,9 +3,9 @@
     ros2 run robogame_sim arena_editor
     ros2 run robogame_sim arena_editor --port 8766 --no-browser
 
-Serves a page on http://localhost:8765 where the arena's platforms and
-ramps are placed on the floor grid as they are set up on the table, and
-ramps turned to face the way they do. Layouts are saved as JSON into the
+Serves a page on http://localhost:8765 where the arena's modules, 1 and 2
+inch platforms, ramps, walls and the thwomp, are placed on the floor grid
+as they are set up on the table, and turned to face the way they do. Layouts are saved as JSON into the
 workspace's src/robogame_sim/layouts, where sim.launch.py layout:=NAME and
 chase_node find them, and checked as they are edited for ramps that cannot
 be driven and platforms no robot can reach. Only this computer can reach
@@ -56,6 +56,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in ("/", "/index.html"):
                 with open(PAGE, "rb") as page:
                     self.reply(200, page.read(), "text/html; charset=utf-8")
+            elif self.path == "/api/modules":
+                self.reply(200, arena_layout.modules_info())
             elif self.path == "/api/layouts":
                 self.reply(200, {"layouts": arena_layout.list_layouts(),
                                  "folder": arena_layout.layout_dirs()[0]})

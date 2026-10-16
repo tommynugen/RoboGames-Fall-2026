@@ -21,9 +21,8 @@ HEIGHT = 0.0254
 HALF = 0.1905
 FOOT_Y = -0.3175
 
-ARENA_MODEL = os.environ.get("ROBOGAME_ARENA_MODEL", os.path.join(
-    os.path.dirname(__file__), "..", "models", "robogame_arena_cad",
-    "model.sdf"))
+DEFAULT_LAYOUT = os.path.join(os.path.dirname(__file__), "..", "layouts",
+                              "default.json")
 
 
 def arena():
@@ -173,10 +172,10 @@ def test_chase_off_the_platform_comes_down_the_ramp(terrain):
     assert math.dist(trail[-1], (0.3, 0.42)) < 0.36
 
 
-@pytest.mark.skipif(not os.path.exists(ARENA_MODEL),
-                    reason="no CAD arena model in this checkout")
-def test_cad_arena_platform_target_is_reached_up_the_ramp():
-    cad = Terrain.from_sdf(ARENA_MODEL)
-    trail = drive(cad, 0.0, 0.42, -math.pi / 2, 0.05, 0.05)
-    assert_never_climbs_an_edge(cad, trail)
-    assert on_platform(cad, *trail[-1])
+def test_default_arena_platform_target_is_reached_up_the_ramp():
+    from robogame_sim import arena_layout
+
+    ground = arena_layout.terrain(arena_layout.load(DEFAULT_LAYOUT))
+    trail = drive(ground, 0.0, 0.42, -math.pi / 2, 0.05, 0.05)
+    assert_never_climbs_an_edge(ground, trail)
+    assert on_platform(ground, *trail[-1])

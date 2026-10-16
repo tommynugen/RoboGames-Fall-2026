@@ -225,26 +225,43 @@ maths is covered by `test/test_chase.py`, the terrain and paths by
 
 ## Arena layouts
 
-The arena's platforms and ramps are modules on a 9 x 9 grid of 12.7 cm
-squares, moved about between games. Map how they are set up on the table
-in the layout editor:
+The arena is a 12 x 12 grid of 4 inch (10.16 cm) floor tiles, 48 inches
+square, and the modules of the CAD's MODULES part studio stand on them,
+moved about between games:
+
+| Module | In the layout | |
+|---|---|---|
+| 1" platform | `platform` | what ramps lead up to |
+| 2" platform | `platform_2` | too high for a ramp, so an obstacle |
+| Curved ramp | `ramp` | rises 1 inch over one square |
+| Wall | `wall` | 1 x 4 inches, 2 high, pegged on one side of a square |
+| Thwomp | `thwomp` | 1 x 4 inches, 6 high, pegged like a wall; fixed in the sim |
+
+Map how they are set up on the table in the layout editor:
 
 ```
 ros2 run robogame_sim arena_editor
 ```
 
 It opens http://localhost:8765 in the browser (only this computer can
-reach it; `--port` and `--no-browser` change that). Pick Platform or Ramp
-(keys 1 and 2) and click or drag on the grid, which is seen from above
-with +x to the right and +y up. Click a ramp to turn it a quarter turn, or
-press R over it; its arrow points uphill. Right-click or the Floor tool (3)
-clears a square, and Ctrl+Z undoes. As you edit it checks the layout and
-outlines in red any ramp whose low end runs into the edge or another
-module, any ramp that leads to no platform, any platform no robot can get
-onto from the floor, and any platform too narrow to drive on (a single
-module). Name the layout and Save, and it is written to
+reach it; `--port` and `--no-browser` change that). Pick a module (keys 1
+to 5) and click or drag on the grid, which is seen from above with +x to
+the right and +y up, each square drawn with its tile's four peg holes.
+Click a ramp, wall or thwomp with its own tool to turn it a quarter turn,
+or press R over it. A ramp's arrow points uphill; a wall or thwomp stands
+on the line of peg holes an inch from the middle, on the side it faces.
+Right-click or the Floor tool (6) clears a square, and Ctrl+Z undoes. As
+you edit it checks the layout and outlines in red any ramp whose low end
+runs into the edge, a module or a wall facing it, any ramp that leads to
+no 1" platform, any 1" platform no robot can get onto from the floor, and
+any 1" platform too narrow to drive on. A robot needs about 5.3 cm
+clear of every edge, so platforms and ramps have to be at least two
+modules wide. Name the layout and Save, and it is written to
 `src/robogame_sim/layouts/NAME.json`, one module per line so it diffs
 well. `http://localhost:8765/#NAME` opens a saved one directly.
+
+Layouts made for the old 9 x 9 grid of 5 inch modules still open, with a
+warning; pick 12 x 12 under Grid to grow one about the middle and Save.
 
 Then run the sim on it, no rebuild needed:
 
@@ -257,19 +274,28 @@ shapes `scripts/export_onshape_arena.py` exported from the CAD, so a
 layout looks and collides like the real modules, prints the same checks,
 spawns robots on top of whatever is under their spawn spot, lifts the
 tokens onto it too, and hands the layout to `chase_node` so the planner
-and the sim agree. `layout:=default` (the default) is the CAD arena's
-layout, the 3 x 3 platform with three ramps on its -y side, and gives the
-same terrain as the export to the millimetre. `layout:=cad` uses the
-Onshape export as it is. A ramp's `rotation` in the file is degrees
-anticlockwise from above: 0 rises toward +y, 90 toward -x, 180 toward -y,
-270 toward +x.
+and the sim agree. Walls and thwomps are obstacles to the planner like a
+platform's edge. `layout:=default` (the default) is a 4 x 4 platform in
+the middle with four ramps on its -y side. `layout:=cad` uses the Onshape
+export as it is, MAIN ASSEMBLY's modules where it puts them. `rotation`
+in the file is degrees anticlockwise from above: a ramp at 0 rises toward
++y, 90 toward -x, 180 toward -y, 270 toward +x, and a wall or thwomp at
+those stands on the +y, -x, -y or +x side of its square.
 
-Checked headless on 2026-10-16 with a layout of two platforms and ramps
-turned 90, 180 and 270 degrees: the world loaded, robot 2 spawned on top
-of a lone platform module, and robot 1 went round to the ramp facing -x,
-up it (height +2.55 cm) and stopped 0.23 m from robot 2 on that platform.
-Clicking, dragging, turning, clearing, undo and Save were checked in
-headless Chromium.
+After changing the modules in Onshape, run
+`scripts/export_onshape_arena.py` and rebuild. It exports every part of
+the MODULES part studio, and the layouts place each by its mesh, so a
+module that changes size or height needs no code change; a new kind of
+module needs an entry in `PARTS` in `arena_layout.py` and a tool in
+`arena_editor.html`.
+
+Checked headless on 2026-10-16 with the 4 inch modules, on a layout of a
+3 x 3 1" platform with three ramps on its -x side, two 2" platforms, two
+walls and a thwomp: the world loaded every mesh, robot 2 spawned on top of
+the platform (z 0.045 m), and robot 1 went round to the ramps and up them
+(z 0.045 m) and held 0.24 m from robot 2. The editor was checked in
+headless Chromium, in light and dark, with a layout of every module and
+with an old 9 x 9 layout.
 
 ## Tests
 

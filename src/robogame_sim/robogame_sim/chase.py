@@ -23,10 +23,11 @@ ARM_REACH = SHOULDER[0] + UPPER_ARM_LENGTH + FOREARM_LENGTH + FINGER_LENGTH
 FOOTPRINT_BACK = CHASSIS[0] / 2
 FOOTPRINT_SIDE = WHEEL_Y + WHEEL_WIDTH / 2
 
-# The floor tiles end at +-0.5715 m, 9 modules of 0.127 m, with no walls.
+# The floor tiles end at +-0.6096 m, 12 modules of 0.1016 m, with no walls
+# round them.
 # Predicted points are kept this far inside the edge, since a target is
 # not going to drive off it and the hunter should not be sent over it.
-ARENA_HALF = 4.5 * 0.127
+ARENA_HALF = 6 * 0.1016
 WALL_MARGIN = 0.06
 
 KEEP_UP_FADE = 0.02
