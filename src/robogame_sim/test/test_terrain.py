@@ -56,7 +56,14 @@ def drive(terrain, hx, hy, hyaw, tx, ty, steps=800, dt=0.05):
         path = terrain.route(hx, hy, tx, ty, tx, ty)
         assert path is not None
 
-        if len(path) == 2:
+        if path.partial:
+            if math.dist((hx, hy), path[-1]) < 0.03:
+                linear, angular = 0.0, 0.0
+            else:
+                linear, angular, _ = follow_command(
+                    hx, hy, hyaw, *next_waypoint(path, 0.0),
+                    0.3, 1.5, 1.2, 3.0, 1.0)
+        elif len(path) == 2:
             linear, angular, _ = chase_command(
                 hx, hy, hyaw, tx, ty, math.hypot(tx - hx, ty - hy),
                 standoff, 0.3, 1.5, 1.2, 3.0, 1.0)
@@ -64,6 +71,9 @@ def drive(terrain, hx, hy, hyaw, tx, ty, steps=800, dt=0.05):
             linear, angular, _ = follow_command(
                 hx, hy, hyaw, *next_waypoint(path, standoff),
                 0.3, 1.5, 1.2, 3.0, 1.0)
+
+        if terrain.on_slope(hx, hy):
+            linear = 0.0 if linear <= 0.0 else max(linear, 0.15)
 
         hx += linear * dt * math.cos(hyaw)
         hy += linear * dt * math.sin(hyaw)

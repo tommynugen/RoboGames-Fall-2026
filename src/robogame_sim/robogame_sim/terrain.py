@@ -43,6 +43,15 @@ ALIGN = math.cos(math.radians(15))
 MOVES = [(di, dj) for di in (-1, 0, 1) for dj in (-1, 0, 1) if di or dj]
 
 
+class Path(list):
+    """Points from the hunter on. partial is True when the path stops at
+    the nearest place to a target the hunter cannot reach."""
+
+    def __init__(self, points, partial=False):
+        super().__init__(points)
+        self.partial = partial
+
+
 def rotation(roll, pitch, yaw):
     cr, sr = math.cos(roll), math.sin(roll)
     cp, sp = math.cos(pitch), math.sin(pitch)
@@ -94,9 +103,19 @@ def read_stl(path):
 
 
 def model_triangles(path):
-    """Every collision surface in an SDF model, in the model's frame."""
+    """Every collision surface in an SDF model file, in the model's frame.
+    Mesh paths are taken relative to the model's folder."""
     model_dir = os.path.dirname(os.path.abspath(path))
-    root = ElementTree.parse(path).getroot()
+
+    def resolve(uri):
+        return os.path.join(model_dir, re.sub(r"^model://[^/]+/", "", uri))
+
+    return sdf_triangles(ElementTree.parse(path).getroot(), resolve)
+
+
+def sdf_triangles(root, resolve):
+    """Every collision surface under an SDF element, in its frame. resolve
+    turns a mesh uri into a file path."""
     triangles = []
 
     for link in root.iter("link"):
@@ -112,9 +131,7 @@ def model_triangles(path):
                 faces = box_top([float(v) for v in
                                  box.find("size").text.split()])
             elif mesh is not None:
-                uri = mesh.find("uri").text.strip()
-                uri = re.sub(r"^model://[^/]+/", "", uri)
-                faces = read_stl(os.path.join(model_dir, uri))
+                faces = read_stl(resolve(mesh.find("uri").text.strip()))
                 scale = mesh.find("scale")
 
                 if scale is not None:
@@ -241,6 +258,7 @@ class Terrain:
         gx, gy = np.gradient(h, self.resolution)
         magnitude = np.hypot(gx, gy)
         sloped = self.free & (magnitude > SLOPE)
+        self.sloped = (magnitude > SLOPE) & ~np.isnan(self.height)
 
         cx, cy = self.centres()
         self.axis = np.zeros(self.shape + (2,))
@@ -282,6 +300,10 @@ class Terrain:
 
     def inside(self, cell):
         return 0 <= cell[0] < self.shape[0] and 0 <= cell[1] < self.shape[1]
+
+    def on_slope(self, x, y):
+        cell = self.cell(x, y)
+        return self.inside(cell) and bool(self.sloped[cell])
 
     def height_at(self, x, y):
         cell = self.cell(x, y)
@@ -390,8 +412,12 @@ class Terrain:
 
         goal is where the hunter means to meet the target, used if it is
         open ground at the target's height, else the target is used. A
-        path of just [hunter, goal] means the straight line is clear. None
-        if there is no way there, or either robot is off the map.
+        path of just [hunter, goal] means the straight line is clear.
+
+        If the target is somewhere the hunter cannot get to, such as on a
+        platform no ramp leads to, the path goes to the nearest place it
+        can reach instead and its partial is True. None if either robot is
+        off the map, or the hunter is boxed in.
         """
         target_level = self.height_at(target_x, target_y)
         hunter_level = self.height_at(hunter_x, hunter_y)
@@ -399,32 +425,82 @@ class Terrain:
         if math.isnan(target_level) or math.isnan(hunter_level):
             return None
 
-        goal_cell = self.cell(goal_x, goal_y)
-        if (not self.inside(goal_cell) or not self.free[goal_cell]
-                or abs(self.height[goal_cell] - target_level) > STEP):
-            goal_cell = self.nearest_free(target_x, target_y, target_level)
-            if goal_cell is None:
-                return None
-            goal_x, goal_y = self.centre(goal_cell)
-
-        if self.clear_line(hunter_x, hunter_y, goal_x, goal_y):
-            return [(hunter_x, hunter_y), (goal_x, goal_y)]
-
         start_cell = self.cell(hunter_x, hunter_y)
         if not self.inside(start_cell) or not self.free[start_cell]:
             start_cell = self.nearest_free(hunter_x, hunter_y, hunter_level)
             if start_cell is None:
                 return None
 
-        cells = self.plan(start_cell, goal_cell)
+        goal_cell = self.cell(goal_x, goal_y)
+        if (not self.inside(goal_cell) or not self.free[goal_cell]
+                or abs(self.height[goal_cell] - target_level) > STEP):
+            goal_cell = self.nearest_free(target_x, target_y, target_level)
+            if goal_cell is not None:
+                goal_x, goal_y = self.centre(goal_cell)
+
+        if goal_cell is not None:
+            if self.clear_line(hunter_x, hunter_y, goal_x, goal_y):
+                return Path([(hunter_x, hunter_y), (goal_x, goal_y)])
+
+            cells = self.plan(start_cell, goal_cell)
+            if cells is not None:
+                return self.path_along(hunter_x, hunter_y, cells,
+                                       (goal_x, goal_y))
+
+        return self.closest_approach(
+            hunter_x, hunter_y, start_cell, target_x, target_y)
+
+    def closest_approach(self, hunter_x, hunter_y, start_cell, x, y):
+        """Path to the place nearest x, y that the hunter can drive to."""
+        seen = self.reachable(*self.centre(start_cell))
+        if seen is None:
+            return None
+
+        cx, cy = self.centres()
+        distance = np.where(seen, np.hypot(cx - x, cy - y), np.inf)
+        best = np.unravel_index(np.argmin(distance), self.shape)
+        end = self.centre(best)
+
+        if self.clear_line(hunter_x, hunter_y, *end):
+            return Path([(hunter_x, hunter_y), end], partial=True)
+
+        cells = self.plan(start_cell, best)
         if cells is None:
             return None
 
-        points = ([(hunter_x, hunter_y)]
-                  + [self.centre(c) for c in cells[1:-1]]
-                  + [(goal_x, goal_y)])
+        return self.path_along(hunter_x, hunter_y, cells, end, partial=True)
 
-        return self.pull_straight(points)
+    def path_along(self, hunter_x, hunter_y, cells, end, partial=False):
+        points = ([(hunter_x, hunter_y)]
+                  + [self.centre(c) for c in cells[1:-1]] + [end])
+        return Path(self.pull_straight(points), partial)
+
+    def reachable(self, x, y):
+        """Which cells a robot starting at x, y can drive to, as a boolean
+        array, or None if x, y is not open ground."""
+        start = self.cell(x, y)
+
+        if not self.inside(start) or not self.free[start]:
+            return None
+
+        seen = np.zeros(self.shape, dtype=bool)
+        seen[start] = True
+        frontier = [start]
+
+        while frontier:
+            here = frontier.pop()
+
+            for di, dj in MOVES:
+                there = (here[0] + di, here[1] + dj)
+
+                if (self.inside(there) and not seen[there]
+                        and self.free[there]
+                        and self.aligned(here, di, dj)
+                        and self.aligned(there, di, dj)):
+                    seen[there] = True
+                    frontier.append(there)
+
+        return seen
 
     def pull_straight(self, points):
         """Drops the points that can be driven past in a straight line."""

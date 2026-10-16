@@ -37,6 +37,7 @@ from robogame_sim.chase import (
     standoff_distance,
     yaw_from_quaternion,
 )
+from robogame_sim import arena_layout
 from robogame_sim.terrain import Terrain, next_waypoint
 
 
@@ -70,11 +71,17 @@ class ChaseNode(Node):
             # rarely drives flat out.
             "prediction_horizon": 1.5,
             "intercept_speed": 0.25,
+            # Least forward speed on a ramp, so the hunter does not stall
+            # on its steep top while closing in slowly.
+            "ramp_speed": 0.15,
             "pose_timeout": 0.5,
             "rate": 20.0,
-            # The arena model whose collision geometry is the terrain. The
-            # model is taken to sit at the world origin, as the world
-            # includes it. Empty for the one installed with this package.
+            # The arena layout, by name or path, made with arena_editor;
+            # sim.launch.py passes the one it built the world from. Empty
+            # for arena_model, an SDF model whose collision geometry is the
+            # terrain, taken to sit at the world origin. Both empty for the
+            # Onshape export installed with this package.
+            "layout": "",
             "arena_model": "",
         }
 
@@ -96,7 +103,8 @@ class ChaseNode(Node):
         self.engaged = False
         self.routing = None
         self.was_tracking = False
-        self.terrain = self.load_terrain(p["arena_model"] or default_arena_model())
+        self.terrain = self.load_terrain(
+            p["layout"], p["arena_model"] or default_arena_model())
 
         self.cmd_publisher = self.create_publisher(
             Twist, f"/{hunter}/cmd_vel", 10)
@@ -108,7 +116,12 @@ class ChaseNode(Node):
 
         self.get_logger().info(f"{hunter} chasing {target}")
 
-    def load_terrain(self, path):
+    def load_terrain(self, layout, path):
+        if layout:
+            terrain = arena_layout.terrain(arena_layout.load(layout))
+            self.get_logger().info(f"terrain from layout {layout}")
+            return terrain
+
         if not path or not os.path.exists(path):
             self.get_logger().warn(
                 f"no arena model at '{path}', chasing in a straight line")
@@ -169,21 +182,38 @@ class ChaseNode(Node):
             path = self.terrain.route(
                 x, y, aim_x, aim_y, self.target.x, self.target.y)
 
-        if path is None or len(path) == 2:
+        follow = (p["max_linear_speed"], p["max_angular_speed"],
+                  p["linear_gain"], p["angular_gain"], p["turn_in_place"])
+
+        if path is None and self.terrain is not None:
+            # A robot is off the arena, or the hunter is boxed in.
+            linear, angular = 0.0, 0.0
+            routing = "stopped, no way to the target"
+        elif path is not None and path.partial:
+            # Out of reach, so wait as close as the hunter can get.
+            if math.dist((x, y), path[-1]) < 0.03:
+                linear, angular = 0.0, 0.0
+            else:
+                linear, angular, _ = follow_command(
+                    x, y, yaw, *next_waypoint(path, 0.0), *follow)
+            routing = "target out of reach, going as close as possible"
+        elif path is None or len(path) == 2:
             linear, angular, _ = chase_command(
                 x, y, yaw, aim_x, aim_y, distance,
                 standoff, p["max_linear_speed"], p["max_angular_speed"],
                 p["linear_gain"], p["angular_gain"], p["turn_in_place"],
                 self.target.vx, self.target.vy)
+            routing = "clear run at the target"
         else:
             linear, angular, _ = follow_command(
-                x, y, yaw, *next_waypoint(path, standoff),
-                p["max_linear_speed"], p["max_angular_speed"],
-                p["linear_gain"], p["angular_gain"], p["turn_in_place"])
+                x, y, yaw, *next_waypoint(path, standoff), *follow)
+            routing = "path"
 
-        routing = ("no way through" if path is None and self.terrain
-                   else "clear run" if path is None or len(path) == 2
-                   else "path")
+        if self.terrain is not None and self.terrain.on_slope(x, y):
+            # Creeping up a ramp stalls on its steep top, and backing off
+            # down it is no better, so on a ramp keep going or hold still.
+            linear = 0.0 if linear <= 0.0 else max(linear, p["ramp_speed"])
+
         if routing != self.routing:
             self.routing = routing
             if routing == "path":
@@ -191,7 +221,7 @@ class ChaseNode(Node):
                     f"({px:.2f}, {py:.2f})" for px, py in path[1:])
                 self.get_logger().info(f"path to the target via {corners}")
             else:
-                self.get_logger().info(f"{routing} at the target")
+                self.get_logger().info(routing)
 
         engaged = distance < standoff + 0.03
         if engaged != self.engaged:

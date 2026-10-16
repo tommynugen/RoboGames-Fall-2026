@@ -160,8 +160,8 @@ robot driving an arc round the arc rather than off its tangent. Along that
 path it finds the earliest point it can reach in time, counting its own
 turning and driving at `intercept_speed` (0.25 m/s), and heads there. A
 target that is still or close is aimed at directly, a fast or far one is
-led by up to `prediction_horizon` (1.5 s), and predicted points stay off
-the walls. Once it has caught up, the hunter adds the target's speed to its
+led by up to `prediction_horizon` (1.5 s), and predicted points stay 6 cm
+inside the edge of the floor. Once it has caught up, the hunter adds the target's speed to its
 own so it keeps pace instead of trailing, fading that out over the last
 2 cm so a target that stops is not run into.
 
@@ -175,16 +175,18 @@ stops. Speeds, gains and the prediction are parameters (see the top of
 `chase_node.py`).
 
 The hunter knows the arena's terrain and plans its way to the target
-(`terrain.py`). At start up it reads the collision geometry of the arena
-model, `models/robogame_arena_cad/model.sdf` (or the `arena_model`
-parameter), into a 2 cm height map. Wherever the height jumps between
+(`terrain.py`). At start up it builds the arena from the same layout as the
+sim (see Arena layouts below; `layout:=cad` reads
+`models/robogame_arena_cad/model.sdf` instead) and turns its collision
+geometry into a 2 cm height map. Wherever the height jumps between
 cells, at a platform's edge, a ramp's sides or the edge of the floor
 tiles, is a step the wheels cannot climb, and the hunter's centre is kept
 5.3 cm from it, enough to turn on the spot. On and within 7 cm of sloped
 ground it may only drive within 15 degrees of the slope, so it lines up
-before a ramp and goes straight up or down it. Nothing about the layout is
-written into the code, so re-exporting the CAD with platforms or ramps
-moved needs only a rebuild.
+before a ramp and goes straight up or down it. On a ramp it keeps to at
+least `ramp_speed` (0.15 m/s) going forward, so it does not stall on the
+steep top, and holds still rather than backing down it. Nothing about the
+layout is written into the code.
 
 Every control step it checks whether it can drive straight at the target.
 If so it chases as above. If not, say the platform is in the way or the
@@ -192,8 +194,9 @@ target is up on it, it plans the cheapest path over the height map with
 A*, pulls it straight, and drives it, slowing before sharp corners such as
 the turn at the foot of a ramp. So it goes round the near side of a
 platform to a target behind it, takes the ramp up to a target on top, and
-comes back down the ramp after a target that has left. It takes about
-15 ms a step.
+comes back down the ramp after a target that has left. A target it
+cannot get to, on a platform no ramp leads to, it waits for at the
+nearest place it can reach. It takes about 15 ms a step.
 
 Checked headless on 2026-10-16 with the CAD arena, robot 2 still, robot 1
 placed by hand. Height is the true height of robot 1 from Gazebo:
@@ -220,6 +223,54 @@ target is still approached and held 1 cm outside the stopping distance. The
 maths is covered by `test/test_chase.py`, the terrain and paths by
 `test/test_terrain.py`.
 
+## Arena layouts
+
+The arena's platforms and ramps are modules on a 9 x 9 grid of 12.7 cm
+squares, moved about between games. Map how they are set up on the table
+in the layout editor:
+
+```
+ros2 run robogame_sim arena_editor
+```
+
+It opens http://localhost:8765 in the browser (only this computer can
+reach it; `--port` and `--no-browser` change that). Pick Platform or Ramp
+(keys 1 and 2) and click or drag on the grid, which is seen from above
+with +x to the right and +y up. Click a ramp to turn it a quarter turn, or
+press R over it; its arrow points uphill. Right-click or the Floor tool (3)
+clears a square, and Ctrl+Z undoes. As you edit it checks the layout and
+outlines in red any ramp whose low end runs into the edge or another
+module, any ramp that leads to no platform, any platform no robot can get
+onto from the floor, and any platform too narrow to drive on (a single
+module). Name the layout and Save, and it is written to
+`src/robogame_sim/layouts/NAME.json`, one module per line so it diffs
+well. `http://localhost:8765/#NAME` opens a saved one directly.
+
+Then run the sim on it, no rebuild needed:
+
+```
+ros2 launch robogame_sim sim.launch.py layout:=NAME robots:=1,2 chase:=1,2
+```
+
+The launch builds the world from the layout with the meshes and collision
+shapes `scripts/export_onshape_arena.py` exported from the CAD, so a
+layout looks and collides like the real modules, prints the same checks,
+spawns robots on top of whatever is under their spawn spot, lifts the
+tokens onto it too, and hands the layout to `chase_node` so the planner
+and the sim agree. `layout:=default` (the default) is the CAD arena's
+layout, the 3 x 3 platform with three ramps on its -y side, and gives the
+same terrain as the export to the millimetre. `layout:=cad` uses the
+Onshape export as it is. A ramp's `rotation` in the file is degrees
+anticlockwise from above: 0 rises toward +y, 90 toward -x, 180 toward -y,
+270 toward +x.
+
+Checked headless on 2026-10-16 with a layout of two platforms and ramps
+turned 90, 180 and 270 degrees: the world loaded, robot 2 spawned on top
+of a lone platform module, and robot 1 went round to the ramp facing -x,
+up it (height +2.55 cm) and stopped 0.23 m from robot 2 on that platform.
+Clicking, dragging, turning, clearing, undo and Save were checked in
+headless Chromium.
+
 ## Tests
 
 ```
@@ -227,7 +278,8 @@ cd src/robogame_sim && python3 -m pytest test
 ```
 
 These check the firmware maths against motors.cpp and arm.cpp, the racing
-controls and steering wheel maths, and that the robot model is valid XML. Print a robot's SDF with `ros2 run robogame_sim
+controls and steering wheel maths, that the robot model is valid XML, the
+chase and path planning, and the arena layouts and their editor. Print a robot's SDF with `ros2 run robogame_sim
 robot_sdf 2`, and check it with `gz sdf -k` once Gazebo is installed.
 
 ## Checked in Gazebo

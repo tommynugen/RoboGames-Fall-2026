@@ -87,10 +87,17 @@ def test_prediction_follows_an_arc():
     assert abs(x - 0.25) < 1e-3 and abs(y - 0.25) < 1e-3
 
 
-def test_prediction_stays_off_the_walls():
+def test_prediction_stays_off_the_edge():
     tracker = driving_tracker(0.4, 0.0, 0.0, 0.2, 0.0)
     x, _ = tracker.predict(2.0)
-    assert x == 0.44
+    assert abs(x - (0.5715 - 0.06)) < 1e-9
+
+
+def test_still_target_near_the_edge_is_aimed_at_where_it_is():
+    tracker = TargetTracker()
+    tracker.update(-0.53, 0.25, 0.0)
+    x, y, _ = tracker.intercept(0.0, 0.0, 0.0, 0.1, 0.25, 1.5, 1.5)
+    assert (x, y) == (-0.53, 0.25)
 
 
 def test_still_target_is_aimed_at_directly():
