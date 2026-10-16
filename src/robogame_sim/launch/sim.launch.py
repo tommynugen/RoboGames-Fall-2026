@@ -5,12 +5,14 @@
     ros2 launch robogame_sim sim.launch.py controller:=joy
     ros2 launch robogame_sim sim.launch.py controller:=classic
     ros2 launch robogame_sim sim.launch.py autonomy:=true
+    ros2 launch robogame_sim sim.launch.py robots:=1,2 chase:=1,2
     ros2 launch robogame_sim sim.launch.py drive_model:=firmware gui:=false
 
 Each robot listens on /robot_N/cmd_vel and /robot_N/arm_command, the same
 topics microcontroller_node takes, so do not run the BLE bridge alongside.
 """
 
+import difflib
 import glob
 import math
 import os
@@ -88,7 +90,29 @@ def package_exists(name):
     return True
 
 
+LAUNCH_ARGUMENTS = (
+    "robots", "gui", "drive_model", "controller", "joy_device_id",
+    "motion_device", "autonomy", "chase",
+)
+
+
+def check_argument_names(context):
+    # ros2 launch takes any name:=value without complaint, so a typo such
+    # as controler:=joy would otherwise quietly start no controller.
+    for name in context.launch_configurations:
+        if name in LAUNCH_ARGUMENTS:
+            continue
+
+        close = difflib.get_close_matches(name, LAUNCH_ARGUMENTS, n=1)
+        hint = f", did you mean {close[0]}?" if close else ""
+        raise RuntimeError(
+            f"Unknown launch argument {name}{hint} Arguments are "
+            + ", ".join(LAUNCH_ARGUMENTS))
+
+
 def launch_setup(context):
+    check_argument_names(context)
+
     robot_ids = [
         int(part)
         for part in LaunchConfiguration("robots").perform(context).split(",")
@@ -98,6 +122,11 @@ def launch_setup(context):
     drive_model = LaunchConfiguration("drive_model").perform(context)
     controller = LaunchConfiguration("controller").perform(context)
     autonomy = LaunchConfiguration("autonomy").perform(context) == "true"
+    chase = [
+        int(part)
+        for part in LaunchConfiguration("chase").perform(context).split(",")
+        if part.strip()
+    ]
 
     share = get_package_share_directory("robogame_sim")
     world = os.path.join(share, "worlds", f"{WORLD_NAME}.sdf")
@@ -220,6 +249,33 @@ def launch_setup(context):
             parameters=[{"use_sim_time": True}],
         ))
 
+    if chase:
+        if len(chase) != 2 or chase[0] == chase[1]:
+            raise RuntimeError(
+                "chase takes two different robot numbers, hunter then target")
+
+        missing = [r for r in chase if r not in robot_ids]
+        if missing:
+            raise RuntimeError(
+                f"chase robots {missing} are not in robots:={robot_ids}")
+
+        if controller != "none" and chase[0] == first_robot:
+            raise RuntimeError(
+                f"robot {first_robot} cannot chase while the controller "
+                f"drives it, try chase:={chase[1]},{chase[0]}")
+
+        actions.append(Node(
+            package="robogame_sim",
+            executable="chase_node",
+            name=f"chase_robot_{chase[0]}",
+            output="screen",
+            parameters=[{
+                "hunter_id": chase[0],
+                "target_id": chase[1],
+                "use_sim_time": True,
+            }],
+        ))
+
     return actions
 
 
@@ -252,5 +308,9 @@ def generate_launch_description():
             "autonomy", default_value="false",
             description="true starts arena_perception autonomy_node, which "
                         "drives robot 1 to points on /robot_1/goal"),
+        DeclareLaunchArgument(
+            "chase", default_value="",
+            description="HUNTER,TARGET, e.g. 1,2, starts chase_node so the "
+                        "first robot drives after the second"),
         OpaqueFunction(function=launch_setup),
     ])

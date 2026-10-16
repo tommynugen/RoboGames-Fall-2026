@@ -127,6 +127,48 @@ ros2 launch robogame_sim sim.launch.py autonomy:=true
 ros2 topic pub --once /robot_1/goal geometry_msgs/msg/Point "{x: 0.2, y: 0.3}"
 ```
 
+## Chase another robot
+
+`chase_node` drives one robot after another. It reads both robots' true
+poses from `/model/robot_N/odometry` and publishes the hunter's `cmd_vel`:
+
+```
+ros2 launch robogame_sim sim.launch.py robots:=1,2 chase:=1,2
+```
+
+Robot 1 hunts robot 2. Drive robot 2 from the keyboard to make it run:
+
+```
+ros2 run teleop_twist_keyboard teleop_twist_keyboard \
+    --ros-args -r cmd_vel:=/robot_2/cmd_vel -p stamped:=false
+```
+
+Or be chased: the controller drives the first robot in `robots`, so have
+robot 2 hunt it:
+
+```
+ros2 launch robogame_sim sim.launch.py robots:=1,2 controller:=joy chase:=2,1
+```
+
+The launch refuses a hunter that the controller is also driving, and any
+misspelt argument (`controler:=joy` would otherwise quietly start no
+controller).
+
+The hunter turns toward where the target will be 0.4 s from now (at most
+15 cm ahead, never past the walls), slows as its heading error grows, and
+turns on the spot if the target is more than about 57 degrees off its
+nose. It stops with its fingertips `clearance` (3 cm) short of the target.
+The arm reaches 15 cm past the centre, so the stopping distance depends on
+which way the target faces: 0.33 m between centres head on, about 0.22 m
+from behind. If it ends up too close, it backs off. If either pose is
+older than 0.5 s, it stops. Speeds, gains and lead time are parameters
+(see the top of `chase_node.py`).
+
+Checked headless: robots spawned 0.70 m apart and facing each other, the
+hunter closed to 0.339 m and held. Robot 2 was then driven on a curve at
+0.15 m/s and 0.8 rad/s for 8 s. The hunter turned, followed and settled
+0.23 m behind it. The maths is covered by `test/test_chase.py`.
+
 ## Tests
 
 ```

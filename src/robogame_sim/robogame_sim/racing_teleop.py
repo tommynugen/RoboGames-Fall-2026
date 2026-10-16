@@ -19,7 +19,10 @@ same topics as arena_perception's controller_input, and the current mode on
 /robot_N/steering_mode.
 """
 
+import signal
+
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 
@@ -346,6 +349,7 @@ class RacingTeleop(Node):
     def destroy_node(self):
         if self.motion is not None:
             self.motion.close()
+            self.motion = None
 
         super().destroy_node()
 
@@ -356,13 +360,19 @@ def main(args=None):
 
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
-    finally:
-        node.destroy_node()
-
+    except Exception:
+        # Ctrl-C can shut the context down while a timer is publishing,
+        # which fails the publish. That is a normal stop, not an error.
         if rclpy.ok():
-            rclpy.shutdown()
+            raise
+    finally:
+        # launch passes Ctrl-C on as a second SIGINT, which would otherwise
+        # cut the motion sensor's close short.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        node.destroy_node()
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":
