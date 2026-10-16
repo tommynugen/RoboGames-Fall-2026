@@ -301,3 +301,51 @@ def test_unreachable_target_is_waited_for_beside_its_platform():
     # Right beside the platform, and parked there.
     assert math.dist(end, target) < 0.16
     assert math.dist(end, trail[-20]) < 1e-3
+
+
+def test_spawn_spot_in_a_pocket_is_moved_to_open_floor():
+    # The corner between two banks of ramps, where the spawn circle puts
+    # robot 1, with a thwomp beside it: like the -x, -y quarter of a
+    # layout with a ramp on every side of the middle platform.
+    layout = {"size": 12, "modules": [
+        ramp(3, r, 270) for r in (4, 5, 6, 7)] + [
+        ramp(c, 3, 0) for c in (4, 5, 6, 7)] + [
+        platform(c, r) for c in (4, 5, 6, 7) for r in (4, 5, 6, 7)] + [
+        side("thwomp", 1, 3, 270)]}
+    ground = al.terrain(layout)
+    floor = al.main_floor(ground)
+
+    x, y = al.open_spot(ground, -0.247, -0.247)
+    assert (x, y) != (-0.247, -0.247)
+    cell = ground.cell(x, y)
+    assert floor[cell] and ground.clearance[cell] >= 0.08
+    assert not ground.axis[cell].any(), "on or by a ramp"
+    assert math.dist((x, y), (-0.247, -0.247)) < 0.15
+
+    # Kept apart from a robot already there.
+    other = al.open_spot(ground, -0.247, -0.247, taken=[(x, y)])
+    assert math.dist(other, (x, y)) >= 0.2
+
+
+def test_open_spawn_spot_is_kept():
+    ground = al.terrain({"size": 12, "modules": []})
+    assert al.open_spot(ground, -0.247, -0.247) == (-0.247, -0.247)
+    assert al.open_spot(ground, 0.247, 0.247,
+                        taken=[(-0.247, -0.247)]) == (0.247, 0.247)
+
+
+def test_default_layout_spawns_clear_of_the_platform_corners():
+    # The spawn circle passes 2 to 3 cm from the corners of the middle
+    # platform.
+    layout = al.load(os.path.join(PACKAGE, "layouts", "default.json"))
+    ground = al.terrain(layout)
+    floor = al.main_floor(ground)
+    taken = []
+
+    for spot in ((-0.247, -0.247), (0.247, 0.247)):
+        x, y = al.open_spot(ground, *spot, taken)
+        taken.append((x, y))
+        cell = ground.cell(x, y)
+        assert floor[cell] and ground.clearance[cell] >= 0.08
+        assert not ground.axis[cell].any(), "on or by a ramp"
+        assert math.dist((x, y), spot) < 0.15

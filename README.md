@@ -282,6 +282,17 @@ in the file is degrees anticlockwise from above: a ramp at 0 rises toward
 +y, 90 toward -x, 180 toward -y, 270 toward +x, and a wall or thwomp at
 those stands on the +y, -x, -y or +x side of its square.
 
+Robots spawn on a circle round the middle, and one whose spot is on a
+ramp or wedged against a module (closer than 8 cm, as at the corners of
+the default platform) is moved to the nearest open, level ground at the
+same height, and the launch prints where.
+
+Only one sim can run at a time in a Gazebo partition, since they share the
+world's name. If one is already running the launch stops straight away and
+says so; before, the second one looked frozen, as its windows and nodes
+attached to the first. Stop the first, or add `partition:=NAME` to run the
+second beside it.
+
 After changing the modules in Onshape, run
 `scripts/export_onshape_arena.py` and rebuild. It exports every part of
 the MODULES part studio, and the layouts place each by its mesh, so a

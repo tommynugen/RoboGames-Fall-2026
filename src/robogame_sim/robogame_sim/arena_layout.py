@@ -489,6 +489,50 @@ def module_cells(ground, x, y):
     return cells
 
 
+def open_spot(ground, x, y, taken=(), room=0.08, apart=0.2):
+    """The spot nearest x, y on level ground of the main floor (which takes
+    in the platforms ramps lead to) with room to turn, at least apart from
+    the spots in taken, so a robot is not spawned on a ramp, or wedged
+    against a module it then cannot plan its way out of.
+    x, y itself when it will do, or when there is no floor at all."""
+    floor = main_floor(ground)
+
+    if floor is None:
+        return x, y
+
+    # Off the ramps and the line-up zone round them too, where a robot
+    # would roll and the planner only lets it drive along the slope.
+    # And at the height the spot is at, so a robot meant for the floor
+    # is not put up on a platform, when there is anywhere else.
+    under = ground.height_at(x, y)
+    under = 0.0 if math.isnan(under) else under
+    same = np.abs(np.nan_to_num(ground.height, nan=np.inf) - under) < 0.005
+    cx, cy = ground.centres()
+    apart_from = np.ones(ground.shape, dtype=bool)
+    for tx, ty in taken:
+        apart_from &= np.hypot(cx - tx, cy - ty) >= apart
+
+    level = floor & ~np.any(ground.axis != 0, axis=-1)
+    open_cells = None
+
+    for choice in (level & same & (ground.clearance >= room), level & same,
+                   level & (ground.clearance >= room), level, floor):
+        if (choice & apart_from).any():
+            open_cells = choice & apart_from
+            break
+
+    if open_cells is None:
+        return x, y
+
+    cell = ground.cell(x, y)
+    if ground.inside(cell) and open_cells[cell]:
+        return x, y
+
+    distance = np.where(open_cells, np.hypot(cx - x, cy - y), np.inf)
+    i, j = np.unravel_index(np.argmin(distance), distance.shape)
+    return float(cx[i, j]), float(cy[i, j])
+
+
 def main_floor(ground):
     """The largest stretch of ground robots on the floor can drive to."""
     low = ground.free & (np.nan_to_num(ground.height, nan=1.0) < 0.005)

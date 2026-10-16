@@ -8,9 +8,17 @@
     ros2 launch robogame_sim sim.launch.py robots:=1,2 chase:=1,2
     ros2 launch robogame_sim sim.launch.py drive_model:=firmware gui:=false
     ros2 launch robogame_sim sim.launch.py layout:=my_setup
+    ros2 launch robogame_sim sim.launch.py partition:=second
 
 layout names an arena layout made with arena_editor (or a path to one), and
 the world is built from it; cad uses the Onshape export as it is.
+
+Only one sim can run in a Gazebo partition, since the world's name is the
+same. If one is already running this stops with a message rather than
+attaching to it; partition:=NAME runs a second one beside it.
+
+Robots spawn on a circle facing the middle, each moved to the nearest open
+floor when its spot is on or wedged against a module.
 
 Each robot listens on /robot_N/cmd_vel and /robot_N/arm_command, the same
 topics microcontroller_node takes, so do not run the BLE bridge alongside.
@@ -20,6 +28,7 @@ import difflib
 import glob
 import math
 import os
+import subprocess
 
 from ament_index_python.packages import (
     PackageNotFoundError,
@@ -98,9 +107,22 @@ def package_exists(name):
     return True
 
 
+def world_running(name, env):
+    """Whether a Gazebo world of this name is already up in env's partition.
+    False when gz cannot tell, so the launch goes ahead as before."""
+    try:
+        services = subprocess.run(
+            ["gz", "service", "-l"], capture_output=True, text=True,
+            timeout=5, env=env).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+    return f"/world/{name}/" in services
+
+
 LAUNCH_ARGUMENTS = (
     "robots", "gui", "drive_model", "controller", "joy_device_id",
-    "motion_device", "autonomy", "chase", "layout",
+    "motion_device", "autonomy", "chase", "layout", "partition",
 )
 
 
@@ -136,6 +158,23 @@ def launch_setup(context):
         if part.strip()
     ]
 
+    # A second gzserver with the same world name refuses to start, and
+    # everything else in this launch then attaches to the sim already
+    # running, which looks like a frozen sim. Say so instead.
+    partition = LaunchConfiguration("partition").perform(context)
+    env = dict(os.environ)
+    if partition:
+        env["GZ_PARTITION"] = partition
+
+    if world_running(WORLD_NAME, env):
+        where = (f"partition {env['GZ_PARTITION']}"
+                 if env.get("GZ_PARTITION") else "the default partition")
+        raise RuntimeError(
+            f"A Gazebo world named {WORLD_NAME} is already running in "
+            f"{where}, probably another sim.launch.py. Stop it with Ctrl-C "
+            f"in its terminal, or run this one beside it with "
+            f"partition:=NAME")
+
     share = get_package_share_directory("robogame_sim")
     world = os.path.join(share, "worlds", f"{WORLD_NAME}.sdf")
     layout_name = LaunchConfiguration("layout").perform(context)
@@ -170,6 +209,10 @@ def launch_setup(context):
         GzServer(world_sdf_file=world, verbosity_level="1"),
     ]
 
+    if partition:
+        # Before the server, so it and everything after share it.
+        actions.insert(0, SetEnvironmentVariable("GZ_PARTITION", partition))
+
     if gui:
         actions.append(ExecuteProcess(
             cmd=gui_command(), name="gazebo_gui", output="screen"))
@@ -177,9 +220,20 @@ def launch_setup(context):
     topics = ["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"]
     remaps = []
 
+    taken = []
+
     for index, robot_id in enumerate(robot_ids):
         robot = f"robot_{robot_id}"
         x, y, yaw = spawn_pose(index, len(robot_ids))
+        # Off any module and clear of it, so the robot can drive away.
+        moved = arena_layout.open_spot(ground, x, y, taken)
+        if moved != (x, y):
+            print(f"[sim.launch] {robot} spawns at {moved[0]:.2f}, "
+                  f"{moved[1]:.2f} instead of {x:.2f}, {y:.2f}, which has "
+                  f"no room to drive away")
+            x, y = moved
+            yaw = math.atan2(-y, -x)
+        taken.append((x, y))
         # Spawn on top of whatever is there, not inside it.
         under = ground.height_at(x, y)
         z = SPAWN_HEIGHT + (0.0 if math.isnan(under) else max(0.0, under))
@@ -353,5 +407,10 @@ def generate_launch_description():
             "layout", default_value="default",
             description="Arena layout from arena_editor, by name or path; "
                         "cad uses the Onshape export as it is"),
+        DeclareLaunchArgument(
+            "partition", default_value="",
+            description="Gazebo partition to run in, so a second sim can "
+                        "run beside one already going; empty keeps "
+                        "GZ_PARTITION as it is"),
         OpaqueFunction(function=launch_setup),
     ])
