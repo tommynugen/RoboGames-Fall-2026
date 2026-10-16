@@ -22,6 +22,12 @@ The modules are the parts of the CAD's MODULES part studio:
     wall        1 x 4 inch wall, 2 inches high
     thwomp      the thwomp, 1 x 4 inches and 6 high, as a fixed block
 
+A platform can carry more modules: a module with "level": 1 stands on the
+platform at level 0 of its square, one at level 2 on a platform at level 1,
+and so on. Ramps, walls, thwomps and platforms all stack on either platform,
+so a ramp on a 1 inch platform climbs to a 2 inch one. level is left out for
+modules on the floor.
+
 rotation is in degrees anticlockwise seen from above. At 0 a ramp rises
 toward +y, at 90 toward -x, at 180 toward -y and at 270 toward +x. A wall
 or thwomp pegs into its floor tile on the line of holes 1 inch from the
@@ -83,6 +89,8 @@ PARTS = {
                    (0.769, 0.886, 0.953), turns=True),
 }
 TYPES = tuple(PARTS)
+# What other modules can stand on.
+PLATFORMS = ("platform", "platform_2")
 
 NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -200,21 +208,28 @@ def normalise(layout):
         raise ValueError(f"size must be 3 to 25, not {size}")
 
     modules = []
-    taken = set()
+    taken = {}
 
     for module in layout.get("modules", []):
         kind = module.get("type")
         col, row = int(module.get("col")), int(module.get("row"))
+        level = int(module.get("level", 0))
 
         if kind not in TYPES:
             raise ValueError(f"unknown module type {kind!r}")
         if not (0 <= col < size and 0 <= row < size):
             raise ValueError(f"{kind} at col {col}, row {row} is off the grid")
-        if (col, row) in taken:
-            raise ValueError(f"two modules at col {col}, row {row}")
-        taken.add((col, row))
+        if level < 0:
+            raise ValueError(f"{kind} at col {col}, row {row} is below the "
+                             f"floor")
+        if (col, row, level) in taken:
+            raise ValueError(f"two modules at col {col}, row {row}"
+                             + (f", level {level}" if level else ""))
+        taken[(col, row, level)] = kind
 
         entry = {"type": kind, "col": col, "row": row}
+        if level:
+            entry["level"] = level
         if PARTS[kind].turns:
             rotation = int(module.get("rotation", 0)) % 360
             if rotation not in ROTATIONS:
@@ -223,7 +238,13 @@ def normalise(layout):
             entry["rotation"] = rotation
         modules.append(entry)
 
-    modules.sort(key=lambda m: (m["row"], m["col"]))
+    # Only a platform carries anything.
+    for (col, row, level), kind in taken.items():
+        if level and taken.get((col, row, level - 1)) not in PLATFORMS:
+            raise ValueError(f"{kind} at col {col}, row {row}, level {level} "
+                             f"is not on a platform")
+
+    modules.sort(key=lambda m: (m["row"], m["col"], m.get("level", 0)))
     return {"size": size, "modules": modules}
 
 
@@ -286,16 +307,59 @@ def uphill(rotation):
     return -math.sin(angle), math.cos(angle)
 
 
-def placement(part, x, y, rotation):
+def part_height(kind):
+    lo, hi = mesh_bounds(PARTS[kind].mesh)
+    return float(hi[2] - lo[2])
+
+
+def stacks(layout):
+    """Each square's modules, bottom first, keyed by (col, row)."""
+    found = {}
+
+    for m in layout["modules"]:
+        found.setdefault((m["col"], m["row"]), []).append(m)
+
+    for stack in found.values():
+        stack.sort(key=lambda m: m.get("level", 0))
+
+    return found
+
+
+def bases(stack):
+    """How high above the floor each module of a stack stands."""
+    heights, base = [], 0.0
+
+    for m in stack:
+        heights.append(base)
+        base += part_height(m["type"])
+
+    return heights
+
+
+def surface(stack):
+    """Height of the top platform of a stack, which a module on top or a
+    robot stands on, and the module standing there, if any."""
+    height = 0.0
+
+    for m in stack or ():
+        if m["type"] not in PLATFORMS:
+            return height, m
+        height += part_height(m["type"])
+
+    return height, None
+
+
+def placement(part, x, y, rotation, base=0.0):
     """Pose (x, y, z, yaw) of a part's mesh for a square centred on x, y,
-    with the floor's top at z = 0, and its bounds' middle in the world."""
+    with the floor's top at z = 0 and the part standing base above it, and
+    its bounds' middle in the world."""
     lo, hi = mesh_bounds(part.mesh)
     middle = (lo + hi) / 2
 
     if part.mount == "floor":
         yaw, z = 0.0, -hi[2]
     else:
-        yaw, z = math.radians(rotation), -lo[2]
+        yaw, z = math.radians(rotation), base - lo[2]
 
     if part.mount == "side":
         # The part studio has the part beside the tile's middle; turn it so
@@ -318,8 +382,9 @@ def model_sdf(layout, name="arena"):
     """The arena as an SDF <model>, meshes as model://robogame_arena_cad."""
     parts = []
 
-    def add(label, part, x, y, rotation):
-        (px, py, pz, yaw), (bx, by, bz) = placement(part, x, y, rotation)
+    def add(label, part, x, y, rotation, base=0.0):
+        (px, py, pz, yaw), (bx, by, bz) = placement(part, x, y, rotation,
+                                                    base)
         uri = f"model://{CAD_MODEL}/meshes/{part.mesh}"
         pose = f"{px:.5f} {py:.5f} {pz:.5f} 0 0 {yaw:.5f}"
         r, g, b = part.colour
@@ -348,9 +413,12 @@ def model_sdf(layout, name="arena"):
         for col in range(size):
             add(f"floor_{col}_{row}", FLOOR, *centre(layout, col, row), 0)
 
-    for m in layout["modules"]:
-        add(f"{m['type']}_{m['col']}_{m['row']}", PARTS[m["type"]],
-            *centre(layout, m["col"], m["row"]), m.get("rotation", 0))
+    for (col, row), stack in sorted(stacks(layout).items()):
+        for m, base in zip(stack, bases(stack)):
+            level = m.get("level", 0)
+            name = f"{m['type']}_{col}_{row}" + (f"_{level}" if level else "")
+            add(name, PARTS[m["type"]], *centre(layout, col, row),
+                m.get("rotation", 0), base)
 
     return (f'<model name="{name}">\n    <static>true</static>\n'
             f'    <link name="link">\n' + "\n".join(parts)
@@ -419,35 +487,62 @@ def blocks(module, dx, dy):
     return (sx, sy) == (dx, dy)
 
 
+def inches(height):
+    n = round(height / 0.0254)
+    return "an inch" if n == 1 else f"{n} inches"
+
+
+def same_height(a, b):
+    return abs(a - b) < 1e-3
+
+
 def check(layout, ground=None):
     """Problems with a layout that a robot would run into, as dicts with
     type, col, row and message."""
     layout = normalise(layout)
     size = layout["size"]
-    at = {(m["col"], m["row"]): m for m in layout["modules"]}
+    at = stacks(layout)
+    rise = part_height("ramp")
     problems = []
+    # Squares ramps lead onto, by the height they lead to.
+    ramp_tops = {}
 
-    for m in layout["modules"]:
-        if m["type"] != "ramp":
+    for (col, row), stack in at.items():
+        base, m = surface(stack)
+        if m is None or m["type"] != "ramp":
             continue
 
         dx, dy = (round(v) for v in uphill(m["rotation"]))
-        low = (m["col"] - dx, m["row"] - dy)
-        high = (m["col"] + dx, m["row"] + dy)
+        low = (col - dx, row - dy)
+        high = (col + dx, row + dy)
+        low_height, low_top = surface(at.get(low))
 
         if not (0 <= low[0] < size and 0 <= low[1] < size):
             problems.append(dict(m, message="its low end is at the edge of "
                                  "the arena, so it cannot be driven onto"))
-        elif low in at and blocks(at[low], dx, dy):
+        elif low_height > base + 1e-3:
+            under = [p for p in at[low] if p["type"] in PLATFORMS][-1]
             problems.append(dict(m, message=f"its low end runs into a "
-                                 f"{PARTS[at[low]['type']].label}"))
+                                 f"{PARTS[under['type']].label}"))
+        elif low_height < base - 1e-3:
+            problems.append(dict(m, message=f"its low end is "
+                                 f"{inches(base - low_height)} above the "
+                                 f"ground in front of it"))
+        elif low_top is not None and blocks(low_top, dx, dy):
+            problems.append(dict(m, message=f"its low end runs into a "
+                                 f"{PARTS[low_top['type']].label}"))
 
-        above = at.get(high, {}).get("type")
-        if above == "platform_2":
-            problems.append(dict(m, message='its high end meets a 2" '
-                                 "platform, an inch above the top of the "
-                                 "ramp"))
-        elif above != "platform":
+        high_height, high_top = surface(at.get(high))
+        platforms = [p for p in at.get(high, ()) if p["type"] in PLATFORMS]
+
+        if same_height(high_height, base + rise) and platforms:
+            ramp_tops[high] = high_height
+        elif high_height > base + rise and platforms:
+            problems.append(dict(m, message=f"its high end meets a "
+                                 f"{PARTS[platforms[-1]['type']].label}, "
+                                 f"{inches(high_height - base - rise)} above "
+                                 f"the top of the ramp"))
+        else:
             problems.append(dict(m, message="its high end leads to no "
                                  "platform"))
 
@@ -457,22 +552,66 @@ def check(layout, ground=None):
     if floor is None:
         return problems
 
-    # 2" platforms are obstacles, since no ramp is high enough for them.
-    for m in layout["modules"]:
-        if m["type"] != "platform":
+    # The tops robots are meant to get onto: 1 inch platforms, and any
+    # other height a ramp leads to. The rest, like a 2 inch platform no
+    # ramp reaches, are obstacles.
+    for region in platform_regions(at):
+        height = region[0][1]
+        if not (same_height(height, part_height("platform"))
+                or any(square in ramp_tops for square, _ in region)):
             continue
 
-        x, y = centre(layout, m["col"], m["row"])
-        cells = module_cells(ground, x, y)
+        for (col, row), _ in region:
+            m = [p for p in at[(col, row)] if p["type"] in PLATFORMS][-1]
+            x, y = centre(layout, col, row)
+            cells = module_cells(ground, x, y)
 
-        if not cells:
-            problems.append(dict(m, message="too narrow for a robot to "
-                                 "drive on, so it is only an obstacle"))
-        elif not any(floor[c] for c in cells):
-            problems.append(dict(m, message="no robot can get onto this "
-                                 "platform from the floor"))
+            if not cells:
+                problems.append(dict(m, message="too narrow for a robot to "
+                                     "drive on, so it is only an obstacle"))
+            elif not any(floor[c] for c in cells):
+                problems.append(dict(m, message="no robot can get onto this "
+                                     "platform from the floor"))
 
     return problems
+
+
+def platform_regions(at):
+    """Squares whose top is a platform, in side by side groups of the same
+    height, as lists of ((col, row), height)."""
+    tops = {}
+
+    for square, stack in at.items():
+        height, m = surface(stack)
+        has_platform = any(p["type"] in PLATFORMS for p in stack)
+        # A wall or thwomp stands on the edge, so the platform is still
+        # there to drive on.
+        if has_platform and (m is None or PARTS[m["type"]].mount == "side"):
+            tops[square] = height
+
+    regions, seen = [], set()
+
+    for square in sorted(tops):
+        if square in seen:
+            continue
+
+        region, todo = [], [square]
+        seen.add(square)
+
+        while todo:
+            col, row = todo.pop()
+            region.append(((col, row), tops[(col, row)]))
+
+            for near in ((col + 1, row), (col - 1, row), (col, row + 1),
+                         (col, row - 1)):
+                if (near in tops and near not in seen
+                        and same_height(tops[near], tops[square])):
+                    seen.add(near)
+                    todo.append(near)
+
+        regions.append(region)
+
+    return regions
 
 
 def module_cells(ground, x, y):

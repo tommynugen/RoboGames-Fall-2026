@@ -9,6 +9,9 @@
     ros2 launch robogame_sim sim.launch.py drive_model:=firmware gui:=false
     ros2 launch robogame_sim sim.launch.py layout:=my_setup
     ros2 launch robogame_sim sim.launch.py partition:=second
+    ros2 launch robogame_sim sim.launch.py fpv:=true controller:=joy
+    ros2 launch robogame_sim sim.launch.py robots:=1,2 chase:=1,2 \
+        controller:=hotplug drive:=2 fpv:=true
 
 layout names an arena layout made with arena_editor (or a path to one), and
 the world is built from it; cad uses the Onshape export as it is.
@@ -22,13 +25,25 @@ floor when its spot is on or wedged against a module.
 
 Each robot listens on /robot_N/cmd_vel and /robot_N/arm_command, the same
 topics microcontroller_node takes, so do not run the BLE bridge alongside.
+
+The controller drives robot drive, the first in robots unless set.
+controller:=hotplug gives it the first controller connected, and every
+controller connected after that a new robot of its own (controller_robots).
+That is for the sim only: the real arena binds controllers to robots by
+address.
+
+fpv:=true puts an FPV camera on the front of every robot's chassis. Click
+the Gazebo window's 3D view, then F switches it between the arena and the
+driven robot's camera, and a robot's number key looks through that robot's
+instead. See fpv_toggle.py.
 """
 
 import difflib
 import glob
-import math
 import os
+import re
 import subprocess
+import tempfile
 
 from ament_index_python.packages import (
     PackageNotFoundError,
@@ -50,37 +65,12 @@ from launch_ros.actions import Node
 from ros_gz_sim.actions import GzServer
 
 from robogame_sim import arena_layout
+from robogame_sim.fpv_toggle import OVERVIEW
 from robogame_sim.robot_sdf import robot_sdf
+from robogame_sim.spawning import bridge_topics, spawn_pose, spawn_spot
 from robogame_sim.terrain import Terrain
 
 WORLD_NAME = "robogame_arena"
-
-# Spawn spots on a circle, every robot facing the centre.
-SPAWN_RADIUS = 0.35
-SPAWN_HEIGHT = 0.025
-
-
-def spawn_pose(index, count):
-    angle = -3 * math.pi / 4 + 2 * math.pi * index / max(count, 1)
-
-    return (
-        SPAWN_RADIUS * math.cos(angle),
-        SPAWN_RADIUS * math.sin(angle),
-        angle + math.pi,
-    )
-
-
-def bridge_topics(robot):
-    return [
-        f"/{robot}/sim/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
-        f"/{robot}/shoulder_cmd@std_msgs/msg/Float64]gz.msgs.Double",
-        f"/{robot}/elbow_cmd@std_msgs/msg/Float64]gz.msgs.Double",
-        f"/{robot}/gripper_cmd@std_msgs/msg/Float64]gz.msgs.Double",
-        f"/model/{robot}/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry",
-        f"/{robot}/wheel_odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
-        f"/{robot}/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model",
-        f"/model/{robot}/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V",
-    ]
 
 
 def gui_command():
@@ -96,6 +86,63 @@ def gui_command():
         "gz-sim-gui-client")))
 
     return clients[-1:] or ["gz", "sim", "-g"]
+
+
+# Publishes the keys pressed in the 3D view for fpv_toggle. Its card only
+# says so, so it is shrunk out of the way like the other helpers.
+KEY_PUBLISHER = """
+<plugin filename="KeyPublisher" name="Key publisher">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="width" type="double">5</property>
+    <property key="height" type="double">5</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+  </gz-gui>
+</plugin>
+"""
+
+# The FPV view sits 2 cm under the arm, nearer than the default near clip.
+CAMERA_CLIP = "<camera_clip><near>0.005</near><far>50</far></camera_clip>"
+
+
+def default_gui_config():
+    # The one gz sim -g would load: the user's copy, else the installed one.
+    found = sorted(glob.glob(os.path.expanduser("~/.gz/sim/*/gui.config")))
+
+    try:
+        prefix = get_package_prefix("gz_sim_vendor")
+        found = found or sorted(glob.glob(os.path.join(
+            prefix, "opt", "gz_sim_vendor", "share", "gz", "gz-sim*",
+            "gui", "gui.config")))
+    except PackageNotFoundError:
+        pass
+
+    return found[-1] if found else None
+
+
+def fpv_gui_config():
+    """The default Gazebo GUI, starting over the arena and publishing keys
+    for fpv_toggle, or None if the default cannot be found."""
+    default = default_gui_config()
+    if default is None:
+        return None
+
+    with open(default) as config:
+        text = config.read()
+
+    overview = " ".join(f"{value:.4f}" for value in OVERVIEW)
+    text = re.sub(r"<camera_pose>[^<]*</camera_pose>",
+                  f"<camera_pose>{overview}</camera_pose>{CAMERA_CLIP}",
+                  text, count=1)
+    text += KEY_PUBLISHER
+
+    path = os.path.join(
+        tempfile.mkdtemp(prefix="robogame_sim_"), "gui.config")
+    with open(path, "w") as config:
+        config.write(text)
+
+    return path
 
 
 def package_exists(name):
@@ -122,7 +169,8 @@ def world_running(name, env):
 
 LAUNCH_ARGUMENTS = (
     "robots", "gui", "drive_model", "controller", "joy_device_id",
-    "motion_device", "autonomy", "chase", "layout", "partition",
+    "motion_device", "autonomy", "chase", "layout", "partition", "fpv",
+    "drive",
 )
 
 
@@ -157,6 +205,13 @@ def launch_setup(context):
         for part in LaunchConfiguration("chase").perform(context).split(",")
         if part.strip()
     ]
+    fpv = LaunchConfiguration("fpv").perform(context) == "true"
+    drive = LaunchConfiguration("drive").perform(context).strip()
+    driven = int(drive) if drive else robot_ids[0]
+
+    if driven not in robot_ids:
+        raise RuntimeError(
+            f"drive:={driven} is not one of robots:={robot_ids}")
 
     # A second gzserver with the same world name refuses to start, and
     # everything else in this launch then attaches to the sim already
@@ -213,9 +268,33 @@ def launch_setup(context):
         # Before the server, so it and everything after share it.
         actions.insert(0, SetEnvironmentVariable("GZ_PARTITION", partition))
 
+    gui_cmd = gui_command()
+
+    if fpv and gui:
+        config = fpv_gui_config()
+
+        if config is None:
+            raise RuntimeError(
+                "fpv:=true could not find Gazebo's default gui.config to add "
+                "the key publisher to")
+
+        gui_cmd += ["--gui-config", config]
+
     if gui:
         actions.append(ExecuteProcess(
-            cmd=gui_command(), name="gazebo_gui", output="screen"))
+            cmd=gui_cmd, name="gazebo_gui", output="screen"))
+
+    if fpv and gui:
+        # F in the Gazebo window toggles FPV, see fpv_toggle.py. The driven
+        # robot first, so F looks through the one being driven.
+        order = [driven] + [r for r in robot_ids if r != driven]
+        actions.append(Node(
+            package="robogame_sim",
+            executable="fpv_toggle",
+            output="screen",
+            arguments=["--robots", ",".join(str(r) for r in order),
+                       "--world", WORLD_NAME],
+        ))
 
     topics = ["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"]
     remaps = []
@@ -224,19 +303,14 @@ def launch_setup(context):
 
     for index, robot_id in enumerate(robot_ids):
         robot = f"robot_{robot_id}"
-        x, y, yaw = spawn_pose(index, len(robot_ids))
-        # Off any module and clear of it, so the robot can drive away.
-        moved = arena_layout.open_spot(ground, x, y, taken)
-        if moved != (x, y):
-            print(f"[sim.launch] {robot} spawns at {moved[0]:.2f}, "
-                  f"{moved[1]:.2f} instead of {x:.2f}, {y:.2f}, which has "
-                  f"no room to drive away")
-            x, y = moved
-            yaw = math.atan2(-y, -x)
+        asked_x, asked_y, yaw = spawn_pose(index, len(robot_ids))
+        x, y, z, yaw, moved = spawn_spot(ground, asked_x, asked_y, yaw,
+                                         taken)
+        if moved:
+            print(f"[sim.launch] {robot} spawns at {x:.2f}, {y:.2f} "
+                  f"instead of {asked_x:.2f}, {asked_y:.2f}, which has no "
+                  f"room to drive away")
         taken.append((x, y))
-        # Spawn on top of whatever is there, not inside it.
-        under = ground.height_at(x, y)
-        z = SPAWN_HEIGHT + (0.0 if math.isnan(under) else max(0.0, under))
 
         actions.append(Node(
             package="ros_gz_sim",
@@ -246,7 +320,7 @@ def launch_setup(context):
             arguments=[
                 "-world", WORLD_NAME,
                 "-name", robot,
-                "-string", robot_sdf(robot_id),
+                "-string", robot_sdf(robot_id, fpv=fpv),
                 "-x", f"{x:.3f}", "-y", f"{y:.3f}", "-z", f"{z:.3f}",
                 "-Y", f"{yaw:.3f}",
             ],
@@ -276,11 +350,10 @@ def launch_setup(context):
         ros_arguments=remaps,
     ))
 
-    first_robot = robot_ids[0]
     has_arena_perception = package_exists("arena_perception")
 
     if controller == "joy":
-        robot = f"robot_{first_robot}"
+        robot = f"robot_{driven}"
 
         actions.append(Node(
             package="joy",
@@ -300,9 +373,23 @@ def launch_setup(context):
             namespace=robot,
             output="screen",
             parameters=[{
-                "robot_id": first_robot,
+                "robot_id": driven,
                 "motion_device": LaunchConfiguration(
                     "motion_device").perform(context),
+            }],
+        ))
+    elif controller == "hotplug":
+        actions.append(Node(
+            package="robogame_sim",
+            executable="controller_robots",
+            output="screen",
+            parameters=[{
+                "first_robot": driven,
+                "robots": robot_ids,
+                "layout": layout_path,
+                "world": WORLD_NAME,
+                "drive_model": drive_model,
+                "fpv": fpv,
             }],
         ))
     elif controller == "classic":
@@ -317,14 +404,15 @@ def launch_setup(context):
                 get_package_share_directory("arena_perception"),
                 "launch", "controller.launch.py")),
             launch_arguments={
-                "robot_id": str(first_robot),
+                "robot_id": str(driven),
                 "joy_device_id": LaunchConfiguration(
                     "joy_device_id").perform(context),
             }.items(),
         ))
     elif controller != "none":
         raise RuntimeError(
-            f"controller must be none, joy or classic, not {controller}")
+            f"controller must be none, joy, hotplug or classic, not "
+            f"{controller}")
 
     if autonomy:
         if not has_arena_perception:
@@ -349,10 +437,11 @@ def launch_setup(context):
             raise RuntimeError(
                 f"chase robots {missing} are not in robots:={robot_ids}")
 
-        if controller != "none" and chase[0] == first_robot:
+        if controller != "none" and chase[0] == driven:
             raise RuntimeError(
-                f"robot {first_robot} cannot chase while the controller "
-                f"drives it, try chase:={chase[1]},{chase[0]}")
+                f"robot {driven} cannot chase while the controller "
+                f"drives it, try chase:={chase[1]},{chase[0]} or "
+                f"drive:={chase[1]}")
 
         actions.append(Node(
             package="robogame_sim",
@@ -384,10 +473,16 @@ def generate_launch_description():
                         "mixing and stall floor"),
         DeclareLaunchArgument(
             "controller", default_value="none",
-            description="joy drives the first robot with racing_teleop "
+            description="joy drives the drive robot with racing_teleop "
                         "(R2 throttle, L2 reverse, Options for wheel "
                         "steering), classic with the repo's "
-                        "controller_input"),
+                        "controller_input. hotplug gives it the first "
+                        "controller and spawns a robot for each one "
+                        "connected after, sim only"),
+        DeclareLaunchArgument(
+            "drive", default_value="",
+            description="Robot number the controller drives, the first in "
+                        "robots when empty"),
         DeclareLaunchArgument(
             "joy_device_id", default_value="0",
             description="Joystick index for controller:=joy"),
@@ -412,5 +507,10 @@ def generate_launch_description():
             description="Gazebo partition to run in, so a second sim can "
                         "run beside one already going; empty keeps "
                         "GZ_PARTITION as it is"),
+        DeclareLaunchArgument(
+            "fpv", default_value="false",
+            description="true mounts an FPV camera on the front of every "
+                        "robot. F in the Gazebo window toggles the view "
+                        "through it, number keys pick the robot"),
         OpaqueFunction(function=launch_setup),
     ])

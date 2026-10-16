@@ -13,8 +13,12 @@ Topics on the Gazebo side, for robot N:
     /model/robot_N/odometry  true pose, standing in for the arena camera
     /robot_N/wheel_odom      wheel odometry, which drifts as wheels slip
     /robot_N/joint_states    every joint
+
+With fpv=True the chassis carries an FPV camera's lens and sight, which
+fpv_toggle puts the Gazebo window's view on.
 """
 
+import math
 import sys
 
 CHASSIS = (0.08, 0.05, 0.03)
@@ -28,6 +32,11 @@ UPPER_ARM_LENGTH = 0.05
 FOREARM_LENGTH = 0.04
 FINGER_LENGTH = 0.025
 FINGER_GAP = 0.006
+
+# FPV camera on the chassis: x, y, z and pitch down. FPV_SIGHT is how far
+# out along its line of sight the point it looks at is.
+FPV_CAMERA = (CHASSIS[0] / 2 + 0.002, 0.0, -0.004, 0.05)
+FPV_SIGHT = 1.0
 
 # One colour per team, robot 0 is the instructor's.
 COLOURS = [
@@ -74,7 +83,7 @@ def material(rgb):
           </material>"""
 
 
-def box_link(name, pose, size, mass, rgb, offset="0 0 0 0 0 0"):
+def box_link(name, pose, size, mass, rgb, offset="0 0 0 0 0 0", extra=""):
     x, y, z = size
     geometry = f"<box><size>{x} {y} {z}</size></box>"
 
@@ -88,8 +97,41 @@ def box_link(name, pose, size, mass, rgb, offset="0 0 0 0 0 0"):
       <visual name="visual">
         <pose>{offset}</pose>
         <geometry>{geometry}</geometry>{material(rgb)}
-      </visual>
+      </visual>{extra}
     </link>"""
+
+
+def fpv_sight():
+    """Where the FPV view looks: FPV_SIGHT metres out along its line."""
+    x, y, z, pitch = FPV_CAMERA
+
+    return (x + FPV_SIGHT * math.cos(pitch), y,
+            z - FPV_SIGHT * math.sin(pitch))
+
+
+def fpv_camera():
+    # Low on the chassis's front face, so it looks where the robot drives
+    # and stays put when the arm moves. Higher up, just under the
+    # shoulder, the arm filled the top of the picture.
+    #
+    # fpv_toggle puts the Gazebo window's camera on the lens, looking at
+    # the sight. The GUI camera can only look at something in the scene,
+    # so the sight is a speck nobody sees, carried by the chassis.
+    x, y, z, _ = FPV_CAMERA
+    sx, sy, sz = fpv_sight()
+    lens = "<box><size>0.004 0.014 0.01</size></box>"
+
+    return f"""
+      <visual name="fpv_lens">
+        <pose>{x - 0.002} {y} {z} 0 0 0</pose>
+        <geometry>{lens}</geometry>{material((0.05, 0.05, 0.05))}
+      </visual>
+      <visual name="fpv_sight">
+        <pose>{sx:.4f} {sy:.4f} {sz:.4f} 0 0 0</pose>
+        <geometry><box><size>0.001 0.001 0.001</size></box></geometry>
+        <transparency>1</transparency>
+        <cast_shadows>false</cast_shadows>
+      </visual>"""
 
 
 def wheel_link(name, x, y, z):
@@ -163,7 +205,7 @@ def position_controller(robot, joint, topic):
     </plugin>"""
 
 
-def robot_sdf(robot_id):
+def robot_sdf(robot_id, fpv=False):
     robot = f"robot_{robot_id}"
     colour = COLOURS[robot_id % len(COLOURS)]
     arm_colour = (0.25, 0.25, 0.28)
@@ -173,7 +215,8 @@ def robot_sdf(robot_id):
     wrist_x = elbow_x + FOREARM_LENGTH
 
     links = [
-        box_link("chassis", "0 0 0 0 0 0", CHASSIS, 0.5, colour),
+        box_link("chassis", "0 0 0 0 0 0", CHASSIS, 0.5, colour,
+                 extra=fpv_camera() if fpv else ""),
         wheel_link("left_front_wheel", WHEEL_X, WHEEL_Y, 0),
         wheel_link("left_rear_wheel", -WHEEL_X, WHEEL_Y, 0),
         wheel_link("right_front_wheel", WHEEL_X, -WHEEL_Y, 0),

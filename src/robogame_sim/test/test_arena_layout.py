@@ -349,3 +349,102 @@ def test_default_layout_spawns_clear_of_the_platform_corners():
         assert floor[cell] and ground.clearance[cell] >= 0.08
         assert not ground.axis[cell].any(), "on or by a ramp"
         assert math.dist((x, y), spot) < 0.15
+
+
+def on(module, level):
+    return dict(module, level=level)
+
+
+# A 1" platform reached by ramps from the floor, with ramps on it up to a
+# 2" platform. Banks of three ramps, as the planner cannot line up with
+# two.
+TWO_STOREYS = (
+    [ramp(c, 2, 0) for c in (2, 3, 4)]
+    + [platform(c, r) for c in range(2, 9) for r in range(3, 7)]
+    + [on(ramp(c, 6, 0), 1) for c in (4, 5, 6)]
+    + [platform(c, r, "platform_2") for c in range(3, 8)
+       for r in (7, 8, 9)])
+
+
+def test_stacked_modules_need_a_platform_under_them():
+    for bad in ({"modules": [on(platform(1, 1), 1)]},
+                {"modules": [ramp(1, 1, 0), on(platform(1, 1), 1)]},
+                {"modules": [side("wall", 1, 1, 0), on(ramp(1, 1, 0), 1)]},
+                {"modules": [platform(1, 1), on(ramp(1, 1, 0), 2)]},
+                {"modules": [platform(1, 1), platform(1, 1)]},
+                {"modules": [on(platform(1, 1), -1)]}):
+        with pytest.raises(ValueError):
+            al.normalise(bad)
+
+    layout = al.normalise({"modules": [
+        on(side("thwomp", 1, 1, 90), 2), platform(1, 1, "platform_2"),
+        on(platform(1, 1), 1), platform(2, 1)]})
+    # Bottom first, and level left out on the floor.
+    assert layout["modules"] == [
+        platform(1, 1, "platform_2"), on(platform(1, 1), 1),
+        on(side("thwomp", 1, 1, 90), 2), platform(2, 1)]
+
+
+def test_stacked_modules_stand_on_the_platforms_under_them():
+    layout = {"size": 12, "modules": [
+        platform(2, 2), on(platform(2, 2), 1),
+        platform(5, 5, "platform_2"), on(ramp(5, 5, 0), 1),
+        platform(8, 8), on(side("wall", 8, 8, 0), 1)]}
+    ground = al.terrain(layout)
+    inch = 0.0254
+
+    assert ground.height_at(*al.centre(layout, 2, 2)) == \
+        pytest.approx(2 * inch, abs=1e-3)
+
+    x, y = al.centre(layout, 5, 5)
+    assert ground.height_at(x, y - 0.04) == pytest.approx(2 * inch,
+                                                           abs=2e-3)
+    assert ground.height_at(x, y + 0.04) == pytest.approx(3 * inch,
+                                                           abs=2e-3)
+
+    x, y = al.centre(layout, 8, 8)
+    assert ground.height_at(x, y + al.PEG_LINE) == \
+        pytest.approx(3 * inch, abs=1e-3)
+    assert ground.height_at(x, y - 0.03) == pytest.approx(inch, abs=1e-3)
+
+    text = al.world_sdf(layout, WORLD)
+    assert 'collision name="platform_2_2_1"' in text
+    assert 'collision name="ramp_5_5_1"' in text
+
+
+def test_ramp_on_a_platform_leads_up_to_a_higher_one():
+    layout = {"size": 12, "modules": list(TWO_STOREYS)}
+    assert al.check(layout) == []
+
+    # Without the ramps on top the 2" platform is an obstacle again.
+    lower = [m for m in TWO_STOREYS if m.get("level") != 1]
+    assert al.check({"size": 12, "modules": lower}) == []
+
+
+def test_checks_compare_heights_across_levels():
+    layout = {"size": 12, "modules": [
+        # On a 1" platform, its low end over the edge of it.
+        platform(2, 2), platform(3, 2), on(ramp(2, 2, 0), 1),
+        on(ramp(3, 2, 0), 1), platform(2, 3), platform(3, 3),
+        # From the floor into a stack two platforms high.
+        ramp(8, 2, 0), platform(8, 3), on(platform(8, 3), 1)]}
+    found = {}
+    for p in al.check(layout):
+        found.setdefault((p["col"], p["row"]), []).append(p["message"])
+
+    assert any("an inch above the ground" in m for m in found[(2, 2)])
+    assert any("an inch above the top of the ramp" in m
+               for m in found[(8, 2)])
+
+
+def test_chase_climbs_onto_a_second_storey():
+    from test_terrain import assert_never_climbs_an_edge, drive
+
+    layout = {"size": 12, "modules": list(TWO_STOREYS)}
+    ground = al.terrain(layout)
+    # Deep enough onto the 2" platform that the hunter does not stop short
+    # on the ramp up to it.
+    target = al.centre(layout, 5, 9)
+    trail = drive(ground, 0.3, -0.45, math.pi, *target, steps=1500)
+    assert_never_climbs_an_edge(ground, trail)
+    assert ground.height_at(*trail[-1]) == pytest.approx(0.0508, abs=3e-3)

@@ -146,6 +146,10 @@
     border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
   }
   .tool svg { width: 30px; height: 30px; }
+  #stack[aria-pressed=true] {
+    border-color: var(--accent); background: var(--accent);
+    color: var(--accent-ink);
+  }
   .tool kbd { color: var(--muted); }
   kbd {
     font: 11px ui-monospace, monospace; border: 1px solid var(--line);
@@ -217,6 +221,9 @@ middle"></select>
           <div id="facing"></div>
           <button id="rotate" style="margin-top:4px">Rotate <kbd>R</kbd>
           </button>
+          <button id="stack" style="margin-top:4px" aria-pressed="false"
+                  title="Place on top of platforms instead of replacing
+them. Shift does the same while held">Stack <kbd>S</kbd></button>
         </div>
       </div>
       <ul class="help">
@@ -225,7 +232,10 @@ middle"></select>
           quarter turn; <kbd>R</kbd> turns the one under the pointer.</li>
         <li>Walls and the thwomp peg in on the side of the square they
           face, an inch from the middle.</li>
-        <li>Right-click to clear a square.</li>
+        <li>Shift-click, or turn on Stack, to put a module on top of a
+          platform: a ramp, wall, thwomp or another platform. The corner
+          shows how high the top platform is.</li>
+        <li>Right-click to take the top module off a square.</li>
       </ul>
     </div>
 
@@ -238,8 +248,21 @@ middle"></select>
     <div class="panel">
       <h2>Run it</h2>
       <pre id="command"></pre>
-      <div class="row"><button id="copy">Copy</button></div>
+      <div class="row"><button id="copy" data-from="command">Copy</button>
+      </div>
       <p class="note" id="folder"></p>
+    </div>
+
+    <div class="panel">
+      <h2>Test it</h2>
+      <pre id="test-command"></pre>
+      <div class="row"><button id="copy-test" data-from="test-command">Copy
+      </button></div>
+      <p class="note">Sim only. Robot 1 chases robot 2, which the first
+        controller drives, and every controller connected after it gets a
+        robot of its own. <kbd>F</kbd> in the Gazebo window toggles FPV,
+        number keys pick the robot. Run it is left as the real arena runs,
+        where controllers are bound to robots by address.</p>
     </div>
   </aside>
 </main>
@@ -256,9 +279,11 @@ const FACING = { 0: "+y", 90: "-x", 180: "-y", 270: "+x" };
 let info = {
   module: 0.1016, size: 12, peg_line: 0.0254,
   types: {
-    platform: { label: '1" platform', turns: false, mount: "square" },
-    platform_2: { label: '2" platform', turns: false, mount: "square" },
-    ramp: { label: "ramp", turns: true, mount: "square" },
+    platform: { label: '1" platform', turns: false, mount: "square",
+                height: 0.0254 },
+    platform_2: { label: '2" platform', turns: false, mount: "square",
+                  height: 0.0508 },
+    ramp: { label: "ramp", turns: true, mount: "square", height: 0.0254 },
     wall: { label: "wall", turns: true, mount: "side", depth: 0.0254,
             height: 0.0508 },
     thwomp: { label: "thwomp", turns: true, mount: "side", depth: 0.0254,
@@ -272,7 +297,8 @@ const TOOLS = [
 ];
 
 let size = info.size;
-let modules = new Map();          // "col,row" -> {type, col, row, rotation}
+// "col,row" -> the square's stack, bottom first: [{type, col, row, rotation}]
+let modules = new Map();
 let tool = "platform";
 let newRotation = 0;
 let hover = null;
@@ -282,6 +308,8 @@ let history = [];
 let savedSnapshot = "";
 let painting = false;
 let paintedThisStroke = new Set();
+let stacking = false;
+let shiftHeld = false;
 
 const board = document.getElementById("board");
 const statusEl = document.getElementById("status");
@@ -293,20 +321,46 @@ const key = (c, r) => `${c},${r}`;
 const snapshot = () => JSON.stringify(layout());
 const turns = type => !!(info.types[type] && info.types[type].turns);
 const label = type => (info.types[type] || { label: type }).label;
+const isPlatform = type => type === "platform" || type === "platform_2";
+const topOf = stack => stack && stack[stack.length - 1];
+const allModules = () => [...modules.values()].flat();
+
+// Inches the platforms of a stack come to, which is where a robot drives
+// or the module on top stands.
+function platformInches(stack) {
+  let height = 0;
+  for (const m of stack) {
+    if (!isPlatform(m.type)) break;
+    height += info.types[m.type].height || 0;
+  }
+  return Math.round(height / 0.0254);
+}
 
 function layout() {
-  const list = [...modules.values()].map(m => turns(m.type)
-    ? { type: m.type, col: m.col, row: m.row, rotation: m.rotation }
-    : { type: m.type, col: m.col, row: m.row });
-  list.sort((a, b) => a.row - b.row || a.col - b.col);
+  const list = [];
+  for (const stack of modules.values()) {
+    stack.forEach((m, level) => {
+      const entry = { type: m.type, col: m.col, row: m.row };
+      if (level) entry.level = level;
+      if (turns(m.type)) entry.rotation = m.rotation;
+      list.push(entry);
+    });
+  }
+  list.sort((a, b) => a.row - b.row || a.col - b.col ||
+                      (a.level || 0) - (b.level || 0));
   return { size, modules: list };
 }
 
 function setLayout(data) {
   size = data.size || info.size;
   modules = new Map();
-  for (const m of data.modules || []) {
-    modules.set(key(m.col, m.row), { rotation: 0, ...m });
+  const sorted = [...(data.modules || [])].sort(
+    (a, b) => (a.level || 0) - (b.level || 0));
+  for (const m of sorted) {
+    const k = key(m.col, m.row);
+    if (!modules.has(k)) modules.set(k, []);
+    const { level, ...rest } = m;
+    modules.get(k).push({ rotation: 0, ...rest });
   }
 }
 
@@ -430,6 +484,32 @@ function drawPegs(parent, x, y, s) {
   }
 }
 
+// A square's modules bottom first. Each platform above the first is drawn
+// a little inside the one under it, like a tier.
+function drawStack(parent, stack, x, y, s, prefix) {
+  let inset = 0;
+  stack.forEach((m, level) => {
+    if (level && isPlatform(m.type)) inset = Math.min(inset + s * 0.08,
+                                                       s * 0.24);
+    const i = isPlatform(m.type) ? inset : 0;
+    drawModule(parent, m.type, x + i, y + i, s - 2 * i, m.rotation, prefix);
+  });
+  if (stack.length > 1) drawBadge(parent, x, y, s, platformInches(stack));
+}
+
+// How high a stack's top platform is, in the square's corner.
+function drawBadge(parent, x, y, s, inches) {
+  const w = s * 0.34, h = s * 0.26;
+  el("rect", { x: x + s - w - 2, y: y + 2, width: w, height: h, rx: h / 2,
+               fill: "var(--panel)", stroke: "var(--ink)",
+               "stroke-width": 1, opacity: 0.92 }, parent);
+  const t = el("text", { x: x + s - w / 2 - 2, y: y + 2 + h / 2,
+                         "font-size": h * 0.72, "font-weight": 700,
+                         fill: "var(--ink)", "text-anchor": "middle",
+                         "dominant-baseline": "central" }, parent);
+  t.textContent = `${inches}"`;
+}
+
 function drawModule(parent, type, x, y, s, rotation, prefix, opacity = 1) {
   if (type === "platform") drawPlatform(parent, x, y, s, opacity);
   else if (type === "platform_2") drawPlatform2(parent, x, y, s, opacity);
@@ -465,13 +545,16 @@ function render() {
       el("rect", { x, y, width: CELL, height: CELL, fill: "var(--floor)",
                    stroke: "var(--floor-line)", "stroke-width": 1 }, g);
 
-      const m = modules.get(k);
-      if (!m || info.types[m.type].mount === "side") drawPegs(g, x, y, CELL);
-      if (m) drawModule(g, m.type, x, y, CELL, m.rotation, "board");
+      const stack = modules.get(k) || [];
+      const m = topOf(stack);
+      if (!stack.some(p => isPlatform(p.type))) drawPegs(g, x, y, CELL);
+      drawStack(g, stack, x, y, CELL, "board");
 
       if (hover && hover.col === col && hover.row === row && !painting) {
-        if (tool !== "erase" && !(m && m.type === tool)) {
-          drawModule(g, tool, x, y, CELL, newRotation, "board", 0.5);
+        if (tool !== "erase" && !(m && m.type === tool && !stacksOn(m))) {
+          const i = stacksOn(m) && isPlatform(tool) ? CELL * 0.08 : 0;
+          drawModule(g, tool, x + i, y + i, CELL - 2 * i, newRotation,
+                     "board", 0.5);
         }
         el("rect", { x: x + 1.5, y: y + 1.5, width: CELL - 3,
                      height: CELL - 3, fill: "none",
@@ -487,8 +570,12 @@ function render() {
                      "stroke-dasharray": strong ? "" : "6 4" }, g);
       }
 
-      const tip = [m ? `${label(m.type)} at ${col}, ${row}`
+      const tip = [m ? `${stack.map(p => label(p.type)).join(" + ")} at ` +
+                       `${col}, ${row}`
                      : `Floor at ${col}, ${row}`, ...(bad.get(k) || [])];
+      if (stack.length > 1) {
+        tip.splice(1, 0, `Top platform ${platformInches(stack)} inches up`);
+      }
       el("title", {}, g).textContent = tip.join("\n");
     }
   }
@@ -537,6 +624,8 @@ function drawPanel() {
 
   const facing = document.getElementById("facing");
   const way = FACING[newRotation];
+  document.getElementById("stack").setAttribute("aria-pressed",
+                                                stacking || shiftHeld);
   if (tool === "ramp") facing.innerHTML = `New ramps rise toward <b>${way}</b>`;
   else if (turns(tool)) {
     facing.innerHTML = `New ${tool}s stand on the <b>${way}</b> side`;
@@ -550,7 +639,9 @@ function drawPanel() {
     caption.className = "caption";
     caption.textContent = `Seen from above. Each square is one ` +
       `${(info.module * 100).toFixed(2)} cm (${inches} inch) module with ` +
-      `a floor tile under it, and its four peg holes. Arrows point uphill.`;
+      `a floor tile under it, and its four peg holes. Arrows point ` +
+      `uphill. On a stack, the corner says how many inches up its top ` +
+      `platform is.`;
   } else {
     caption.className = "caption warn";
     caption.textContent = `This layout is ${size} × ${size}, but the ` +
@@ -601,13 +692,31 @@ function cellFrom(event) {
   return { col: +g.dataset.col, row: +g.dataset.row };
 }
 
+// Whether the tool would go on top of m rather than replace it.
+function stacksOn(m) {
+  return !!m && (stacking || shiftHeld) && isPlatform(m.type);
+}
+
+// Places the tool on a square, or with erase takes its top module off.
+// Otherwise it works on the top of the stack: on a platform while
+// stacking it goes on top, on a module of its own kind it turns it, and
+// anything else it replaces.
 function apply(cell, erase, stroke) {
   const k = key(cell.col, cell.row);
-  const m = modules.get(k);
+  const stack = modules.get(k);
+  const m = topOf(stack);
+  const placed = { type: tool, col: cell.col, row: cell.row,
+                   rotation: newRotation };
 
   if (erase || tool === "erase") {
-    if (m) modules.delete(k);
-    return !!m;
+    if (!m) return false;
+    stack.pop();
+    if (!stack.length) modules.delete(k);
+    return true;
+  }
+  if (stacksOn(m)) {
+    stack.push(placed);
+    return true;
   }
   // A click on a module of the tool's kind turns it, if it turns.
   if (m && m.type === tool) {
@@ -616,8 +725,8 @@ function apply(cell, erase, stroke) {
     newRotation = m.rotation;
     return true;
   }
-  modules.set(k, { type: tool, col: cell.col, row: cell.row,
-                   rotation: newRotation });
+  if (m) stack[stack.length - 1] = placed;
+  else modules.set(k, [placed]);
   return true;
 }
 
@@ -671,7 +780,7 @@ function setTool(name) {
 }
 
 function rotate() {
-  const m = hover && modules.get(key(hover.col, hover.row));
+  const m = hover && topOf(modules.get(key(hover.col, hover.row)));
   if (m && turns(m.type)) {
     remember();
     m.rotation = (m.rotation + 90) % 360;
@@ -685,16 +794,23 @@ function rotate() {
 
 document.getElementById("rotate").addEventListener("click", rotate);
 
+function toggleStacking() {
+  stacking = !stacking;
+  render();
+}
+
+document.getElementById("stack").addEventListener("click", toggleStacking);
+
 // Grows or shrinks the grid about its middle, so modules stay where they
 // are on the table as far as whole squares allow.
 function resize(next) {
   if (next === size) return;
   const shift = Math.floor((next - size) / 2);
-  const moved = [...modules.values()].map(m => ({
-    ...m, col: m.col + shift, row: m.row + shift }));
-  const kept = moved.filter(m => m.col >= 0 && m.row >= 0 &&
-                                 m.col < next && m.row < next);
-  const lost = moved.length - kept.length;
+  const moved = [...modules.values()].map(stack => stack.map(m => ({
+    ...m, col: m.col + shift, row: m.row + shift })));
+  const kept = moved.filter(([m]) => m.col >= 0 && m.row >= 0 &&
+                                     m.col < next && m.row < next);
+  const lost = moved.flat().length - kept.flat().length;
   if (lost && !confirm(`${lost} module${lost === 1 ? " is" : "s are"} ` +
                        `off a ${next} × ${next} grid and will be removed. ` +
                        `Resize?`)) {
@@ -703,7 +819,8 @@ function resize(next) {
   }
   remember();
   size = next;
-  modules = new Map(kept.map(m => [key(m.col, m.row), m]));
+  modules = new Map(kept.map(stack => [key(stack[0].col, stack[0].row),
+                                       stack]));
   changed();
 }
 
@@ -740,7 +857,23 @@ document.addEventListener("keydown", event => {
   } else if (/^[1-9]$/.test(event.key) && TOOLS[+event.key - 1]) {
     setTool(TOOLS[+event.key - 1][0]);
   } else if (event.key.toLowerCase() === "r") rotate();
+  else if (event.key.toLowerCase() === "s" && !event.ctrlKey &&
+           !event.metaKey) toggleStacking();
 });
+
+// Shift stacks while it is held.
+for (const name of ["keydown", "keyup"]) {
+  document.addEventListener(name, event => {
+    if (event.shiftKey !== shiftHeld) {
+      shiftHeld = event.shiftKey;
+      render();
+    }
+  });
+}
+window.addEventListener("blur", () => { shiftHeld = false; render(); });
+board.addEventListener("pointerdown", event => {
+  shiftHeld = event.shiftKey;
+}, { capture: true });
 
 // -- server ----------------------------------------------------------------
 
@@ -797,7 +930,7 @@ function showProblems() {
     list.appendChild(li);
   }
   const counts = new Map();
-  for (const m of modules.values()) {
+  for (const m of allModules()) {
     counts.set(m.type, (counts.get(m.type) || 0) + 1);
   }
   const parts = TOOLS.filter(([type]) => counts.has(type)).map(([type]) => {
@@ -808,24 +941,31 @@ function showProblems() {
     parts.length ? `${parts.join(", ")}.` : "Nothing on the floor yet.";
 }
 
+// Run it is the sim as the real arena runs. Test it adds what only the sim
+// can do: a robot for every controller, and FPV.
 function updateCommand() {
   const name = nameEl.value.trim() || "default";
-  document.getElementById("command").textContent =
-    `ros2 launch robogame_sim sim.launch.py layout:=${name} ` +
-    `robots:=1,2 chase:=1,2`;
+  const run = `ros2 launch robogame_sim sim.launch.py layout:=${name} ` +
+              `robots:=1,2 chase:=1,2`;
+  document.getElementById("command").textContent = run;
+  document.getElementById("test-command").textContent =
+    `${run} controller:=hotplug drive:=2 fpv:=true`;
 }
 
 nameEl.addEventListener("input", updateCommand);
 
-document.getElementById("copy").addEventListener("click", async () => {
-  const text = document.getElementById("command").textContent;
-  try {
-    await navigator.clipboard.writeText(text);
-    updateStatus("Command copied", "saved");
-  } catch {
-    updateStatus("Select the command and copy it by hand", "dirty");
-  }
-});
+for (const id of ["copy", "copy-test"]) {
+  const button = document.getElementById(id);
+  button.addEventListener("click", async () => {
+    const text = document.getElementById(button.dataset.from).textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      updateStatus("Command copied", "saved");
+    } catch {
+      updateStatus("Select the command and copy it by hand", "dirty");
+    }
+  });
+}
 
 async function refreshSaved(selected) {
   const { layouts, folder } = await api("/api/layouts");

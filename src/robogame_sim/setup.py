@@ -34,6 +34,8 @@ setup(
             'racing_teleop = robogame_sim.racing_teleop:main',
             'chase_node = robogame_sim.chase_node:main',
             'arena_editor = robogame_sim.arena_editor:main',
+            'fpv_toggle = robogame_sim.fpv_toggle:main',
+            'controller_robots = robogame_sim.controller_robots:main',
         ],
     },
 )

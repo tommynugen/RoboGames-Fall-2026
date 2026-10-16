@@ -72,7 +72,22 @@ ros2 launch robogame_sim sim.launch.py                    # robot 1
 ros2 launch robogame_sim sim.launch.py robots:=0,1,2,3    # several robots
 ros2 launch robogame_sim sim.launch.py gui:=false         # no window
 ros2 launch robogame_sim sim.launch.py drive_model:=firmware
+ros2 launch robogame_sim sim.launch.py fpv:=true          # onboard camera
 ```
+
+`fpv:=true` puts an FPV camera low on the front of every robot's chassis,
+under the arm, so it does not move when the arm does. Click the Gazebo
+window's 3D view, then:
+
+| Key | |
+|---|---|
+| F | toggle between the arena and the driven robot's FPV |
+| 1 to 9 | look through that robot's FPV instead, robots spawned for a controller too |
+| Esc | leave FPV where the camera is, rather than going back over the arena |
+
+The Gazebo window's own camera is put on the robot (`fpv_toggle.py`), so
+nothing extra is rendered. Each F back to the arena logs an "Unable to
+follow target" error from Gazebo: that is how the camera is let go.
 
 Drive with a PS4 or PS5 controller, like a racing game:
 
@@ -96,6 +111,9 @@ and level, rolling 45 degrees is full lock, and tipping 20 degrees moves the
 shoulder. Both triggers are proportional, and as in a car, steering while
 reversing swings the back of the robot that way. With no throttle the
 stick spins the robot in place.
+
+The controller drives the first robot in `robots`, or the one `drive:=N`
+names.
 
 This is `racing_teleop` in this package, not the repo's `controller_input`,
 so a sync does not undo it. It reads `/robot_N/joy` from `joy_node` and the
@@ -153,6 +171,43 @@ ros2 launch robogame_sim sim.launch.py robots:=1,2 controller:=joy chase:=2,1
 The launch refuses a hunter that the controller is also driving, and any
 misspelt argument (`controler:=joy` would otherwise quietly start no
 controller).
+
+## A robot for every controller
+
+The editor's Test it command, for the sim only:
+
+```
+ros2 launch robogame_sim sim.launch.py layout:=NAME robots:=1,2 chase:=1,2 \
+    controller:=hotplug drive:=2 fpv:=true
+```
+
+Robot 1 chases robot 2, and the first controller connected drives robot 2.
+Every controller connected after it gets a robot of its own, numbered on
+from the highest there (3, 4, ...), spawned on open ground facing somewhere
+it can drive, with racing controls and wheel steering from that
+controller's own motion sensor. A controller that drops and comes back
+drives the same robot again; its robot waits where it stopped. F toggles
+FPV on robot 2, and 3 looks through robot 3's camera.
+
+`controller_robots` does this. It finds each controller by its Bluetooth
+address and reads its `/dev/input/jsN` itself, publishing `/robot_N/joy`
+as `joy_node` would: `joy_node` picks a controller by index or by name, and
+every DualSense has the same name.
+
+This is not in the editor's Run it command, which stays as the real arena
+runs. There `robot_control.launch.py` binds each controller to the robot
+`controllers.yaml` gives it, on the same `/robot_N/joy` and
+`/robot_N/cmd_vel` topics, and hotplug would bind them in the order they
+connect instead.
+
+Checked headless on 2026-10-16 on a layout with ramps stacked on a 1"
+platform up to a 2" one: a DualSense was bound to robot 2 with its motion
+sensor; a virtual gamepad made through `/dev/uinput` spawned robot 3, drove
+it about 2 m on R2, dropped, and drove robot 3 again on coming back; robot
+1 came down the ramps to robot 2 on the floor and stopped 0.25 m away, and
+after robot 2 was moved onto the 2" platform, climbed both levels (height
+0.071 m) and stopped 0.23 m from it. F and 3 put the view on robots 2 and
+3, and Ctrl-C stopped every process, robot 3's included.
 
 The hunter predicts where the target is going. From the target's poses it
 measures its speed and turn rate, assumes it keeps both, and so follows a
@@ -237,6 +292,10 @@ moved about between games:
 | Wall | `wall` | 1 x 4 inches, 2 high, pegged on one side of a square |
 | Thwomp | `thwomp` | 1 x 4 inches, 6 high, pegged like a wall; fixed in the sim |
 
+Any module can stand on a platform of either height, and platforms stack,
+so a ramp on a 1" platform climbs onto a 2" platform or onto two 1"
+platforms stacked.
+
 Map how they are set up on the table in the layout editor:
 
 ```
@@ -250,11 +309,16 @@ the right and +y up, each square drawn with its tile's four peg holes.
 Click a ramp, wall or thwomp with its own tool to turn it a quarter turn,
 or press R over it. A ramp's arrow points uphill; a wall or thwomp stands
 on the line of peg holes an inch from the middle, on the side it faces.
-Right-click or the Floor tool (6) clears a square, and Ctrl+Z undoes. As
+Shift-click, or turn on Stack (S), to put the tool on top of a platform
+instead of replacing it; a stacked square shows how many inches up its top
+platform is in its corner. A plain click works on the top of a stack.
+Right-click or the Floor tool (6) takes the top module off a square, and
+Ctrl+Z undoes. As
 you edit it checks the layout and outlines in red any ramp whose low end
-runs into the edge, a module or a wall facing it, any ramp that leads to
-no 1" platform, any 1" platform no robot can get onto from the floor, and
-any 1" platform too narrow to drive on. A robot needs about 5.3 cm
+runs into the edge, a module, a wall facing it or a drop, any ramp whose
+high end is not a platform exactly an inch above where it starts, and any
+platform robots are meant to reach (a 1" one, or one a ramp leads to) that
+no robot can get onto from the floor or that is too narrow to drive on. A robot needs about 5.3 cm
 clear of every edge, so platforms and ramps have to be at least two
 modules wide. Name the layout and Save, and it is written to
 `src/robogame_sim/layouts/NAME.json`, one module per line so it diffs
@@ -277,7 +341,9 @@ tokens onto it too, and hands the layout to `chase_node` so the planner
 and the sim agree. Walls and thwomps are obstacles to the planner like a
 platform's edge. `layout:=default` (the default) is a 4 x 4 platform in
 the middle with four ramps on its -y side. `layout:=cad` uses the Onshape
-export as it is, MAIN ASSEMBLY's modules where it puts them. `rotation`
+export as it is, MAIN ASSEMBLY's modules where it puts them. A module on a platform has
+`"level": 1` in the file (2 on top of that, and so on), and is left
+without one on the floor. `rotation`
 in the file is degrees anticlockwise from above: a ramp at 0 rises toward
 +y, 90 toward -x, 180 toward -y, 270 toward +x, and a wall or thwomp at
 those stands on the +y, -x, -y or +x side of its square.
@@ -285,13 +351,18 @@ those stands on the +y, -x, -y or +x side of its square.
 Robots spawn on a circle round the middle, and one whose spot is on a
 ramp or wedged against a module (closer than 8 cm, as at the corners of
 the default platform) is moved to the nearest open, level ground at the
-same height, and the launch prints where.
+same height, and the launch prints where. A robot that would face a module
+less than 25 cm away is turned to face open ground, as its arm, reaching
+15 cm past its centre, would pin it there.
 
 Only one sim can run at a time in a Gazebo partition, since they share the
 world's name. If one is already running the launch stops straight away and
 says so; before, the second one looked frozen, as its windows and nodes
 attached to the first. Stop the first, or add `partition:=NAME` to run the
-second beside it.
+second beside it. That separates the two in Gazebo only: both still use
+`/robot_N/...` in ROS, so the two would drive each other's robots. Give the
+second its own ROS domain as well, `ROS_DOMAIN_ID=42 ros2 launch ...`, and
+the same in any terminal that talks to it.
 
 After changing the modules in Onshape, run
 `scripts/export_onshape_arena.py` and rebuild. It exports every part of
