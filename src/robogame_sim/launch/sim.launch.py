@@ -24,10 +24,12 @@ from ament_index_python.packages import (
 )
 from launch import LaunchDescription
 from launch.actions import (
+    AppendEnvironmentVariable,
     DeclareLaunchArgument,
     ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
+    SetEnvironmentVariable,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -135,7 +137,16 @@ def launch_setup(context):
     # Through gz_sim.launch.py the ruby gz wrapper is stopped instead, and
     # the real server is left running, so the next launch finds the world
     # already taken.
-    actions = [GzServer(world_sdf_file=world, verbosity_level="1")]
+    actions = [
+        # gzserver ignores Ctrl-C and gets killed, which leaves Fast DDS
+        # shared memory ports locked. The next launch can then hang in
+        # rclcpp::Node waiting for one, so the sim talks over UDP only.
+        SetEnvironmentVariable("FASTDDS_BUILTIN_TRANSPORTS", "UDPv4"),
+        # The world includes the CAD arena as model://robogame_arena_cad.
+        AppendEnvironmentVariable(
+            "GZ_SIM_RESOURCE_PATH", os.path.join(share, "models")),
+        GzServer(world_sdf_file=world, verbosity_level="1"),
+    ]
 
     if gui:
         actions.append(ExecuteProcess(
