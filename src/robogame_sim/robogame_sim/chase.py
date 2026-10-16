@@ -31,6 +31,40 @@ WALL_MARGIN = 0.06
 
 KEEP_UP_FADE = 0.02
 
+# The raised part of the arena, from models/robogame_arena_cad: a platform
+# of 3 x 3 modules 0.127 m square and 0.0254 m high in the middle, and a
+# ramp of three modules along its -y side, rising toward +y. The wheels
+# cannot climb the platform's edge or the ramp's sides, so the ramp's low
+# end is the only way up.
+MODULE = 0.127
+PLATFORM_HALF = 1.5 * MODULE
+RAMP_TOP_Y = -PLATFORM_HALF
+RAMP_FOOT_Y = RAMP_TOP_Y - MODULE
+
+FLOOR, RAMP, PLATFORM = "floor", "ramp", "platform"
+
+# A robot on the floor cannot get its centre closer than this to the
+# raised block, so a path that does is going through it.
+BLOCK_MARGIN = 0.03
+BLOCK = (-PLATFORM_HALF - BLOCK_MARGIN, RAMP_FOOT_Y - BLOCK_MARGIN,
+         PLATFORM_HALF + BLOCK_MARGIN, PLATFORM_HALF + BLOCK_MARGIN)
+
+# Paths round the block go by its corners, far enough out for the chassis
+# to turn there without touching it.
+CORNER_MARGIN = 0.08
+CORNERS = [
+    (sx * (PLATFORM_HALF + CORNER_MARGIN), y)
+    for sx in (-1, 1)
+    for y in (RAMP_FOOT_Y - CORNER_MARGIN, PLATFORM_HALF + CORNER_MARGIN)]
+
+# Robots go up and down the ramp straight along it, with their centre in a
+# lane that keeps the wheels clear of its sides. They line up APPROACH
+# before the foot, and are clear of the ramp once at TOP on the platform.
+LANE_HALF = PLATFORM_HALF - FOOTPRINT_SIDE - 0.02
+APPROACH_Y = RAMP_FOOT_Y - 0.1
+TOP_Y = RAMP_TOP_Y + 0.06
+LINE_UP = 0.03
+
 
 def normalize_angle(angle):
     return math.atan2(math.sin(angle), math.cos(angle))
@@ -152,6 +186,172 @@ def standoff_distance(hunter_x, hunter_y, target_x, target_y, target_yaw,
         math.atan2(hunter_y - target_y, hunter_x - target_x) - target_yaw)
 
     return ARM_REACH + footprint_extent(bearing) + clearance
+
+
+def level(x, y):
+    """Which part of the arena a robot centred at x, y is on."""
+    if abs(x) > PLATFORM_HALF or not RAMP_FOOT_Y <= y <= PLATFORM_HALF:
+        return FLOOR
+
+    return RAMP if y < RAMP_TOP_Y else PLATFORM
+
+
+def in_block(x, y):
+    left, bottom, right, top = BLOCK
+    return left < x < right and bottom < y < top
+
+
+def crosses_block(ax, ay, bx, by):
+    """Whether the segment from a to b passes through the raised block."""
+    # Liang-Barsky: clip the segment to the box, and see if any is left.
+    left, bottom, right, top = BLOCK
+    dx, dy = bx - ax, by - ay
+    enter, leave = 0.0, 1.0
+
+    for p, q in ((-dx, ax - left), (dx, right - ax),
+                 (-dy, ay - bottom), (dy, top - ay)):
+        if abs(p) < 1e-12:
+            if q <= 0.0:
+                return False
+        elif p < 0.0:
+            enter = max(enter, q / p)
+        else:
+            leave = min(leave, q / p)
+
+    return leave - enter > 1e-9
+
+
+def floor_path(start_x, start_y, goal_x, goal_y):
+    """Shortest path over the floor from start to goal, going round the
+    raised block by its corners, as the points after start. None if the
+    goal cannot be reached, such as from inside the block."""
+    points = [(start_x, start_y), (goal_x, goal_y)] + CORNERS
+    distance = {0: 0.0}
+    previous = {}
+    unvisited = set(range(len(points)))
+
+    while unvisited:
+        here = min(unvisited, key=lambda i: distance.get(i, math.inf))
+
+        if here not in distance:
+            return None
+
+        if here == 1:
+            break
+
+        unvisited.remove(here)
+        hx, hy = points[here]
+
+        for there in unvisited:
+            tx, ty = points[there]
+
+            if crosses_block(hx, hy, tx, ty):
+                continue
+
+            length = distance[here] + math.hypot(tx - hx, ty - hy)
+
+            if length < distance.get(there, math.inf):
+                distance[there] = length
+                previous[there] = here
+
+    path = [points[1]]
+    index = 1
+
+    while previous.get(index, 0) != 0:
+        index = previous[index]
+        path.insert(0, points[index])
+
+    return path
+
+
+def path_length(start_x, start_y, path):
+    length = 0.0
+
+    for x, y in path:
+        length += math.hypot(x - start_x, y - start_y)
+        start_x, start_y = x, y
+
+    return length
+
+
+def route(hunter_x, hunter_y, aim_x, aim_y, target_x, target_y, standoff):
+    """Where the hunter should head when it cannot drive straight at the
+    aim point, as (x, y, distance left to drive). None when it can.
+
+    The level is taken from where the target is now, not the aim point.
+    A hunter on the floor goes round the raised block rather than into it,
+    and to reach a target up on the platform or ramp it lines up at the
+    foot of the ramp and drives straight up. Coming down for a target on
+    the floor it goes back down the ramp the same way.
+    """
+    hunter_level = level(hunter_x, hunter_y)
+    target_level = level(target_x, target_y)
+    lane_x = clamp(hunter_x, -LANE_HALF, LANE_HALF)
+    in_lane = (abs(hunter_x) <= LANE_HALF
+               and APPROACH_Y - LINE_UP <= hunter_y <= TOP_Y + LINE_UP)
+
+    def straight(x, y, then_x, then_y, stop_short=0.0):
+        left = (math.hypot(x - hunter_x, y - hunter_y)
+                + math.hypot(then_x - x, then_y - y) - stop_short)
+        return x, y, max(0.0, left)
+
+    if target_level != FLOOR:
+        if hunter_level == PLATFORM or target_level == hunter_level:
+            return None
+
+        if hunter_level == RAMP or in_lane:
+            return straight(lane_x, TOP_Y, target_x, target_y, standoff)
+
+        foot_x = clamp(target_x, -LANE_HALF, LANE_HALF)
+        path = floor_path(hunter_x, hunter_y, foot_x, APPROACH_Y)
+
+        if path is None:
+            return None
+
+        return path[0] + (path_length(hunter_x, hunter_y, path),)
+
+    if hunter_level != FLOOR or (in_lane and in_block(hunter_x, hunter_y)):
+        if hunter_level == RAMP or in_lane:
+            return straight(lane_x, APPROACH_Y, target_x, target_y)
+
+        return straight(lane_x, TOP_Y, lane_x, TOP_Y)
+
+    # A predicted point inside the block is not somewhere the target can
+    # get to on the floor, so go for where it is now instead.
+    if in_block(aim_x, aim_y):
+        aim_x, aim_y = target_x, target_y
+
+    if not crosses_block(hunter_x, hunter_y, aim_x, aim_y):
+        return None
+
+    path = floor_path(hunter_x, hunter_y, aim_x, aim_y)
+
+    if path is None:
+        return None
+
+    return path[0] + (
+        max(0.0, path_length(hunter_x, hunter_y, path) - standoff),)
+
+
+def follow_command(hunter_x, hunter_y, hunter_yaw, waypoint_x, waypoint_y,
+                   remaining, max_linear, max_angular, linear_gain,
+                   angular_gain, turn_in_place):
+    """Twist (linear, angular) toward a waypoint on a route, slowing as
+    remaining, the distance left to drive, runs out. Like chase_command it
+    curves in, and turns on the spot past turn_in_place radians."""
+    heading_error = normalize_angle(
+        math.atan2(waypoint_y - hunter_y, waypoint_x - hunter_x)
+        - hunter_yaw)
+
+    angular = clamp(angular_gain * heading_error, -max_angular, max_angular)
+
+    if abs(heading_error) > turn_in_place:
+        linear = 0.0
+    else:
+        linear = clamp(linear_gain * remaining * math.cos(heading_error),
+                       0.0, max_linear)
+
+    return linear, angular, heading_error
 
 
 def chase_command(hunter_x, hunter_y, hunter_yaw, aim_x, aim_y,

@@ -174,6 +174,25 @@ it ends up too close, it backs off. If either pose is older than 0.5 s, it
 stops. Speeds, gains and the prediction are parameters (see the top of
 `chase_node.py`).
 
+The hunter also knows the arena's raised block: the 0.381 m square
+platform in the middle, 2.5 cm high, and the ramp along its -y side, which
+is the only way on since the wheels cannot climb the edge. On the floor it
+goes round the block by its corners rather than into it, switching back
+to a straight run as soon as the target is in clear view. When the target
+is up on the platform or the ramp, it heads for a point 10 cm in front of
+the ramp's foot, turns to face up it, drives straight up, and chases as
+usual once on top. Chasing a target that has dropped back to the floor, it
+comes down the ramp the same way. The layout is in `chase.py`
+(`PLATFORM_HALF`, `RAMP_FOOT_Y` and so on), so change it there if the
+arena's modules move.
+
+Checked headless on 2026-10-16 with the CAD arena, robot 2 still on the
+platform at (0.05, 0.05): robot 1 from the floor behind the platform went
+round it, up the ramp (its height rising the platform's 2.5 cm) and
+stopped 0.23 m from robot 2 after 8 s; from the side, 10 s. With robot 2
+on the floor behind the platform, robot 1 came down the ramp and round to
+it.
+
 Checked headless on 2026-10-16, robot 2 steered round a 0.3 m orbit of the
 arena from the start, robot 1 hunting it from 0.7 m away. Gap is distance
 past the stopping distance, measured after the first 5 s:

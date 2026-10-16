@@ -1,10 +1,24 @@
 import math
 
 from robogame_sim.chase import (
+    APPROACH_Y,
     ARM_REACH,
+    CORNERS,
+    FLOOR,
+    LANE_HALF,
+    PLATFORM,
+    RAMP,
+    RAMP_TOP_Y,
+    TOP_Y,
     TargetTracker,
     chase_command,
+    crosses_block,
+    floor_path,
+    follow_command,
     footprint_extent,
+    in_block,
+    level,
+    route,
     standoff_distance,
 )
 
@@ -149,3 +163,123 @@ def test_standoff_allows_for_both_arms_head_on():
     from_behind = standoff_distance(-0.5, 0.0, 0.0, 0.0, 0.0, clearance=0.03)
     assert abs(head_on - (2 * ARM_REACH + 0.03)) < 1e-9
     assert abs(from_behind - (ARM_REACH + 0.04 + 0.03)) < 1e-9
+
+
+def drive_route(hx, hy, hyaw, tx, ty, steps=600, dt=0.05):
+    """Drives a hunter after a still target the way chase_node does, and
+    returns the hunter's centre at every step."""
+    tracker = TargetTracker()
+    tracker.update(tx, ty, 0.0)
+    trail = [(hx, hy)]
+
+    for _ in range(steps):
+        standoff = standoff_distance(hx, hy, tx, ty, 0.0, 0.03)
+        waypoint = route(hx, hy, tx, ty, tx, ty, standoff)
+
+        if waypoint is None:
+            linear, angular, _ = chase_command(
+                hx, hy, hyaw, tx, ty, math.hypot(tx - hx, ty - hy),
+                standoff, 0.3, 1.5, 1.2, 3.0, 1.0)
+        else:
+            linear, angular, _ = follow_command(
+                hx, hy, hyaw, *waypoint, 0.3, 1.5, 1.2, 3.0, 1.0)
+
+        hx += linear * dt * math.cos(hyaw)
+        hy += linear * dt * math.sin(hyaw)
+        hyaw += angular * dt
+        trail.append((hx, hy))
+
+    return trail
+
+
+def assert_no_climbing_the_edge(trail):
+    """The hunter only gets onto the raised block over the ramp's foot,
+    with its wheels inside the ramp."""
+    for (ax, ay), (bx, by) in zip(trail, trail[1:]):
+        if level(ax, ay) == FLOOR and level(bx, by) != FLOOR:
+            assert level(bx, by) == RAMP and abs(bx) <= LANE_HALF + 0.01
+        if level(ax, ay) == FLOOR:
+            assert not (in_block(bx, by) and abs(bx) > LANE_HALF + 0.01)
+
+
+def test_level_of_each_part_of_the_arena():
+    assert level(0.0, 0.0) == PLATFORM
+    assert level(0.0, -0.25) == RAMP
+    assert level(0.0, -0.35) == FLOOR
+    assert level(0.3, 0.0) == FLOOR
+    assert level(0.0, 0.25) == FLOOR
+
+
+def test_block_check_sees_a_line_through_the_platform():
+    assert crosses_block(-0.4, 0.0, 0.4, 0.0)
+    assert not crosses_block(-0.4, 0.3, 0.4, 0.3)
+    assert not crosses_block(-0.3, -0.4, -0.3, 0.4)
+
+
+def test_floor_path_goes_round_the_platform():
+    path = floor_path(-0.4, 0.0, 0.4, 0.0)
+    assert len(path) == 3 and path[-1] == (0.4, 0.0)
+    assert path[0] in CORNERS and path[1] in CORNERS
+
+
+def test_floor_target_in_view_is_chased_directly():
+    assert route(0.3, 0.3, 0.4, 0.0, 0.4, 0.0, 0.1) is None
+
+
+def test_floor_target_behind_the_platform_is_reached_round_it():
+    x, y, left = route(-0.4, 0.0, 0.4, 0.0, 0.4, 0.0, 0.1)
+    assert (x, y) in CORNERS and left > 0.8
+
+
+def test_platform_target_from_the_floor_goes_to_the_ramp():
+    # From the far side the first stop is a corner, not the platform.
+    x, y, _ = route(0.0, 0.4, 0.0, 0.0, 0.0, 0.0, 0.2)
+    assert (x, y) in CORNERS and y > 0
+    # From in front of the ramp it lines up at the foot.
+    x, y, _ = route(0.05, -0.5, 0.0, 0.0, 0.0, 0.0, 0.2)
+    assert (x, y) == (0.0, APPROACH_Y)
+
+
+def test_hunter_lined_up_at_the_foot_drives_straight_up():
+    x, y, left = route(0.05, APPROACH_Y, 0.0, 0.1, 0.0, 0.1, 0.2)
+    assert x == 0.05 and y > RAMP_TOP_Y and left > 0
+
+
+def test_hunter_on_the_platform_chases_directly():
+    assert route(0.1, 0.1, -0.1, -0.1, -0.1, -0.1, 0.2) is None
+
+
+def test_hunter_comes_down_the_ramp_for_a_floor_target():
+    x, y, _ = route(0.0, 0.1, 0.4, 0.4, 0.4, 0.4, 0.2)
+    assert (x, y) == (0.0, TOP_Y)
+    x, y, _ = route(0.0, -0.25, 0.4, 0.4, 0.4, 0.4, 0.2)
+    assert (x, y) == (0.0, APPROACH_Y)
+
+
+def test_follow_turns_on_the_spot_for_a_waypoint_behind():
+    linear, angular, _ = follow_command(
+        0, 0, 0, -0.3, 0.01, 0.5, 0.3, 1.5, 1.2, 3.0, 1.0)
+    assert linear == 0.0 and angular == 1.5
+
+
+def test_chase_from_behind_the_platform_climbs_the_ramp():
+    # Hunter on the floor north of the platform, target on top of it.
+    trail = drive_route(0.0, 0.42, -math.pi / 2, 0.05, 0.05)
+    assert_no_climbing_the_edge(trail)
+    hx, hy = trail[-1]
+    assert level(hx, hy) == PLATFORM
+    assert math.hypot(hx - 0.05, hy - 0.05) < 0.4
+
+
+def test_chase_from_the_side_climbs_the_ramp():
+    trail = drive_route(0.42, 0.0, math.pi, -0.1, 0.1)
+    assert_no_climbing_the_edge(trail)
+    assert level(*trail[-1]) == PLATFORM
+
+
+def test_chase_round_the_platform_on_the_floor():
+    trail = drive_route(-0.42, 0.0, 0.0, 0.42, 0.05)
+    assert_no_climbing_the_edge(trail)
+    assert all(level(x, y) == FLOOR for x, y in trail)
+    hx, hy = trail[-1]
+    assert math.hypot(hx - 0.42, hy - 0.05) < 0.35

@@ -8,8 +8,10 @@ camera's stand-in, and publishes /robot_<hunter>/cmd_vel. From the target's
 poses it works out its speed and turn rate, predicts its path, and heads
 for the earliest point on it the hunter can reach in time. The hunter stops
 with its fingertips clearance metres short of the target, allowing for
-both arms, keeps facing it, and follows when it moves. If either pose goes
-stale the hunter is stopped.
+both arms, keeps facing it, and follows when it moves. It drives round
+the raised platform in the middle of the arena rather than into it, and
+goes up the ramp, the only way on, when the target is up there. If either
+pose goes stale the hunter is stopped.
 """
 
 import math
@@ -24,6 +26,8 @@ from rclpy.time import Time
 from robogame_sim.chase import (
     TargetTracker,
     chase_command,
+    follow_command,
+    route,
     standoff_distance,
     yaw_from_quaternion,
 )
@@ -70,6 +74,7 @@ class ChaseNode(Node):
         self.hunter_stamp = None
         self.target = TargetTracker()
         self.engaged = False
+        self.routing = False
         self.was_tracking = False
 
         self.cmd_publisher = self.create_publisher(
@@ -128,11 +133,28 @@ class ChaseNode(Node):
             x, y, yaw, standoff, p["intercept_speed"],
             p["max_angular_speed"], p["prediction_horizon"])
 
-        linear, angular, _ = chase_command(
-            x, y, yaw, aim_x, aim_y, distance,
-            standoff, p["max_linear_speed"], p["max_angular_speed"],
-            p["linear_gain"], p["angular_gain"], p["turn_in_place"],
-            self.target.vx, self.target.vy)
+        waypoint = route(
+            x, y, aim_x, aim_y, self.target.x, self.target.y, standoff)
+
+        if waypoint is None:
+            linear, angular, _ = chase_command(
+                x, y, yaw, aim_x, aim_y, distance,
+                standoff, p["max_linear_speed"], p["max_angular_speed"],
+                p["linear_gain"], p["angular_gain"], p["turn_in_place"],
+                self.target.vx, self.target.vy)
+        else:
+            linear, angular, _ = follow_command(
+                x, y, yaw, *waypoint,
+                p["max_linear_speed"], p["max_angular_speed"],
+                p["linear_gain"], p["angular_gain"], p["turn_in_place"])
+
+        routing = waypoint is not None
+        if routing != self.routing:
+            self.routing = routing
+            self.get_logger().info(
+                f"heading for ({waypoint[0]:.2f}, {waypoint[1]:.2f}) on "
+                "the way to the target" if routing
+                else "clear run at the target")
 
         engaged = distance < standoff + 0.03
         if engaged != self.engaged:
