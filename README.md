@@ -174,24 +174,36 @@ it ends up too close, it backs off. If either pose is older than 0.5 s, it
 stops. Speeds, gains and the prediction are parameters (see the top of
 `chase_node.py`).
 
-The hunter also knows the arena's raised block: the 0.381 m square
-platform in the middle, 2.5 cm high, and the ramp along its -y side, which
-is the only way on since the wheels cannot climb the edge. On the floor it
-goes round the block by its corners rather than into it, switching back
-to a straight run as soon as the target is in clear view. When the target
-is up on the platform or the ramp, it heads for a point 10 cm in front of
-the ramp's foot, turns to face up it, drives straight up, and chases as
-usual once on top. Chasing a target that has dropped back to the floor, it
-comes down the ramp the same way. The layout is in `chase.py`
-(`PLATFORM_HALF`, `RAMP_FOOT_Y` and so on), so change it there if the
-arena's modules move.
+The hunter knows the arena's terrain and plans its way to the target
+(`terrain.py`). At start up it reads the collision geometry of the arena
+model, `models/robogame_arena_cad/model.sdf` (or the `arena_model`
+parameter), into a 2 cm height map. Wherever the height jumps between
+cells, at a platform's edge, a ramp's sides or the edge of the floor
+tiles, is a step the wheels cannot climb, and the hunter's centre is kept
+5.3 cm from it, enough to turn on the spot. On and within 7 cm of sloped
+ground it may only drive within 15 degrees of the slope, so it lines up
+before a ramp and goes straight up or down it. Nothing about the layout is
+written into the code, so re-exporting the CAD with platforms or ramps
+moved needs only a rebuild.
 
-Checked headless on 2026-10-16 with the CAD arena, robot 2 still on the
-platform at (0.05, 0.05): robot 1 from the floor behind the platform went
-round it, up the ramp (its height rising the platform's 2.5 cm) and
-stopped 0.23 m from robot 2 after 8 s; from the side, 10 s. With robot 2
-on the floor behind the platform, robot 1 came down the ramp and round to
-it.
+Every control step it checks whether it can drive straight at the target.
+If so it chases as above. If not, say the platform is in the way or the
+target is up on it, it plans the cheapest path over the height map with
+A*, pulls it straight, and drives it, slowing before sharp corners such as
+the turn at the foot of a ramp. So it goes round the near side of a
+platform to a target behind it, takes the ramp up to a target on top, and
+comes back down the ramp after a target that has left. It takes about
+15 ms a step.
+
+Checked headless on 2026-10-16 with the CAD arena, robot 2 still, robot 1
+placed by hand. Height is the true height of robot 1 from Gazebo:
+
+| Robot 1 from | Robot 2 at | What robot 1 did |
+| --- | --- | --- |
+| floor north of the platform | on the platform | round the east side, lined up in front of the ramp, up it (height +2.54 cm), stopped 0.23 m from robot 2 at 9 s |
+| floor east of the platform | on the platform | round the south east corner and up the ramp, stopped 0.22 m away at 6 s |
+| on the platform | floor north of it | down the ramp (height -2.53 cm), round the east side, stopped 0.23 m away at 10 s |
+| floor west of the platform | floor east of it | round the north side on the floor, stopped 0.24 m away at 6 s |
 
 Checked headless on 2026-10-16, robot 2 steered round a 0.3 m orbit of the
 arena from the start, robot 1 hunting it from 0.7 m away. Gap is distance
@@ -205,7 +217,8 @@ past the stopping distance, measured after the first 5 s:
 
 Before, the hunter sat behind the target and never caught it. A still
 target is still approached and held 1 cm outside the stopping distance. The
-maths is covered by `test/test_chase.py`.
+maths is covered by `test/test_chase.py`, the terrain and paths by
+`test/test_terrain.py`.
 
 ## Tests
 

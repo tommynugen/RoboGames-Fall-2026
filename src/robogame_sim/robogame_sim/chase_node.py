@@ -8,15 +8,22 @@ camera's stand-in, and publishes /robot_<hunter>/cmd_vel. From the target's
 poses it works out its speed and turn rate, predicts its path, and heads
 for the earliest point on it the hunter can reach in time. The hunter stops
 with its fingertips clearance metres short of the target, allowing for
-both arms, keeps facing it, and follows when it moves. It drives round
-the raised platform in the middle of the arena rather than into it, and
-goes up the ramp, the only way on, when the target is up there. If either
+both arms, keeps facing it, and follows when it moves.
+
+It knows the arena's terrain from the arena model (see terrain.py): when
+something is in the way it plans a path, so it goes round a platform
+rather than into it, and up a ramp to a target on top of one. If either
 pose goes stale the hunter is stopped.
 """
 
 import math
+import os
 
 import rclpy
+from ament_index_python.packages import (
+    PackageNotFoundError,
+    get_package_share_directory,
+)
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.executors import ExternalShutdownException
@@ -27,10 +34,19 @@ from robogame_sim.chase import (
     TargetTracker,
     chase_command,
     follow_command,
-    route,
     standoff_distance,
     yaw_from_quaternion,
 )
+from robogame_sim.terrain import Terrain, next_waypoint
+
+
+def default_arena_model():
+    try:
+        share = get_package_share_directory("robogame_sim")
+    except PackageNotFoundError:
+        return ""
+
+    return os.path.join(share, "models", "robogame_arena_cad", "model.sdf")
 
 
 class ChaseNode(Node):
@@ -56,6 +72,10 @@ class ChaseNode(Node):
             "intercept_speed": 0.25,
             "pose_timeout": 0.5,
             "rate": 20.0,
+            # The arena model whose collision geometry is the terrain. The
+            # model is taken to sit at the world origin, as the world
+            # includes it. Empty for the one installed with this package.
+            "arena_model": "",
         }
 
         for name, value in defaults.items():
@@ -74,8 +94,9 @@ class ChaseNode(Node):
         self.hunter_stamp = None
         self.target = TargetTracker()
         self.engaged = False
-        self.routing = False
+        self.routing = None
         self.was_tracking = False
+        self.terrain = self.load_terrain(p["arena_model"] or default_arena_model())
 
         self.cmd_publisher = self.create_publisher(
             Twist, f"/{hunter}/cmd_vel", 10)
@@ -86,6 +107,16 @@ class ChaseNode(Node):
         self.create_timer(1.0 / p["rate"], self.control_loop)
 
         self.get_logger().info(f"{hunter} chasing {target}")
+
+    def load_terrain(self, path):
+        if not path or not os.path.exists(path):
+            self.get_logger().warn(
+                f"no arena model at '{path}', chasing in a straight line")
+            return None
+
+        terrain = Terrain.from_sdf(path)
+        self.get_logger().info(f"terrain from {path}")
+        return terrain
 
     @staticmethod
     def stamp_seconds(message):
@@ -133,10 +164,12 @@ class ChaseNode(Node):
             x, y, yaw, standoff, p["intercept_speed"],
             p["max_angular_speed"], p["prediction_horizon"])
 
-        waypoint = route(
-            x, y, aim_x, aim_y, self.target.x, self.target.y, standoff)
+        path = None
+        if self.terrain is not None:
+            path = self.terrain.route(
+                x, y, aim_x, aim_y, self.target.x, self.target.y)
 
-        if waypoint is None:
+        if path is None or len(path) == 2:
             linear, angular, _ = chase_command(
                 x, y, yaw, aim_x, aim_y, distance,
                 standoff, p["max_linear_speed"], p["max_angular_speed"],
@@ -144,17 +177,21 @@ class ChaseNode(Node):
                 self.target.vx, self.target.vy)
         else:
             linear, angular, _ = follow_command(
-                x, y, yaw, *waypoint,
+                x, y, yaw, *next_waypoint(path, standoff),
                 p["max_linear_speed"], p["max_angular_speed"],
                 p["linear_gain"], p["angular_gain"], p["turn_in_place"])
 
-        routing = waypoint is not None
+        routing = ("no way through" if path is None and self.terrain
+                   else "clear run" if path is None or len(path) == 2
+                   else "path")
         if routing != self.routing:
             self.routing = routing
-            self.get_logger().info(
-                f"heading for ({waypoint[0]:.2f}, {waypoint[1]:.2f}) on "
-                "the way to the target" if routing
-                else "clear run at the target")
+            if routing == "path":
+                corners = ", ".join(
+                    f"({px:.2f}, {py:.2f})" for px, py in path[1:])
+                self.get_logger().info(f"path to the target via {corners}")
+            else:
+                self.get_logger().info(f"{routing} at the target")
 
         engaged = distance < standoff + 0.03
         if engaged != self.engaged:
