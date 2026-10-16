@@ -10,22 +10,26 @@ Each robot listens on /robot_N/cmd_vel and /robot_N/arm_command, the same
 topics microcontroller_node takes, so do not run the BLE bridge alongside.
 """
 
+import glob
 import math
 import os
 
 from ament_index_python.packages import (
     PackageNotFoundError,
+    get_package_prefix,
     get_package_share_directory,
 )
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
+    ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
 )
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from ros_gz_sim.actions import GzServer
 
 from robogame_sim.robot_sdf import robot_sdf
 
@@ -59,6 +63,21 @@ def bridge_topics(robot):
     ]
 
 
+def gui_command():
+    # gz sim -g starts the GUI client through sh, which Ctrl-C does not
+    # pass on to, so the window outlives the launch. Run the client itself.
+    try:
+        prefix = get_package_prefix("gz_sim_vendor")
+    except PackageNotFoundError:
+        return ["gz", "sim", "-g"]
+
+    clients = sorted(glob.glob(os.path.join(
+        prefix, "opt", "gz_sim_vendor", "libexec", "gz", "sim*",
+        "gz-sim-gui-client")))
+
+    return clients[-1:] or ["gz", "sim", "-g"]
+
+
 def package_exists(name):
     try:
         get_package_share_directory(name)
@@ -82,16 +101,15 @@ def launch_setup(context):
     share = get_package_share_directory("robogame_sim")
     world = os.path.join(share, "worlds", f"{WORLD_NAME}.sdf")
 
-    gz_args = f"-r {'' if gui else '-s '}{world}"
+    # GzServer runs the server inside a ROS process, so Ctrl-C stops it.
+    # Through gz_sim.launch.py the ruby gz wrapper is stopped instead, and
+    # the real server is left running, so the next launch finds the world
+    # already taken.
+    actions = [GzServer(world_sdf_file=world, verbosity_level="1")]
 
-    actions = [
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(
-                get_package_share_directory("ros_gz_sim"),
-                "launch", "gz_sim.launch.py")),
-            launch_arguments={"gz_args": gz_args}.items(),
-        ),
-    ]
+    if gui:
+        actions.append(ExecuteProcess(
+            cmd=gui_command(), name="gazebo_gui", output="screen"))
 
     topics = ["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"]
     remaps = []

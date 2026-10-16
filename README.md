@@ -46,8 +46,8 @@ and each arm command moves the shoulder or elbow 5 degrees, clamped to 0 to
 
 ## Setup
 
-ROS 2 Lyrical is installed here, not the Jazzy the repo targets. Gazebo
-comes with `ros_gz`:
+ROS 2 Lyrical is installed here, not the Jazzy the repo targets, so this
+runs Gazebo Jetty (gz-sim 10). Gazebo comes with `ros_gz`:
 
 ```
 sudo apt install ros-lyrical-ros-gz
@@ -111,6 +111,37 @@ These check the firmware maths against motors.cpp and arm.cpp, and that the
 robot model is valid XML. Print a robot's SDF with `ros2 run robogame_sim
 robot_sdf 2`, and check it with `gz sdf -k` once Gazebo is installed.
 
+## Checked in Gazebo
+
+Run headless on 2026-10-16:
+
+- Spawning one robot or four (`robots:=0,1,2,3`), each at its own spot.
+- Driving: 0.2 m/s for about 2.7 s covered 0.54 m, then the 750 ms
+  timeout stopped the robot.
+- Turning, true pose against command: a 1.5 rad/s spin for 2 s turned 183
+  degrees for 172 asked, and a 0.2 m/s, 0.5 rad/s arc for 3 s turned 87
+  for 86. A spin in place drifts about 5 cm. Wheel odometry stayed within
+  about 10 degrees of the truth.
+- Arm: `+++++` gave shoulder +25 degrees, `HHHH` elbow -20, `c` shut the
+  fingers and `o` opened them.
+- The repo's unchanged `autonomy_node` reached (0.2, 0.3) and then
+  (-0.3, -0.3), stopping within its 5 cm tolerance.
+- `drive_model:=firmware`: 0.1 m/s with 0.3 rad/s pivoted about 290 degrees
+  in a second.
+- The GUI opens, and Ctrl-C stops everything, server and window included.
+
+## Known issues
+
+- `parameter_bridge` segfaults (exit -11) as the launch shuts down. It
+  happens when the Gazebo server stops before the bridge, which also
+  happens running the bridge alone with no launch, so it is a bug in the
+  Lyrical `ros_gz_bridge` 3.0.10 rather than here. It only happens at exit
+  and does no harm.
+- If an older run was killed hard, a `gz-sim-main` or `gz-sim-gui-client`
+  can be left behind and the next launch reports "Another world of the
+  same name is running". Stop it with `pkill -x gz-sim-main` or
+  `pkill -f gz-sim-gui-client`.
+
 ## Differences from the repo's arena_sim
 
 - The world is the same arena, cleaned so it parses. The original has a
@@ -120,6 +151,9 @@ robot_sdf 2`, and check it with `gz sdf -k` once Gazebo is installed.
   number, each with its own colour and topics.
 - The model has the shoulder, elbow and gripper from the firmware in place
   of the single lifting arm.
+- Gazebo is started with `ros_gz_sim`'s `GzServer` action and the GUI
+  client directly. Going through `gz_sim.launch.py` stops only the `gz`
+  ruby wrapper on Ctrl-C, and leaves the real server running.
 - Wheel links stay square with the chassis and only the cylinder is turned,
   so the wheel axle is plainly the link's Y axis.
 
