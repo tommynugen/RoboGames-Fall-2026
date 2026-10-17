@@ -244,7 +244,7 @@ def launch_setup(context):
         ground = arena_layout.terrain(layout)
         world = arena_layout.write_world(layout, world, ground)
 
-        for problem in arena_layout.check(layout, ground):
+        for problem in arena_layout.check(layout):
             print(f"[sim.launch] layout {layout_name}: {problem['type']} at "
                   f"col {problem['col']}, row {problem['row']}: "
                   f"{problem['message']}")

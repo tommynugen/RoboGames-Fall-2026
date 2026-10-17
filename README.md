@@ -315,12 +315,17 @@ platform is in its corner. A plain click works on the top of a stack.
 Right-click or the Floor tool (6) takes the top module off a square, and
 Ctrl+Z undoes. As
 you edit it checks the layout and outlines in red any ramp whose low end
-runs into the edge, a module, a wall facing it or a drop, any ramp whose
-high end is not a platform exactly an inch above where it starts, and any
-platform robots are meant to reach (a 1" one, or one a ramp leads to) that
-no robot can get onto from the floor or that is too narrow to drive on. A robot needs about 5.3 cm
-clear of every edge, so platforms and ramps have to be at least two
-modules wide. Name the layout and Save, and it is written to
+runs into the edge, a module, a wall facing it, the side of a ramp or a
+drop, any ramp whose high end is not a platform (or the foot of another
+ramp) exactly an inch above where it starts, and any platform robots are
+meant to reach (a 1" one, or one a ramp leads to) that no robot can get
+onto from the floor. Ramps chain, so a ramp on a platform can carry on
+from the top of one on the floor, and a chain can turn on a one module
+landing. The checks go by which module edges meet at the same height;
+chase_node's planner is more cautious, keeping the robot about 5.3 cm
+clear of every edge, so it may not path over one module landings and
+ramps that a robot driven by hand gets over. Name the layout and Save,
+and it is written to
 `src/robogame_sim/layouts/NAME.json`, one module per line so it diffs
 well. `http://localhost:8766/#NAME` opens a saved one directly.
 

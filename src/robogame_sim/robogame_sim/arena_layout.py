@@ -476,15 +476,62 @@ def write_world(layout, base_world, ground=None):
 
 # -- checks ----------------------------------------------------------------
 
-def blocks(module, dx, dy):
-    """Whether a module on the square below a ramp's low end, the ramp
-    rising along dx, dy, is in the way of driving onto it."""
-    if PARTS[module["type"]].mount != "side":
-        return True
+def facing(module):
+    """The side, as (dx, dy), a ramp rises toward or a wall or thwomp
+    stands on."""
+    dx, dy = uphill(module["rotation"])
+    return round(dx), round(dy)
 
-    # Only a wall or thwomp on the side next to the ramp.
-    sx, sy = (round(v) for v in uphill(module["rotation"]))
-    return (sx, sy) == (dx, dy)
+
+def label(module):
+    return PARTS[module["type"]].label
+
+
+def in_the_way(module):
+    return ("the side of a ramp" if module["type"] == "ramp"
+            else f"a {label(module)}")
+
+
+def edge(at, square, side):
+    """What a robot meets crossing the side (dx, dy) of a square, as
+    (height, blocker). height is that of the square's top along the side,
+    None where it cannot be crossed: along the slope of a ramp, or behind a
+    wall or thwomp standing on that side, which is then the blocker."""
+    base, top = surface(at.get(square))
+
+    if top is None:
+        return base, None
+
+    if top["type"] == "ramp":
+        dx, dy = facing(top)
+        if side == (dx, dy):
+            return base + part_height("ramp"), None
+        if side == (-dx, -dy):
+            return base, None
+        return None, top
+
+    # A wall or thwomp only closes the side it stands on.
+    if facing(top) == side:
+        return None, top
+
+    return base, None
+
+
+def crossable(at, a, b):
+    """Whether a robot can drive between side by side squares a and b."""
+    side = (b[0] - a[0], b[1] - a[1])
+    height_a, blocker_a = edge(at, a, side)
+    height_b, blocker_b = edge(at, b, (-side[0], -side[1]))
+
+    if height_a is not None and height_b is not None:
+        return same_height(height_a, height_b)
+
+    # Ramps side by side, rising the same way from the same height, are one
+    # wider ramp.
+    return (blocker_a is not None and blocker_b is not None
+            and blocker_a["type"] == blocker_b["type"] == "ramp"
+            and blocker_a["rotation"] == blocker_b["rotation"]
+            and same_height(surface(at[a])[0], surface(at[b])[0]))
 
 
 def inches(height):
@@ -496,61 +543,81 @@ def same_height(a, b):
     return abs(a - b) < 1e-3
 
 
-def check(layout, ground=None):
+def check(layout):
     """Problems with a layout that a robot would run into, as dicts with
-    type, col, row and message."""
+    type, col, row and message.
+
+    They are worked out module by module, from the height of each square's
+    top along its sides, not from chase_node's terrain: that keeps the
+    robot's centre clear enough of every edge to turn on the spot, so it
+    finds the one module landings a chain of ramps turns on too narrow,
+    though a robot drives over them."""
     layout = normalise(layout)
     size = layout["size"]
     at = stacks(layout)
     rise = part_height("ramp")
     problems = []
-    # Squares ramps lead onto, by the height they lead to.
-    ramp_tops = {}
+    # Level squares ramps lead onto.
+    ramp_tops = set()
+
+    def on_grid(square):
+        return 0 <= square[0] < size and 0 <= square[1] < size
 
     for (col, row), stack in at.items():
         base, m = surface(stack)
         if m is None or m["type"] != "ramp":
             continue
 
-        dx, dy = (round(v) for v in uphill(m["rotation"]))
+        dx, dy = facing(m)
         low = (col - dx, row - dy)
         high = (col + dx, row + dy)
-        low_height, low_top = surface(at.get(low))
 
-        if not (0 <= low[0] < size and 0 <= low[1] < size):
+        if not on_grid(low):
             problems.append(dict(m, message="its low end is at the edge of "
                                  "the arena, so it cannot be driven onto"))
-        elif low_height > base + 1e-3:
-            under = [p for p in at[low] if p["type"] in PLATFORMS][-1]
-            problems.append(dict(m, message=f"its low end runs into a "
-                                 f"{PARTS[under['type']].label}"))
-        elif low_height < base - 1e-3:
-            problems.append(dict(m, message=f"its low end is "
-                                 f"{inches(base - low_height)} above the "
-                                 f"ground in front of it"))
-        elif low_top is not None and blocks(low_top, dx, dy):
-            problems.append(dict(m, message=f"its low end runs into a "
-                                 f"{PARTS[low_top['type']].label}"))
+        else:
+            # The side of the square in front facing the ramp, which may
+            # be the top of another ramp leading up to this one.
+            height, blocker = edge(at, low, (dx, dy))
+            low_top = surface(at[low])[1] if low in at else None
 
-        high_height, high_top = surface(at.get(high))
+            if blocker is not None:
+                problems.append(dict(m, message=f"its low end runs into "
+                                     f"{in_the_way(blocker)}"))
+            elif height > base + 1e-3:
+                under = (low_top if low_top is not None else
+                         [p for p in at[low] if p["type"] in PLATFORMS][-1])
+                problems.append(dict(m, message=f"its low end runs into a "
+                                     f"{label(under)}"))
+            elif height < base - 1e-3:
+                problems.append(dict(m, message=f"its low end is "
+                                     f"{inches(base - height)} above the "
+                                     f"ground in front of it"))
+
+        height, blocker = (edge(at, high, (-dx, -dy)) if on_grid(high)
+                           else (None, None))
+        high_top = surface(at[high])[1] if high in at else None
         platforms = [p for p in at.get(high, ()) if p["type"] in PLATFORMS]
 
-        if same_height(high_height, base + rise) and platforms:
-            ramp_tops[high] = high_height
-        elif high_height > base + rise and platforms:
+        if blocker is not None:
+            problems.append(dict(m, message=f"its high end runs into "
+                                 f"{in_the_way(blocker)}"))
+        elif height is not None and same_height(height, base + rise):
+            # Onto a platform, or up another ramp from the top of this one.
+            if high_top is None or high_top["type"] != "ramp":
+                ramp_tops.add(high)
+        elif height is not None and height > base + rise and platforms:
+            what = (high_top if high_top is not None
+                    and high_top["type"] == "ramp" else platforms[-1])
             problems.append(dict(m, message=f"its high end meets a "
-                                 f"{PARTS[platforms[-1]['type']].label}, "
-                                 f"{inches(high_height - base - rise)} above "
+                                 f"{label(what)}, "
+                                 f"{inches(height - base - rise)} above "
                                  f"the top of the ramp"))
         else:
             problems.append(dict(m, message="its high end leads to no "
                                  "platform"))
 
-    ground = ground or terrain(layout)
-    floor = main_floor(ground)
-
-    if floor is None:
-        return problems
+    floor = floor_squares(at, size)
 
     # The tops robots are meant to get onto: 1 inch platforms, and any
     # other height a ramp leads to. The rest, like a 2 inch platform no
@@ -561,19 +628,47 @@ def check(layout, ground=None):
                 or any(square in ramp_tops for square, _ in region)):
             continue
 
-        for (col, row), _ in region:
-            m = [p for p in at[(col, row)] if p["type"] in PLATFORMS][-1]
-            x, y = centre(layout, col, row)
-            cells = module_cells(ground, x, y)
-
-            if not cells:
-                problems.append(dict(m, message="too narrow for a robot to "
-                                     "drive on, so it is only an obstacle"))
-            elif not any(floor[c] for c in cells):
+        for square, _ in region:
+            if square not in floor:
+                m = [p for p in at[square] if p["type"] in PLATFORMS][-1]
                 problems.append(dict(m, message="no robot can get onto this "
                                      "platform from the floor"))
 
     return problems
+
+
+def floor_squares(at, size):
+    """The squares a robot on the floor can drive to, which are those
+    joined to the largest stretch of bare floor."""
+    seen, best, best_bare = set(), set(), 0
+
+    for start in ((col, row) for row in range(size) for col in range(size)):
+        if start in seen:
+            continue
+
+        region, todo = {start}, [start]
+        seen.add(start)
+
+        while todo:
+            col, row = todo.pop()
+
+            for near in ((col + 1, row), (col - 1, row), (col, row + 1),
+                         (col, row - 1)):
+                if (0 <= near[0] < size and 0 <= near[1] < size
+                        and near not in seen
+                        and crossable(at, (col, row), near)):
+                    seen.add(near)
+                    region.add(near)
+                    todo.append(near)
+
+        bare = sum(1 for square in region
+                   if not any(p["type"] in PLATFORMS or p["type"] == "ramp"
+                              for p in at.get(square, ())))
+
+        if bare > best_bare:
+            best, best_bare = region, bare
+
+    return best
 
 
 def platform_regions(at):
@@ -612,20 +707,6 @@ def platform_regions(at):
         regions.append(region)
 
     return regions
-
-
-def module_cells(ground, x, y):
-    """Open cells under a module's square."""
-    cells = []
-    step = ground.resolution
-
-    for ox in np.arange(-MODULE / 2 + step / 2, MODULE / 2, step):
-        for oy in np.arange(-MODULE / 2 + step / 2, MODULE / 2, step):
-            cell = ground.cell(x + ox, y + oy)
-            if ground.inside(cell) and ground.free[cell]:
-                cells.append(cell)
-
-    return cells
 
 
 def open_spot(ground, x, y, taken=(), room=0.08, apart=0.2):

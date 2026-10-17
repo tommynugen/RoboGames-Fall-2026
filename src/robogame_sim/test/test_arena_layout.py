@@ -135,7 +135,7 @@ def test_checks_find_ramps_and_platforms_robots_cannot_use():
         platform(1, 7), platform(1, 6), platform(2, 7), platform(2, 6),
         ramp(0, 7, 270),                # low end against the arena edge
         ramp(6, 2, 0),                  # leads to nothing
-        platform(9, 9),                 # a lone module, too narrow
+        platform(9, 9),                 # a lone module, no ramp to it
         ramp(5, 5, 0), platform(5, 4),  # low end runs into a platform
         ramp(8, 4, 0), side("wall", 8, 3, 0),  # into a wall facing it
         ramp(10, 4, 0), platform(10, 5, "platform_2"),  # onto a 2" one
@@ -147,7 +147,7 @@ def test_checks_find_ramps_and_platforms_robots_cannot_use():
 
     assert "edge of the arena" in found[(0, 7)]
     assert "no platform" in found[(6, 2)]
-    assert "too narrow" in found[(9, 9)]
+    assert "no robot can get onto" in found[(9, 9)]
     assert "runs into a 1\" platform" in found[(5, 5)]
     assert "runs into a wall" in found[(8, 4)]
     assert "2\" platform" in found[(10, 4)]
@@ -435,6 +435,41 @@ def test_checks_compare_heights_across_levels():
     assert any("an inch above the ground" in m for m in found[(2, 2)])
     assert any("an inch above the top of the ramp" in m
                for m in found[(8, 2)])
+
+
+def test_ramps_chain_up_and_turn_on_one_module_landings():
+    layout = {"size": 12, "modules": [
+        # Floor to 1" to a 2" corner, the second ramp on a platform.
+        ramp(0, 2, 180), platform(0, 1), on(ramp(0, 1, 180), 1),
+        platform(0, 0, "platform_2"),
+        # Up toward -x onto a one module landing 3" up, then turning up
+        # toward +y onto a 4" platform.
+        ramp(7, 4, 90), platform(6, 4), on(ramp(6, 4, 90), 1),
+        platform(5, 4, "platform_2"), on(ramp(5, 4, 90), 1),
+        platform(4, 4, "platform_2"), on(platform(4, 4), 1),
+        platform(4, 5, "platform_2"), on(platform(4, 5), 1),
+        on(ramp(4, 5, 0), 2),
+        platform(4, 6, "platform_2"), on(platform(4, 6, "platform_2"), 1)]}
+    assert al.check(layout) == []
+
+    # A ramp in the chain turned across it leaves the top stranded.
+    layout["modules"][6] = on(ramp(6, 4, 0), 1)
+    found = {}
+    for p in al.check(layout):
+        found.setdefault((p["col"], p["row"]), []).append(p["message"])
+
+    assert any("side of a ramp" in m for m in found[(7, 4)])
+    assert any("no robot can get onto" in m for m in found[(4, 6)])
+
+
+def test_a_wall_closes_the_side_it_stands_on():
+    layout = {"size": 12, "modules": [
+        ramp(5, 4, 0), platform(5, 5), on(side("wall", 5, 5, 0), 1),
+        platform(5, 6)]}
+    found = {(p["col"], p["row"]): p["message"] for p in al.check(layout)}
+
+    assert "no robot can get onto" in found[(5, 6)]
+    assert (5, 5) not in found
 
 
 def test_chase_climbs_onto_a_second_storey():
