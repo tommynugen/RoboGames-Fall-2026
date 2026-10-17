@@ -483,3 +483,123 @@ def test_chase_climbs_onto_a_second_storey():
     trail = drive(ground, 0.3, -0.45, math.pi, *target, steps=1500)
     assert_never_climbs_an_edge(ground, trail)
     assert ground.height_at(*trail[-1]) == pytest.approx(0.0508, abs=3e-3)
+
+
+def test_a_wall_spans_two_floor_tiles():
+    layout = {"size": 12, "modules": [side("wall", 5.5, 5, 0)]}
+    ground = al.terrain(layout)
+    x, y = al.centre(layout, 5.5, 5)
+    y += al.PEG_LINE
+    # Over the join between the tiles and the peg holes either side of it.
+    for d in (-0.04, 0.0, 0.04):
+        assert ground.height_at(x + d, y) == pytest.approx(0.0508, abs=1e-3)
+    for d in (-0.06, 0.06):
+        assert ground.height_at(x + d, y) == pytest.approx(0.0, abs=1e-3)
+
+    text = al.world_sdf(layout, WORLD)
+    assert 'collision name="wall_5p5_5"' in text
+
+
+def test_walls_and_thwomps_share_a_tile_where_they_fit():
+    fits = [
+        # Side by side, either way round.
+        [side("wall", 5, 5, 0), side("wall", 5, 5, 180)],
+        [side("thwomp", 5, 5, 90), side("wall", 5, 5, 270)],
+        # Staggered across two tiles.
+        [side("wall", 4, 5, 0), side("wall", 4.5, 5, 180),
+         side("wall", 5, 5, 0)],
+        # One along each side of a ramp.
+        [ramp(5, 5, 0), side("wall", 6, 5, 90), side("wall", 4, 5, 270)],
+    ]
+    for modules in fits:
+        assert len(al.normalise({"modules": modules})["modules"]) == \
+            len(modules)
+
+    for clash in (
+            [side("wall", 5, 5, 0), side("wall", 5, 5, 90)],
+            # The same peg line, from half a square up.
+            [side("wall", 5, 5, 0), side("thwomp", 5, 5.5, 180)],
+            [side("wall", 5, 5, 0), side("wall", 5.5, 5, 0)],
+            [platform(5, 5), side("wall", 5.5, 5, 90)]):
+        with pytest.raises(ValueError, match="overlaps"):
+            al.normalise({"modules": clash})
+
+    layout = {"size": 12, "modules": [side("wall", 5, 5, 0),
+                                      side("wall", 5, 5, 180)]}
+    ground = al.terrain(layout)
+    x, y = al.centre(layout, 5, 5)
+    for d in (-al.PEG_LINE, al.PEG_LINE):
+        assert ground.height_at(x, y + d) == pytest.approx(0.0508, abs=1e-3)
+    assert ground.height_at(x, y) == pytest.approx(0.0, abs=1e-3)
+
+    text = al.world_sdf(layout, WORLD)
+    assert 'collision name="wall_5_5"' in text
+    assert 'collision name="wall_5_5_r180"' in text
+
+
+def test_modules_go_in_steps_of_half_a_square():
+    layout = al.normalise({"modules": [platform(5.5, 2.5), platform(1.0, 1)]})
+    assert layout["modules"] == [platform(1, 1), platform(5.5, 2.5)]
+    assert isinstance(layout["modules"][0]["col"], int)
+    assert '"col": 5.5, "row": 2.5' in al.dumps(layout)
+
+    for bad in ({"modules": [platform(5.25, 2)]},
+                {"modules": [platform(11.5, 2)]},
+                {"modules": [side("wall", 0, 0, 90),
+                             side("wall", -0.5, 0, 270)]},
+                {"modules": [platform(5, 5), platform(5.5, 5.5)]}):
+        with pytest.raises(ValueError):
+            al.normalise(bad)
+
+    # A wall's square can hang over the edge, as long as the wall is on
+    # the grid.
+    al.normalise({"modules": [side("wall", -0.5, 0, 270),
+                              side("wall", 11.5, 3, 90)]})
+
+
+def test_platforms_across_tiles_stand_where_they_are_put():
+    layout = {"size": 12, "modules": [platform(5.5, 5.5)]}
+    ground = al.terrain(layout)
+    x, y = al.centre(layout, 5, 5)
+    assert ground.height_at(x + 0.03, y + 0.03) == \
+        pytest.approx(0.0254, abs=1e-3)
+    assert ground.height_at(x - 0.03, y - 0.03) == \
+        pytest.approx(0.0, abs=1e-3)
+
+
+def test_modules_stack_across_platforms_of_one_height():
+    al.normalise({"modules": [
+        platform(5, 5), platform(6, 5), on(platform(5.5, 5), 1),
+        on(side("wall", 6.5, 5, 90), 1)]})
+
+    for bad in ([platform(5, 5), on(side("wall", 5.5, 5, 0), 1)],
+                [platform(5, 5), platform(6, 5, "platform_2"),
+                 on(side("wall", 5.5, 5, 0), 1)]):
+        with pytest.raises(ValueError):
+            al.normalise({"modules": bad})
+
+    layout = {"size": 12, "modules": [
+        platform(5, 5), platform(6, 5), on(platform(5.5, 5), 1)]}
+    ground = al.terrain(layout)
+    x, y = al.centre(layout, 5.5, 5)
+    assert ground.height_at(x, y) == pytest.approx(0.0508, abs=1e-3)
+
+
+def test_ramps_and_platforms_off_the_tiles_are_checked_the_same():
+    # The ramps and platform of default.json, half a square along.
+    layout = {"size": 12, "modules": [
+        *[ramp(c + 0.5, 3, 0) for c in range(4, 8)],
+        *[platform(c + 0.5, r) for c in range(4, 8) for r in range(4, 8)]]}
+    assert al.check(layout) == []
+
+    # A wall across the foot of two of the ramps, and a ramp that only
+    # half meets the platform.
+    blocked = layout["modules"] + [side("wall", 5, 2, 0),
+                                   ramp(3.5, 7.5, 270)]
+    found = {}
+    for p in al.check({"size": 12, "modules": blocked}):
+        found.setdefault((p["col"], p["row"]), []).append(p["message"])
+    assert "runs into a wall" in found[(4.5, 3)][0]
+    assert "runs into a wall" in found[(5.5, 3)][0]
+    assert (6.5, 3) not in found
+    assert "part of its high end" in found[(3.5, 7.5)][0]

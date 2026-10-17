@@ -1,15 +1,15 @@
-"""Arena layouts: which module sits on each square of the arena floor.
+"""Arena layouts: which modules stand where on the arena floor.
 
 The arena is a square grid of 4 inch (0.1016 m) modules, 12 x 12, centred
 on the origin. Every square has a floor tile. A layout lists what stands on
-them, one module to a square:
+them:
 
     {
       "size": 12,
       "modules": [
         {"type": "platform", "col": 5, "row": 5},
         {"type": "ramp", "col": 5, "row": 4, "rotation": 0},
-        {"type": "wall", "col": 0, "row": 0, "rotation": 180}
+        {"type": "wall", "col": 0.5, "row": 0, "rotation": 180}
       ]
     }
 
@@ -22,16 +22,25 @@ The modules are the parts of the CAD's MODULES part studio:
     wall        1 x 4 inch wall, 2 inches high
     thwomp      the thwomp, 1 x 4 inches and 6 high, as a fixed block
 
-A platform can carry more modules: a module with "level": 1 stands on the
-platform at level 0 of its square, one at level 2 on a platform at level 1,
-and so on. Ramps, walls, thwomps and platforms all stack on either platform,
-so a ramp on a 1 inch platform climbs to a 2 inch one. level is left out for
-modules on the floor.
+Every module pegs into the same 2 inch grid of holes, which runs on
+across the joins between floor tiles, so a module goes anywhere on that
+grid: col and row are in steps of a half, and a module at col 5.5 stands
+across the tiles at cols 5 and 6. The holes split the floor into 2 inch
+cells, one hole in the middle of each and four to a tile. A platform or
+ramp covers 2 x 2 cells and a wall or thwomp 1 x 2, and no two modules
+share a cell, so two walls fit side by side on one tile.
+
+A platform can carry more modules: a module with "level": 1 stands on
+platforms at level 0 under every cell it covers, one at level 2 on
+platforms at level 1, and so on, all of them the same height. Ramps,
+walls, thwomps and platforms all stack on either platform, so a ramp on a
+1 inch platform climbs to a 2 inch one. level is left out for modules on
+the floor.
 
 rotation is in degrees anticlockwise seen from above. At 0 a ramp rises
 toward +y, at 90 toward -x, at 180 toward -y and at 270 toward +x. A wall
-or thwomp pegs into its floor tile on the line of holes 1 inch from the
-middle, on the side its rotation points to: at 0 along the +y side.
+or thwomp pegs in on the line of holes 1 inch from the middle of its
+square, on the side its rotation points to: at 0 along the +y side.
 
 From a layout this builds the Gazebo model of the arena, out of the meshes
 scripts/export_onshape_arena.py exported from the CAD, a world around it,
@@ -208,26 +217,17 @@ def normalise(layout):
         raise ValueError(f"size must be 3 to 25, not {size}")
 
     modules = []
-    taken = {}
 
     for module in layout.get("modules", []):
         kind = module.get("type")
-        col, row = int(module.get("col")), int(module.get("row"))
-        level = int(module.get("level", 0))
-
         if kind not in TYPES:
             raise ValueError(f"unknown module type {kind!r}")
-        if not (0 <= col < size and 0 <= row < size):
-            raise ValueError(f"{kind} at col {col}, row {row} is off the grid")
-        if level < 0:
-            raise ValueError(f"{kind} at col {col}, row {row} is below the "
-                             f"floor")
-        if (col, row, level) in taken:
-            raise ValueError(f"two modules at col {col}, row {row}"
-                             + (f", level {level}" if level else ""))
-        taken[(col, row, level)] = kind
 
-        entry = {"type": kind, "col": col, "row": row}
+        entry = {"type": kind, "col": half(module.get("col"), "col"),
+                 "row": half(module.get("row"), "row")}
+        level = int(module.get("level", 0))
+        if level < 0:
+            raise ValueError(f"{where(entry)} is below the floor")
         if level:
             entry["level"] = level
         if PARTS[kind].turns:
@@ -238,14 +238,54 @@ def normalise(layout):
             entry["rotation"] = rotation
         modules.append(entry)
 
-    # Only a platform carries anything.
-    for (col, row, level), kind in taken.items():
-        if level and taken.get((col, row, level - 1)) not in PLATFORMS:
-            raise ValueError(f"{kind} at col {col}, row {row}, level {level} "
-                             f"is not on a platform")
+    taken = {}
+    for m in modules:
+        level = m.get("level", 0)
+        for cell in cells(m):
+            if not on_grid(cell, size):
+                raise ValueError(f"{where(m)} is off the grid")
+            other = taken.setdefault((cell, level), m)
+            if other is not m:
+                raise ValueError(f"{where(m)} overlaps the {where(other)}")
 
-    modules.sort(key=lambda m: (m["row"], m["col"], m.get("level", 0)))
+    # Only platforms carry anything, and all at one height, so it stands
+    # level.
+    for m in modules:
+        level = m.get("level", 0)
+        if not level:
+            continue
+        if any(taken.get((cell, level - 1), {}).get("type") not in PLATFORMS
+               for cell in cells(m)):
+            raise ValueError(f"{where(m)} is not on a platform")
+
+    at = columns(modules)
+    for m in modules:
+        if len({round(stand(at, m, cell), 4) for cell in cells(m)}) > 1:
+            raise ValueError(f"{where(m)} stands across platforms of "
+                             f"different heights")
+
+    modules.sort(key=lambda m: (m["row"], m["col"], m.get("level", 0),
+                                m["type"], m.get("rotation", 0)))
     return {"size": size, "modules": modules}
+
+
+def half(value, name):
+    """A col or row, which is in steps of a half: a whole number when it is
+    one, so layouts keep reading 5 and not 5.0."""
+    doubled = float(value) * 2
+    if doubled != round(doubled):
+        raise ValueError(f"{name} must be in steps of a half, not {value}")
+
+    doubled = round(doubled)
+    return doubled // 2 if doubled % 2 == 0 else doubled / 2
+
+
+def where(m):
+    """A module and where it is, for messages."""
+    text = f"{m['type']} at col {m['col']}, row {m['row']}"
+    if m.get("level"):
+        text += f", level {m['level']}"
+    return text
 
 
 def load(name):
@@ -312,36 +352,61 @@ def part_height(kind):
     return float(hi[2] - lo[2])
 
 
-def stacks(layout):
-    """Each square's modules, bottom first, keyed by (col, row)."""
+def cells(m):
+    """The 2 inch cells a module covers, as (x, y) counted like col and row
+    but two to a square: square (col, row) is cells 2 col and 2 col + 1
+    along x, and the same along y."""
+    x, y = round(2 * m["col"]), round(2 * m["row"])
+
+    if PARTS[m["type"]].mount != "side":
+        return [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)]
+
+    # The half of the square on the side the module faces.
+    ux, uy = (round(v) for v in uphill(m["rotation"]))
+    if ux == 0:
+        y += uy > 0
+        return [(x, y), (x + 1, y)]
+
+    x += ux > 0
+    return [(x, y), (x, y + 1)]
+
+
+def on_grid(cell, size):
+    return all(0 <= v < 2 * size for v in cell)
+
+
+def shifted(found, dx, dy):
+    return [(x + dx, y + dy) for x, y in found]
+
+
+def columns(modules):
+    """The modules over each cell, bottom first, keyed by cell."""
     found = {}
 
-    for m in layout["modules"]:
-        found.setdefault((m["col"], m["row"]), []).append(m)
+    for m in modules:
+        for cell in cells(m):
+            found.setdefault(cell, []).append(m)
 
-    for stack in found.values():
-        stack.sort(key=lambda m: m.get("level", 0))
+    for column in found.values():
+        column.sort(key=lambda m: m.get("level", 0))
 
     return found
 
 
-def bases(stack):
-    """How high above the floor each module of a stack stands."""
-    heights, base = [], 0.0
-
-    for m in stack:
-        heights.append(base)
-        base += part_height(m["type"])
-
-    return heights
+def stand(at, m, cell=None):
+    """How high above the floor a module stands: the platforms under it,
+    on the given cell or its first."""
+    level = m.get("level", 0)
+    return sum(part_height(p["type"])
+               for p in at[cell or cells(m)[0]] if p.get("level", 0) < level)
 
 
-def surface(stack):
-    """Height of the top platform of a stack, which a module on top or a
-    robot stands on, and the module standing there, if any."""
+def surface(column):
+    """Height of the top platform of a cell's column, which a module on top
+    or a robot stands on, and the module standing there, if any."""
     height = 0.0
 
-    for m in stack or ():
+    for m in column or ():
         if m["type"] not in PLATFORMS:
             return height, m
         height += part_height(m["type"])
@@ -413,12 +478,18 @@ def model_sdf(layout, name="arena"):
         for col in range(size):
             add(f"floor_{col}_{row}", FLOOR, *centre(layout, col, row), 0)
 
-    for (col, row), stack in sorted(stacks(layout).items()):
-        for m, base in zip(stack, bases(stack)):
-            level = m.get("level", 0)
-            name = f"{m['type']}_{col}_{row}" + (f"_{level}" if level else "")
-            add(name, PARTS[m["type"]], *centre(layout, col, row),
-                m.get("rotation", 0), base)
+    at = columns(layout["modules"])
+    names = set()
+    for m in layout["modules"]:
+        level = m.get("level", 0)
+        name = (f"{m['type']}_{m['col']}_{m['row']}".replace(".", "p")
+                + (f"_{level}" if level else ""))
+        # Walls side by side on one square.
+        if name in names:
+            name += f"_r{m['rotation']}"
+        names.add(name)
+        add(name, PARTS[m["type"]], *centre(layout, m["col"], m["row"]),
+            m.get("rotation", 0), stand(at, m))
 
     return (f'<model name="{name}">\n    <static>true</static>\n'
             f'    <link name="link">\n' + "\n".join(parts)
@@ -492,33 +563,48 @@ def in_the_way(module):
             else f"a {label(module)}")
 
 
-def edge(at, square, side):
-    """What a robot meets crossing the side (dx, dy) of a square, as
-    (height, blocker). height is that of the square's top along the side,
-    None where it cannot be crossed: along the slope of a ramp, or behind a
-    wall or thwomp standing on that side, which is then the blocker."""
-    base, top = surface(at.get(square))
+def along(ramp, cell):
+    """Which row of a ramp's cells a cell is, 0 at the bottom, 1 at the
+    top."""
+    dx, dy = facing(ramp)
+    rows = [x * dx + y * dy for x, y in cells(ramp)]
+    return cell[0] * dx + cell[1] * dy - min(rows)
+
+
+def edge(at, cell, side):
+    """What a robot meets crossing the side (dx, dy) of a cell, as
+    (height, blocker). height is that of the cell's top along the side,
+    None where it cannot be crossed: along the slope of a ramp, or across a
+    wall or thwomp, which is then the blocker."""
+    base, top = surface(at.get(cell))
 
     if top is None:
         return base, None
 
     if top["type"] == "ramp":
         dx, dy = facing(top)
+        row = along(top, cell)
         if side == (dx, dy):
-            return base + part_height("ramp"), None
+            return base + part_height("ramp") * (row + 1) / 2, None
         if side == (-dx, -dy):
-            return base, None
+            return base + part_height("ramp") * row / 2, None
         return None, top
 
-    # A wall or thwomp only closes the side it stands on.
-    if facing(top) == side:
+    # A wall or thwomp stands across the middle of its cells, so it closes
+    # them on either side of it, and leaves the way along it open.
+    if facing(top) in (side, (-side[0], -side[1])):
         return None, top
 
     return base, None
 
 
 def crossable(at, a, b):
-    """Whether a robot can drive between side by side squares a and b."""
+    """Whether a robot can drive between side by side cells a and b."""
+    top_a, top_b = surface(at.get(a))[1], surface(at.get(b))[1]
+    # Within one module.
+    if top_a is not None and top_a is top_b:
+        return True
+
     side = (b[0] - a[0], b[1] - a[1])
     height_a, blocker_a = edge(at, a, side)
     height_b, blocker_b = edge(at, b, (-side[0], -side[1]))
@@ -526,11 +612,12 @@ def crossable(at, a, b):
     if height_a is not None and height_b is not None:
         return same_height(height_a, height_b)
 
-    # Ramps side by side, rising the same way from the same height, are one
-    # wider ramp.
+    # Ramps side by side, rising the same way from the same height and
+    # level with each other, are one wider ramp.
     return (blocker_a is not None and blocker_b is not None
             and blocker_a["type"] == blocker_b["type"] == "ramp"
             and blocker_a["rotation"] == blocker_b["rotation"]
+            and along(blocker_a, a) == along(blocker_b, b)
             and same_height(surface(at[a])[0], surface(at[b])[0]))
 
 
@@ -544,80 +631,103 @@ def same_height(a, b):
 
 
 def check(layout):
-    """Problems with a layout that a robot would run into, as dicts with
-    type, col, row and message.
+    """Problems with a layout that a robot would run into, as the modules
+    they are with, and a message.
 
-    They are worked out module by module, from the height of each square's
+    They are worked out module by module, from the height of each cell's
     top along its sides, not from chase_node's terrain: that keeps the
     robot's centre clear enough of every edge to turn on the spot, so it
     finds the one module landings a chain of ramps turns on too narrow,
     though a robot drives over them."""
     layout = normalise(layout)
     size = layout["size"]
-    at = stacks(layout)
+    at = columns(layout["modules"])
     rise = part_height("ramp")
     problems = []
-    # Level squares ramps lead onto.
+    # Level cells ramps lead onto.
     ramp_tops = set()
 
-    def on_grid(square):
-        return 0 <= square[0] < size and 0 <= square[1] < size
-
-    for (col, row), stack in at.items():
-        base, m = surface(stack)
-        if m is None or m["type"] != "ramp":
+    for m in layout["modules"]:
+        if m["type"] != "ramp":
             continue
 
+        base = stand(at, m)
         dx, dy = facing(m)
-        low = (col - dx, row - dy)
-        high = (col + dx, row + dy)
+        own = cells(m)
+        # The row of cells in front of each end.
+        low = [cell for cell in shifted(own, -dx, -dy) if cell not in own]
+        high = [cell for cell in shifted(own, dx, dy) if cell not in own]
 
-        if not on_grid(low):
+        if not all(on_grid(cell, size) for cell in low):
             problems.append(dict(m, message="its low end is at the edge of "
                                  "the arena, so it cannot be driven onto"))
         else:
-            # The side of the square in front facing the ramp, which may
-            # be the top of another ramp leading up to this one.
-            height, blocker = edge(at, low, (dx, dy))
-            low_top = surface(at[low])[1] if low in at else None
+            # The side of the cells in front facing the ramp, which may be
+            # the top of another ramp leading up to this one.
+            ahead = [(cell, *edge(at, cell, (dx, dy))) for cell in low]
+            blockers = [b for _, _, b in ahead if b is not None]
+            higher = [cell for cell, height, b in ahead
+                      if b is None and height > base + 1e-3]
+            lower = [height for _, height, b in ahead
+                     if b is None and height < base - 1e-3]
 
-            if blocker is not None:
+            if blockers:
                 problems.append(dict(m, message=f"its low end runs into "
-                                     f"{in_the_way(blocker)}"))
-            elif height > base + 1e-3:
+                                     f"{in_the_way(blockers[0])}"))
+            elif higher:
+                low_top = surface(at[higher[0]])[1]
                 under = (low_top if low_top is not None else
-                         [p for p in at[low] if p["type"] in PLATFORMS][-1])
+                         [p for p in at[higher[0]]
+                          if p["type"] in PLATFORMS][-1])
                 problems.append(dict(m, message=f"its low end runs into a "
                                      f"{label(under)}"))
-            elif height < base - 1e-3:
+            elif lower:
                 problems.append(dict(m, message=f"its low end is "
-                                     f"{inches(base - height)} above the "
-                                     f"ground in front of it"))
+                                     f"{inches(base - min(lower))} above "
+                                     f"the ground in front of it"))
 
-        height, blocker = (edge(at, high, (-dx, -dy)) if on_grid(high)
-                           else (None, None))
-        high_top = surface(at[high])[1] if high in at else None
-        platforms = [p for p in at.get(high, ()) if p["type"] in PLATFORMS]
+        top = base + rise
+        reached, above, blockers = [], [], []
+        for cell in high:
+            if not on_grid(cell, size):
+                continue
 
-        if blocker is not None:
+            height, blocker = edge(at, cell, (-dx, -dy))
+            high_top = surface(at[cell])[1] if cell in at else None
+            platforms = [p for p in at.get(cell, ())
+                         if p["type"] in PLATFORMS]
+
+            if blocker is not None:
+                blockers.append(blocker)
+            elif same_height(height, top):
+                # Onto a platform, or up another ramp from the top of this
+                # one.
+                reached.append(cell)
+                if high_top is None or high_top["type"] != "ramp":
+                    ramp_tops.add(cell)
+            elif height > top and platforms:
+                above.append((height, high_top if high_top is not None
+                              and high_top["type"] == "ramp"
+                              else platforms[-1]))
+
+        if len(reached) == len(high):
+            continue
+        if blockers:
             problems.append(dict(m, message=f"its high end runs into "
-                                 f"{in_the_way(blocker)}"))
-        elif height is not None and same_height(height, base + rise):
-            # Onto a platform, or up another ramp from the top of this one.
-            if high_top is None or high_top["type"] != "ramp":
-                ramp_tops.add(high)
-        elif height is not None and height > base + rise and platforms:
-            what = (high_top if high_top is not None
-                    and high_top["type"] == "ramp" else platforms[-1])
+                                 f"{in_the_way(blockers[0])}"))
+        elif above:
+            height, what = max(above, key=lambda a: a[0])
             problems.append(dict(m, message=f"its high end meets a "
-                                 f"{label(what)}, "
-                                 f"{inches(height - base - rise)} above "
-                                 f"the top of the ramp"))
+                                 f"{label(what)}, {inches(height - top)} "
+                                 f"above the top of the ramp"))
+        elif reached:
+            problems.append(dict(m, message="part of its high end leads to "
+                                 "no platform"))
         else:
             problems.append(dict(m, message="its high end leads to no "
                                  "platform"))
 
-    floor = floor_squares(at, size)
+    floor = floor_cells(at, size)
 
     # The tops robots are meant to get onto: 1 inch platforms, and any
     # other height a ramp leads to. The rest, like a 2 inch platform no
@@ -625,24 +735,29 @@ def check(layout):
     for region in platform_regions(at):
         height = region[0][1]
         if not (same_height(height, part_height("platform"))
-                or any(square in ramp_tops for square, _ in region)):
+                or any(cell in ramp_tops for cell, _, _ in region)):
             continue
 
-        for square, _ in region:
-            if square not in floor:
-                m = [p for p in at[square] if p["type"] in PLATFORMS][-1]
-                problems.append(dict(m, message="no robot can get onto this "
-                                     "platform from the floor"))
+        stranded = []
+        for cell, _, m in region:
+            # Where a wall or thwomp stands on it is not somewhere to get
+            # to.
+            if (cell in floor or surface(at[cell])[1] is not None
+                    or any(m is s for s in stranded)):
+                continue
+            stranded.append(m)
+            problems.append(dict(m, message="no robot can get onto this "
+                                 "platform from the floor"))
 
     return problems
 
 
-def floor_squares(at, size):
-    """The squares a robot on the floor can drive to, which are those
-    joined to the largest stretch of bare floor."""
+def floor_cells(at, size):
+    """The cells a robot on the floor can drive to, which are those joined
+    to the largest stretch of bare floor."""
     seen, best, best_bare = set(), set(), 0
 
-    for start in ((col, row) for row in range(size) for col in range(size)):
+    for start in ((x, y) for y in range(2 * size) for x in range(2 * size)):
         if start in seen:
             continue
 
@@ -650,20 +765,18 @@ def floor_squares(at, size):
         seen.add(start)
 
         while todo:
-            col, row = todo.pop()
+            x, y = todo.pop()
 
-            for near in ((col + 1, row), (col - 1, row), (col, row + 1),
-                         (col, row - 1)):
-                if (0 <= near[0] < size and 0 <= near[1] < size
-                        and near not in seen
-                        and crossable(at, (col, row), near)):
+            for near in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if (on_grid(near, size) and near not in seen
+                        and crossable(at, (x, y), near)):
                     seen.add(near)
                     region.add(near)
                     todo.append(near)
 
-        bare = sum(1 for square in region
+        bare = sum(1 for cell in region
                    if not any(p["type"] in PLATFORMS or p["type"] == "ramp"
-                              for p in at.get(square, ())))
+                              for p in at.get(cell, ())))
 
         if bare > best_bare:
             best, best_bare = region, bare
@@ -672,35 +785,34 @@ def floor_squares(at, size):
 
 
 def platform_regions(at):
-    """Squares whose top is a platform, in side by side groups of the same
-    height, as lists of ((col, row), height)."""
+    """Cells whose top is a platform, in side by side groups of the same
+    height, as lists of (cell, height, the platform on top)."""
     tops = {}
 
-    for square, stack in at.items():
-        height, m = surface(stack)
-        has_platform = any(p["type"] in PLATFORMS for p in stack)
+    for cell, column in at.items():
+        height, m = surface(column)
+        platforms = [p for p in column if p["type"] in PLATFORMS]
         # A wall or thwomp stands on the edge, so the platform is still
         # there to drive on.
-        if has_platform and (m is None or PARTS[m["type"]].mount == "side"):
-            tops[square] = height
+        if platforms and (m is None or PARTS[m["type"]].mount == "side"):
+            tops[cell] = height, platforms[-1]
 
     regions, seen = [], set()
 
-    for square in sorted(tops):
-        if square in seen:
+    for cell in sorted(tops):
+        if cell in seen:
             continue
 
-        region, todo = [], [square]
-        seen.add(square)
+        region, todo = [], [cell]
+        seen.add(cell)
 
         while todo:
-            col, row = todo.pop()
-            region.append(((col, row), tops[(col, row)]))
+            x, y = todo.pop()
+            region.append(((x, y), *tops[(x, y)]))
 
-            for near in ((col + 1, row), (col - 1, row), (col, row + 1),
-                         (col, row - 1)):
+            for near in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
                 if (near in tops and near not in seen
-                        and same_height(tops[near], tops[square])):
+                        and same_height(tops[near][0], tops[cell][0])):
                     seen.add(near)
                     todo.append(near)
 
