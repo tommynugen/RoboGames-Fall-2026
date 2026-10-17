@@ -496,15 +496,19 @@ def model_sdf(layout, name="arena"):
             + "\n    </link>\n  </model>")
 
 
-def terrain(layout):
-    """The terrain chase_node plans over, for this layout."""
+def triangles(layout):
+    """Every collision surface of this layout's arena model."""
     meshes = mesh_dir()
 
     def resolve(uri):
         return os.path.join(meshes, uri.rsplit("/", 1)[-1])
 
-    root = ElementTree.fromstring(model_sdf(layout))
-    return Terrain(sdf_triangles(root, resolve))
+    return sdf_triangles(ElementTree.fromstring(model_sdf(layout)), resolve)
+
+
+def terrain(layout):
+    """The terrain chase_node plans over, for this layout."""
+    return Terrain(triangles(layout))
 
 
 INCLUDE = re.compile(

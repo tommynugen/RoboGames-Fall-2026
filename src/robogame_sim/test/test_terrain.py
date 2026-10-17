@@ -4,17 +4,19 @@ import os
 import numpy as np
 import pytest
 
-from robogame_sim.chase import (
-    chase_command,
-    follow_command,
-    standoff_distance,
-)
+from robogame_sim.chase import Chaser
 from robogame_sim.terrain import (
+    CLEARANCE,
+    HALF_LENGTH,
+    RESOLUTION,
+    TURN_CLEARANCE,
     Terrain,
     box_top,
     corner_angle,
+    line_axis,
     next_waypoint,
     path_length,
+    point_along,
 )
 
 HEIGHT = 0.0254
@@ -48,31 +50,13 @@ def on_platform(terrain, x, y):
 def drive(terrain, hx, hy, hyaw, tx, ty, steps=800, dt=0.05):
     """Drives a hunter after a still target the way chase_node does, and
     returns the hunter's centre at every step."""
+    chaser = Chaser(terrain)
     trail = [(hx, hy)]
 
-    for _ in range(steps):
-        standoff = standoff_distance(hx, hy, tx, ty, 0.0, 0.03)
-        path = terrain.route(hx, hy, tx, ty, tx, ty)
-        assert path is not None
-
-        if path.partial:
-            if math.dist((hx, hy), path[-1]) < 0.03:
-                linear, angular = 0.0, 0.0
-            else:
-                linear, angular, _ = follow_command(
-                    hx, hy, hyaw, *next_waypoint(path, 0.0),
-                    0.3, 1.5, 1.2, 3.0, 1.0)
-        elif len(path) == 2:
-            linear, angular, _ = chase_command(
-                hx, hy, hyaw, tx, ty, math.hypot(tx - hx, ty - hy),
-                standoff, 0.3, 1.5, 1.2, 3.0, 1.0)
-        else:
-            linear, angular, _ = follow_command(
-                hx, hy, hyaw, *next_waypoint(path, standoff),
-                0.3, 1.5, 1.2, 3.0, 1.0)
-
-        if terrain.on_slope(hx, hy):
-            linear = 0.0 if linear <= 0.0 else max(linear, 0.15)
+    for step in range(steps):
+        chaser.track(tx, ty, step * dt)
+        linear, angular = chaser.update(step * dt, hx, hy, hyaw)
+        assert chaser.path is not None
 
         hx += linear * dt * math.cos(hyaw)
         hy += linear * dt * math.sin(hyaw)
@@ -179,3 +163,91 @@ def test_default_arena_platform_target_is_reached_up_the_ramp():
     trail = drive(ground, 0.0, 0.42, -math.pi / 2, 0.05, 0.05)
     assert_never_climbs_an_edge(ground, trail)
     assert on_platform(ground, *trail[-1])
+
+
+def walls(*boxes, floor=0.6):
+    """A floor with walls 0.05 high on it, each (x0, y0, x1, y1)."""
+    parts = [box_top((2 * floor, 2 * floor, 0.0))]
+    for x0, y0, x1, y1 in boxes:
+        parts.append(box_top((x1 - x0, y1 - y0, 0.05))
+                     + [(x0 + x1) / 2, (y0 + y1) / 2, 0.025])
+    return Terrain(np.concatenate(parts))
+
+
+INCH = 0.0254
+
+
+def test_cell_centres_are_on_the_half_inch_lattice(terrain):
+    x, y = terrain.centre(terrain.cell(0.1, -0.2))
+    assert x / RESOLUTION == pytest.approx(round(x / RESOLUTION))
+    assert y / RESOLUTION == pytest.approx(round(y / RESOLUTION))
+
+
+def test_clearance_is_measured_from_the_robot_itself():
+    ground = walls((-0.6, 0.1, 0.6, 0.1 + INCH))
+    wall, drop = ground.room_at(0.0, 0.1 - 0.05)
+    assert wall == pytest.approx(0.05, abs=0.002) and drop == math.inf
+    assert not ground.can_turn(0.0, 0.1 - 0.05)
+    assert ground.can_turn(0.0, 0.1 - TURN_CLEARANCE - 0.003)
+
+
+def test_the_floor_edge_is_a_drop_the_ends_may_hang_over():
+    ground = walls()
+    # A wall this close would leave no room to turn.
+    x = 0.6 - 0.052
+    wall, drop = ground.room_at(x, 0.0)
+    assert wall == math.inf and drop == pytest.approx(0.052, abs=0.002)
+    assert ground.can_turn(x, 0.0)
+
+
+def gap(width):
+    """Two walls across the arena at y 0 with a gap width wide in the
+    middle, so the way from one side to the other is through it."""
+    return walls((-0.6, -INCH / 2, -width / 2, INCH / 2),
+                 (width / 2, -INCH / 2, 0.6, INCH / 2))
+
+
+def test_gap_narrower_than_a_turn_is_driven_through_lined_up():
+    ground = gap(4.5 * INCH)
+    middle = ground.cell(0.0, 0.0)
+    assert not ground.free[middle]
+    # It has room lined up with the gap, along y.
+    assert ground.lined_up[2][middle]
+
+    path = ground.route(0.2, -0.3, 0.2, 0.3, 0.2, 0.3)
+    assert path is not None and not path.partial
+    assert len(path) > 2
+
+    # Every leg through the gap runs along it.
+    for a, b in zip(path, path[1:]):
+        cells = ground.line_cells(*a, *b)
+        if not ground.free[cells].all():
+            assert line_axis(b[0] - a[0], b[1] - a[1]) == 2
+
+
+def test_gap_narrower_than_the_robot_is_not_driven_through():
+    ground = gap(2 * CLEARANCE - 0.01)
+    path = ground.route(0.2, -0.3, 0.2, 0.3, 0.2, 0.3)
+    assert path.partial
+    assert path[-1][1] < 0.0
+
+
+def test_chase_through_a_narrow_gap(terrain=None):
+    ground = gap(4.5 * INCH)
+    trail = drive(ground, 0.3, -0.3, math.pi, 0.25, 0.35, steps=600)
+    assert math.dist(trail[-1], (0.25, 0.35)) < 0.25
+    # Through the gap, never closer to a wall than its body allows.
+    for x, y in trail:
+        if abs(y) < 0.05:
+            assert abs(x) < 4.5 * INCH / 2 - 0.03
+
+
+def test_point_along_a_path():
+    path = [(0.0, 0.0), (0.1, 0.0), (0.1, 0.2)]
+    assert point_along(path, 0.05) == pytest.approx((0.05, 0.0))
+    assert point_along(path, 0.2) == pytest.approx((0.1, 0.1))
+    assert point_along(path, 1.0) == (0.1, 0.2)
+
+
+def test_hunter_front_is_its_wheels_with_the_arm_stowed():
+    assert HALF_LENGTH == pytest.approx(0.05)

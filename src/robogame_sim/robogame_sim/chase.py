@@ -1,27 +1,48 @@
-"""Steering maths for chase_node, kept free of ROS so it can be tested.
+"""Steering for chase_node, kept free of ROS so it can be tested.
 
-The hunter predicts where the target is going from its speed and turn rate,
-finds the earliest point on that path it can get to in time, and heads for
-it, matching the target's speed once it has caught up.
+Chaser works out a twist for the hunter each tick from both robots' poses.
+The hunter drives with its arm stowed, STOW_ARM, so its footprint is just
+its body and it fits through any gap its body does. It always heads for the
+target: straight at it, a little ahead of where it is going, when the way
+is clear, and along a path planned over the terrain when it is not. It
+turns on the spot only where it has room to and the turn is large, lines
+up before driving into a gap too narrow to turn in, backs out of one when
+the target goes the other way, and frees itself when it has been stuck.
 """
 
 import math
+from collections import deque
 
 from robogame_sim.robot_sdf import (
-    CHASSIS,
     FINGER_LENGTH,
     FOREARM_LENGTH,
     SHOULDER,
     UPPER_ARM_LENGTH,
-    WHEEL_WIDTH,
-    WHEEL_Y,
+    WHEEL_X,
+)
+from robogame_sim.terrain import (
+    DROP_HALF_WIDTH,
+    HALF_LENGTH,
+    HALF_WIDTH,
+    SOFT_CLEARANCE,
+    TURN_CLEARANCE,
+    corner_angle,
+    next_waypoint,
+    path_length,
+    point_along,
 )
 
-# The arm reaches well past the chassis, so the robot's footprint runs from
-# the back of the chassis to the fingertips, and out to the wheels sideways.
+# An arm at its start angles, level and straight, reaches well past the
+# chassis. Stowed, with the shoulder straight up and the elbow folded back,
+# it is over the chassis.
 ARM_REACH = SHOULDER[0] + UPPER_ARM_LENGTH + FOREARM_LENGTH + FINGER_LENGTH
-FOOTPRINT_BACK = CHASSIS[0] / 2
-FOOTPRINT_SIDE = WHEEL_Y + WHEEL_WIDTH / 2
+
+# Arm commands, one character each as the BLE bridge takes them, that stow
+# the arm from any angle: shoulder and elbow each step to 180 degrees and
+# stop there. STOWED is near enough in radians for both joints, as the sim
+# reports them.
+STOW_ARM = "+X" * 36
+STOWED = math.radians(85)
 
 # The floor tiles end at +-0.6096 m, 12 modules of 0.1016 m, with no walls
 # round them.
@@ -31,7 +52,15 @@ ARENA_HALF = 6 * 0.1016
 WALL_MARGIN = 0.06
 
 KEEP_UP_FADE = 0.02
-
+# Fastest it turns where walls leave it no room to turn on the spot, and
+# where only a drop does, as it pivots with its wheels inside WHEEL_REACH.
+NARROW_TURN_RATE = 0.6
+PIVOT_TURN_RATE = 1.0
+# How far along the path it looks lined up in a gap, up to the first
+# corner sharper than LANE_CORNER.
+LANE_LOOKAHEAD = 0.12
+LANE_CORNER = math.radians(20)
+WHEEL_REACH = math.hypot(WHEEL_X, HALF_WIDTH)
 
 
 def normalize_angle(angle):
@@ -46,6 +75,16 @@ def yaw_from_quaternion(q):
     return math.atan2(
         2.0 * (q.w * q.z + q.x * q.y),
         1.0 - 2.0 * (q.y ** 2 + q.z ** 2))
+
+
+def arm_reach(shoulder, elbow):
+    """How far forward of a robot's centre its arm or body reaches, for
+    shoulder and elbow joint angles in radians, 0 being level and
+    straight and positive raising them."""
+    elbow_x = SHOULDER[0] + UPPER_ARM_LENGTH * math.cos(shoulder)
+    tip_x = elbow_x + (FOREARM_LENGTH + FINGER_LENGTH) * math.cos(
+        shoulder + elbow)
+    return max(HALF_LENGTH, elbow_x, tip_x)
 
 
 class TargetTracker:
@@ -106,117 +145,353 @@ class TargetTracker:
         limit = ARENA_HALF - WALL_MARGIN
         return clamp(x, -limit, limit), clamp(y, -limit, limit)
 
-    def intercept(self, hunter_x, hunter_y, hunter_yaw, standoff,
-                  hunter_speed, hunter_turn_rate, horizon, step=0.05):
-        """The earliest point on the target's predicted path that the
-        hunter can reach in time, and how many seconds ahead it is.
 
-        Reaching a point means getting within standoff of it, at
-        hunter_speed once turned toward it at hunter_turn_rate. If no point
-        within horizon seconds can be reached, the one at horizon is used.
-        """
-        seconds = 0.0
-
-        if abs(self.speed) < 1e-3:
-            # A still target is aimed at where it is, edge or not.
-            x, y = self.x, self.y
-            return x, y, 0.0
-
-        while True:
-            x, y = self.predict(seconds)
-            distance = math.hypot(x - hunter_x, y - hunter_y)
-            turn = abs(normalize_angle(
-                math.atan2(y - hunter_y, x - hunter_x) - hunter_yaw))
-            needed = (max(0.0, distance - standoff) / hunter_speed
-                      + turn / hunter_turn_rate)
-
-            if needed <= seconds or seconds >= horizon:
-                return x, y, seconds
-
-            seconds = min(horizon, seconds + step)
-
-
-def footprint_extent(bearing):
+def footprint_extent(bearing, reach=ARM_REACH):
     """Distance from a robot's centre to the edge of its footprint, along
-    bearing radians from its heading."""
+    bearing radians from its heading, for an arm or body reaching reach
+    metres forward."""
     dx, dy = math.cos(bearing), math.sin(bearing)
-    reach_x = ARM_REACH if dx > 0 else FOOTPRINT_BACK
+    reach_x = reach if dx > 0 else HALF_LENGTH
 
     return min(
         reach_x / abs(dx) if abs(dx) > 1e-9 else math.inf,
-        FOOTPRINT_SIDE / abs(dy) if abs(dy) > 1e-9 else math.inf)
+        HALF_WIDTH / abs(dy) if abs(dy) > 1e-9 else math.inf)
 
 
 def standoff_distance(hunter_x, hunter_y, target_x, target_y, target_yaw,
-                      clearance):
-    """Centre to centre distance that leaves the hunter's fingertips
-    clearance metres short of the target, whichever way the target faces."""
+                      clearance, target_reach=ARM_REACH):
+    """Centre to centre distance that leaves the front of the hunter, its
+    arm stowed, clearance metres short of the target, whichever way the
+    target faces and however far its arm reaches."""
     bearing = normalize_angle(
         math.atan2(hunter_y - target_y, hunter_x - target_x) - target_yaw)
 
-    return ARM_REACH + footprint_extent(bearing) + clearance
+    return HALF_LENGTH + footprint_extent(bearing, target_reach) + clearance
 
 
-def follow_command(hunter_x, hunter_y, hunter_yaw, waypoint_x, waypoint_y,
-                   remaining, max_linear, max_angular, linear_gain,
-                   angular_gain, turn_in_place):
-    """Twist (linear, angular) toward a waypoint on a route, slowing as
-    remaining, the distance left to drive, runs out. Like chase_command it
-    curves in, and turns on the spot past turn_in_place radians."""
+def drive_command(hunter_x, hunter_y, hunter_yaw, waypoint_x, waypoint_y,
+                  remaining, limit, max_angular, linear_gain, angular_gain,
+                  turn_in_place, can_turn=True, line_up=False, keep_up=0.0):
+    """Twist (linear, angular, heading_error) toward a waypoint, slowing
+    as remaining, the distance left to drive, runs out, plus keep_up to
+    match a moving target's speed.
+
+    Forward speed falls off with heading error, so the hunter curves in.
+    Past turn_in_place radians it turns on the spot, or past a few degrees
+    when line_up says it is about to drive into a gap it cannot turn in.
+    Where it cannot turn, can_turn False, it is lined up in such a gap: it
+    backs out when the waypoint is behind it, and only creeps while it
+    straightens up.
+    """
     heading_error = normalize_angle(
         math.atan2(waypoint_y - hunter_y, waypoint_x - hunter_x)
         - hunter_yaw)
+    error = heading_error
+    reverse = not can_turn and abs(error) > math.pi / 2
 
-    angular = clamp(angular_gain * heading_error, -max_angular, max_angular)
+    if reverse:
+        error = normalize_angle(error - math.pi)
 
-    if abs(heading_error) > turn_in_place:
+    angular = clamp(angular_gain * error, -max_angular, max_angular)
+    speed = clamp(linear_gain * remaining + keep_up, 0.0, limit)
+    threshold = 0.15 if line_up or not can_turn else turn_in_place
+
+    if abs(error) <= threshold:
+        linear = speed * math.cos(error)
+    elif can_turn:
         linear = 0.0
     else:
-        linear = clamp(linear_gain * remaining * math.cos(heading_error),
-                       0.0, max_linear)
+        linear = min(speed, 0.03)
 
-    return linear, angular, heading_error
-
-
-def chase_command(hunter_x, hunter_y, hunter_yaw, aim_x, aim_y,
-                  target_distance, standoff, max_linear, max_angular,
-                  linear_gain, angular_gain, turn_in_place,
-                  target_vx=0.0, target_vy=0.0):
-    """Twist (linear, angular) for the hunter.
-
-    aim_x and aim_y are where the hunter means to meet the target, and
-    target_distance is to where the target is now. The hunter drives to
-    stop standoff short of the aim point, plus the target's own velocity
-    along the hunter's heading so it keeps up rather than trailing. Forward
-    speed falls off with heading error, so the hunter curves in, and it
-    turns on the spot past turn_in_place radians. Closer than standoff to
-    the target itself, it backs off at up to half speed.
-    """
-    heading_error = normalize_angle(
-        math.atan2(aim_y - hunter_y, aim_x - hunter_x) - hunter_yaw)
-
-    angular = clamp(angular_gain * heading_error, -max_angular, max_angular)
-
-    aim_gap = math.hypot(aim_x - hunter_x, aim_y - hunter_y) - standoff
-    target_gap = target_distance - standoff
-    keep_up = (target_vx * math.cos(hunter_yaw)
-               + target_vy * math.sin(hunter_yaw))
-
-    # Matching the target's speed fades out over the last KEEP_UP_FADE
-    # metres, so if the target stops the hunter is not carried into it.
-    keep_up *= clamp(target_gap / KEEP_UP_FADE, 0.0, 1.0)
-
-    if target_gap < 0.0:
-        linear = linear_gain * target_gap
-    elif abs(heading_error) > turn_in_place:
-        linear = 0.0
-    elif abs(aim_gap) < 0.01 and abs(keep_up) < 0.01:
+    if remaining < 0.01 and abs(keep_up) < 0.01:
         # A small dead band, so the hunter sits still at the standoff
         # instead of rocking back and forth on pose noise.
         linear = 0.0
-    else:
-        linear = (linear_gain * aim_gap + keep_up) * math.cos(heading_error)
 
-    linear = clamp(linear, -max_linear / 2, max_linear)
+    if not can_turn:
+        # In a gap it cannot turn in it only straightens up, gently, as
+        # it goes: spun hard, skidding wheels swing it into the side.
+        angular = 0.0 if linear == 0.0 else clamp(
+            angular, -NARROW_TURN_RATE, NARROW_TURN_RATE)
 
-    return linear, angular, heading_error
+    return (-linear if reverse else linear), angular, heading_error
+
+
+def lane_ahead(path):
+    """The start of a path, as far as its first real corner: the little
+    jogs between cell centres along a gap do not count."""
+    for k in range(1, len(path) - 1):
+        if (math.dist(path[0], path[k]) > 0.03
+                and corner_angle(path[k - 1], path[k], path[k + 1])
+                > LANE_CORNER):
+            return path[:k + 1]
+    return path
+
+
+class Chaser:
+    """Steers a hunter after a target over a Terrain, or straight at it
+    with none. Feed it the target's poses with track, and call update with
+    the hunter's each tick."""
+
+    def __init__(self, terrain=None, clearance=0.03, max_linear=0.3,
+                 max_angular=1.5, linear_gain=1.2, angular_gain=3.0,
+                 turn_in_place=1.0, lead_time=0.6, approach_speed=0.25,
+                 ramp_speed=0.15, narrow_speed=0.15, stuck_time=1.0):
+        self.terrain = terrain
+        self.clearance = clearance
+        self.max_linear = max_linear
+        self.max_angular = max_angular
+        self.linear_gain = linear_gain
+        self.angular_gain = angular_gain
+        self.turn_in_place = turn_in_place
+        self.lead_time = lead_time
+        self.approach_speed = approach_speed
+        self.ramp_speed = ramp_speed
+        self.narrow_speed = narrow_speed
+        self.stuck_time = stuck_time
+
+        self.target = TargetTracker()
+        # How far forward the target's arm reaches. Taken to be out until
+        # set_target_arm says otherwise.
+        self.target_reach = ARM_REACH
+        self.history = deque()
+        self.recovery = None
+        self.last_recovery = None
+        self.waiting = False
+        self.status = "waiting"
+        self.path = None
+        self.engaged = False
+        self.distance = math.inf
+        self.gap = math.inf
+
+    def track(self, x, y, stamp, yaw=0.0):
+        self.target.update(x, y, stamp, yaw)
+
+    def set_target_arm(self, shoulder, elbow):
+        self.target_reach = arm_reach(shoulder, elbow)
+
+    def aim(self, x, y, distance, standoff):
+        """Where to head for: where the target will be by the time the
+        hunter gets there, looking no more than lead_time ahead."""
+        t = self.target
+
+        if abs(t.speed) < 0.02:
+            return t.x, t.y
+
+        lead = clamp((distance - standoff) / self.approach_speed,
+                     0.0, self.lead_time)
+        return t.predict(lead)
+
+    def speed_limit(self, x, y, can_turn):
+        if self.terrain is None:
+            return self.max_linear
+
+        if not can_turn:
+            return self.narrow_speed
+
+        # Slower near a wall or an edge, so a turn is not made too late.
+        room = clamp((self.terrain.clearance_at(x, y) - TURN_CLEARANCE)
+                     / (SOFT_CLEARANCE - TURN_CLEARANCE), 0.0, 1.0)
+        return self.max_linear * (0.75 + 0.25 * room)
+
+    def update(self, now, x, y, yaw):
+        """Twist (linear, angular) for the hunter at x, y, yaw."""
+        t = self.target
+        terrain = self.terrain
+        self.distance = distance = math.hypot(t.x - x, t.y - y)
+        standoff = standoff_distance(x, y, t.x, t.y, t.yaw, self.clearance,
+                                     self.target_reach)
+        self.gap = gap = distance - standoff
+        aim_x, aim_y = self.aim(x, y, distance, standoff)
+
+        path = None
+        if terrain is not None:
+            path = terrain.route(x, y, aim_x, aim_y, t.x, t.y, yaw)
+        self.path = path
+
+        if self.recovery is not None and now < self.recovery[0]:
+            linear, angular = self.recovery[1], 0.0
+            self.status = "freeing itself"
+        elif terrain is not None and path is None:
+            # A robot is off the arena, or the hunter is boxed in.
+            linear, angular = 0.0, 0.0
+            self.status = "stopped, no way to the target"
+        else:
+            self.recovery = None
+            linear, angular = self.steer(x, y, yaw, path, aim_x, aim_y,
+                                         standoff, gap)
+
+        if terrain is not None and terrain.on_slope(x, y) and linear != 0.0:
+            # Creeping up a ramp stalls on its steep top, so on a ramp it
+            # goes at ramp_speed at least, either way.
+            linear = math.copysign(max(abs(linear), self.ramp_speed), linear)
+
+        self.engaged = gap < 0.03
+        self.check_stuck(now, x, y, yaw, linear, angular)
+        return linear, angular
+
+    def steer(self, x, y, yaw, path, aim_x, aim_y, standoff, gap):
+        t = self.target
+        terrain = self.terrain
+        can_turn = terrain is None or terrain.can_turn(x, y)
+        limit = self.speed_limit(x, y, can_turn)
+        pivot = False
+
+        if not can_turn:
+            # With only a drop too close to turn, as in a corner of the
+            # floor, it can still pivot, slowly, its wheels staying on.
+            wall, drop = terrain.room_at(x, y)
+            pivot = can_turn = (wall >= TURN_CLEARANCE
+                                and drop >= WHEEL_REACH)
+        keep_up = 0.0
+
+        self.waiting = False
+
+        if path is not None and path.partial:
+            # Out of reach, so wait as close as the hunter can get.
+            wx, wy, remaining = next_waypoint(path, 0.0) if len(path) > 2 \
+                else (*path[-1], path_length(path))
+            if math.dist((x, y), path[-1]) < 0.03:
+                wx, wy, remaining = t.x, t.y, 0.0
+                self.waiting = True
+            self.status = "target out of reach, going as close as possible"
+        elif path is None or len(path) == 2:
+            # Clear run: at the aim point, keeping up with the target.
+            wx, wy = aim_x, aim_y
+            remaining = math.hypot(aim_x - x, aim_y - y) - standoff
+            keep_up = (t.vx * math.cos(yaw) + t.vy * math.sin(yaw)) * clamp(
+                gap / KEEP_UP_FADE, 0.0, 1.0)
+            self.status = "clear run at the target"
+        elif not can_turn:
+            # In a gap it cannot turn in it heads for a point a little way
+            # along the path, which lies along the gap, rather than for a
+            # cell centre that may be beside it when it has drifted off
+            # the middle, and so eases back to the middle as it goes.
+            wx, wy = point_along(lane_ahead(path), LANE_LOOKAHEAD)
+            remaining = max(0.0, path_length(path) - standoff)
+            self.status = "path"
+        else:
+            # A corner where the next leg goes into a gap too narrow to turn
+            # in is where the hunter lines up for it, so it stops right on
+            # it rather than cutting it.
+            precise = len(path) > 2 and not terrain.free_line(
+                *path[1], *path[2])
+            wx, wy, remaining = next_waypoint(
+                path, standoff, reached=0.01 if precise else 0.03)
+            if precise and (wx, wy) == tuple(path[1]):
+                remaining = min(remaining, math.dist((x, y), path[1]) + 0.005)
+            elif not precise:
+                # Elsewhere it curves round a corner without slowing, if the
+                # way across it is open.
+                ahead = self.cut_corner(path, x, y)
+                if ahead is not None:
+                    wx, wy = ahead
+                    remaining = max(0.0, path_length(path) - standoff)
+            self.status = "path"
+
+        if gap < 0.0 and not (path is not None and path.partial):
+            # Caught up, or the target came at the hunter: it holds its
+            # ground facing the target rather than giving any back.
+            wx, wy, remaining, keep_up = t.x, t.y, 0.0, 0.0
+            self.status = "with the target"
+
+        line_up = terrain is not None and not terrain.free_line(x, y, wx, wy)
+        linear, angular, _ = drive_command(
+            x, y, yaw, wx, wy, remaining, limit, self.max_angular,
+            self.linear_gain, self.angular_gain, self.turn_in_place,
+            can_turn, line_up, keep_up)
+
+        if pivot:
+            angular = clamp(angular, -PIVOT_TURN_RATE, PIVOT_TURN_RATE)
+        elif (not can_turn and abs(linear) <= 0.03 and linear != 0.0
+              and not self.safe_move(x, y, yaw, math.copysign(1, linear),
+                                     0.04, walls=False)):
+            # Creeping while it straightens up would take a wheel over an
+            # edge: it turns where it is instead. A wall it may scrape.
+            heading_error = normalize_angle(
+                math.atan2(wy - y, wx - x) - yaw)
+            if abs(heading_error) > math.pi / 2:
+                heading_error = normalize_angle(heading_error - math.pi)
+            linear = 0.0
+            angular = clamp(self.angular_gain * heading_error,
+                            -NARROW_TURN_RATE, NARROW_TURN_RATE)
+        return linear, angular
+
+    def cut_corner(self, path, x, y, lookahead=(0.12, 0.09, 0.06)):
+        """A point past the path's first corner, at most lookahead along
+        it, that the hunter can drive straight to with room to spare, or
+        None."""
+        corner = math.dist((x, y), path[1])
+
+        for distance in lookahead:
+            if distance <= corner:
+                return None
+
+            px, py = point_along(path, distance)
+            if self.terrain.open_line(x, y, px, py):
+                return px, py
+
+        return None
+
+    def safe_move(self, x, y, yaw, way, distance=0.07, walls=True):
+        """Whether driving distance straight forward, way 1, or back, way
+        -1, ends somewhere the hunter is allowed to be, or with walls
+        False, at least clear of any drop."""
+        if self.terrain is None:
+            return True
+
+        end_x = x + way * distance * math.cos(yaw)
+        end_y = y + way * distance * math.sin(yaw)
+        wall, drop = self.terrain.room_at(end_x, end_y)
+        return (not math.isnan(self.terrain.height_at(end_x, end_y))
+                and (wall >= HALF_WIDTH or not walls)
+                and drop >= DROP_HALF_WIDTH)
+
+    def check_stuck(self, now, x, y, yaw, linear, angular):
+        """Frees the hunter when it is pressed against something the plan
+        did not allow for: after stuck_time of driving or turning without
+        moving at all, or three times that without getting anywhere
+        whatever it was doing, while not with the target nor waiting for
+        it. It backs off for a moment, or goes forward if it was backing,
+        and the other way the next time, but only a way that keeps it on
+        ground it may be on."""
+        history = self.history
+        driving = abs(linear) > 0.03 or abs(angular) > 0.3
+        history.append((now, x, y, yaw, driving, linear))
+
+        while history and now - history[0][0] > 3 * self.stuck_time:
+            history.popleft()
+
+        if (self.recovery is not None or self.engaged or self.waiting
+                or self.status == "stopped, no way to the target"):
+            history.clear()
+            return
+
+        recent = [h for h in history if now - h[0] <= self.stuck_time]
+        pushing = (now - recent[0][0] >= self.stuck_time * 0.9
+                   and all(h[4] for h in recent)
+                   and math.hypot(x - recent[0][1], y - recent[0][2]) < 0.01
+                   and abs(normalize_angle(yaw - recent[0][3])) < 0.05)
+        idle = (now - history[0][0] >= 3 * self.stuck_time * 0.95
+                and math.hypot(x - history[0][1], y - history[0][2]) < 0.02)
+
+        if not (pushing or idle):
+            return
+
+        push = sum(h[5] for h in recent)
+        back = -1.0 if push >= 0.0 else 1.0
+
+        if self.last_recovery is not None and now - self.last_recovery[0] < 5:
+            back = -self.last_recovery[1]
+
+        # Only where the move would leave it on ground it may be on, so it
+        # never frees itself over the edge of the floor or a platform.
+        safe = [way for way in (back, -back) if self.safe_move(x, y, yaw, way)]
+        if not safe:
+            history.clear()
+            return
+        back = safe[0]
+
+        self.recovery = (now + 0.5, 0.12 * back)
+        self.last_recovery = (now, back)
+        history.clear()

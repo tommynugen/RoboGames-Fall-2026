@@ -396,8 +396,9 @@ def test_stacked_modules_stand_on_the_platforms_under_them():
     assert ground.height_at(*al.centre(layout, 2, 2)) == \
         pytest.approx(2 * inch, abs=1e-3)
 
+    # The curved ramp's foot, at the module's edge, is on the platform.
     x, y = al.centre(layout, 5, 5)
-    assert ground.height_at(x, y - 0.04) == pytest.approx(2 * inch,
+    assert ground.height_at(x, y - 0.05) == pytest.approx(2 * inch,
                                                            abs=2e-3)
     assert ground.height_at(x, y + 0.04) == pytest.approx(3 * inch,
                                                            abs=2e-3)

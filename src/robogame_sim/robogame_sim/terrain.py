@@ -2,16 +2,26 @@
 
 The collision geometry of the arena model is rasterised into a height map:
 the top of every box, and the upward faces of every mesh. Wherever the
-height jumps between neighbouring cells, as at a platform's edge, a ramp's
-sides or the edge of the floor tiles, is a step the wheels cannot climb,
-and the robot's centre is kept CLEARANCE away from it. Where the ground
-slopes, on a ramp, the robot may only drive up or down the slope, and that
-holds for LINE_UP around it too, so it lines up before climbing and comes
-off the top straight.
+height jumps, as at a platform's edge, a wall, a ramp's sides or the edge of
+the floor tiles, is a step the wheels cannot climb. The steps are found on
+a raster FINE times finer than the cells, so each cell knows how far it is
+from the nearest one to a couple of millimetres: tight gaps between walls
+need that.
 
-A path from the hunter to the target is planned over the cells with A*,
-then pulled straight, so the hunter goes round a platform that is in the
-way and up a ramp to reach a target on top of one.
+Where a cell has TURN_CLEARANCE the robot can turn on the spot. Where it
+only has CLEARANCE, in a gap narrower than the robot is long, the robot can
+still drive through lined up with the gap, along one of the four grid
+axes, if its body fits there that way round. It cannot turn in such a cell,
+so a path only enters one lined up and leaves it the same way.
+
+Where the ground slopes, on a ramp, the robot may only drive up or down the
+slope, and that holds for LINE_UP around it too, so it lines up before
+climbing and comes off the top straight.
+
+A path from the hunter to the target is planned with A* over the cells,
+and the way the robot faces in each narrow one, then pulled straight, so
+the hunter goes round a platform that is in the way, through a gap between
+walls, and up a ramp to reach a target on top of one.
 """
 
 import heapq
@@ -23,24 +33,61 @@ import xml.etree.ElementTree as ElementTree
 
 import numpy as np
 
-from robogame_sim.robot_sdf import CHASSIS, WHEEL_WIDTH, WHEEL_Y
+from robogame_sim.robot_sdf import (
+    CHASSIS,
+    WHEEL_RADIUS,
+    WHEEL_WIDTH,
+    WHEEL_X,
+    WHEEL_Y,
+)
 
-RESOLUTION = 0.02
+# Half an inch: on a layout every module edge is on this lattice, and so is
+# the middle of every gap between two modules, so with cell centres on it
+# a gap is planned through its middle.
+RESOLUTION = 0.0127
+FINE = 4
 # Height change between neighbouring cells that is a step, not a slope.
-# The arena ramps rise at most about 0.008 m per cell, the platforms 0.025.
+# The arena ramps rise at most about 0.006 m per cell, the platforms 0.025.
 STEP = 0.013
 # Gradient above which the ground counts as a ramp.
 SLOPE = 0.05
-# The chassis corners are 0.053 m from its centre, so it can turn on the
-# spot at CLEARANCE from a step without touching it. Cells closer than
-# SOFT_CLEARANCE cost more, so paths keep a little further off.
-CLEARANCE = math.hypot(CHASSIS[0] / 2, WHEEL_Y + WHEEL_WIDTH / 2)
+
+# The robot's body seen from above, wheels and all, with its arm stowed
+# over the chassis: the wheels stand out past both ends of the chassis.
+HALF_LENGTH = max(CHASSIS[0] / 2, WHEEL_X + WHEEL_RADIUS)
+HALF_WIDTH = max(CHASSIS[1] / 2, WHEEL_Y + WHEEL_WIDTH / 2)
+# Turning on the spot, the body's corners sweep a circle, which still just
+# fits in a 5 inch gap between walls.
+TURN_CLEARANCE = math.hypot(HALF_LENGTH, HALF_WIDTH) + 0.002
+# Room either side of the body, and at its ends, to drive lined up through
+# a gap it cannot turn in.
+SIDE_MARGIN = 0.01
+END_MARGIN = 0.004
+CLEARANCE = HALF_WIDTH + SIDE_MARGIN
+# A drop, the edge of the floor or of a platform the robot is on, only has
+# to stay clear of where the wheels touch the ground: the ends of the body
+# may hang over it.
+DROP_HALF_LENGTH = WHEEL_X + 0.008
+DROP_HALF_WIDTH = HALF_WIDTH + 0.005
+DROP_TURN_CLEARANCE = math.hypot(WHEEL_X, HALF_WIDTH) + 0.004
+# Cells closer than SOFT_CLEARANCE to a step cost more, so paths keep a
+# little further off, and lined up only cells cost the most, so a gap is
+# used when it saves going a long way round.
 SOFT_CLEARANCE = 0.1
+NARROW_COST = 3.0
 LINE_UP = 0.07
 # Moves on and around a ramp must be within 15 degrees of its slope.
 ALIGN = math.cos(math.radians(15))
+# The robot steps sideways into a lane beside it, one cell over while it
+# drives LANE_CHANGE cells along, a little under 10 degrees off the lane.
+# A straight line through cells the robot must be lined up in may be that
+# far off their axis.
+LANE_CHANGE = 6
+LINE_TOLERANCE = math.radians(10)
 
-MOVES = [(di, dj) for di in (-1, 0, 1) for dj in (-1, 0, 1) if di or dj]
+# Opposite moves are four apart, and d % 4 is the axis a move runs along.
+MOVES = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
+AXES = [math.pi / 4 * k for k in range(4)]
 
 
 class Path(list):
@@ -146,21 +193,123 @@ def sdf_triangles(root, resolve):
     return np.concatenate(triangles) if triangles else np.zeros((0, 3, 3))
 
 
+def rasterise(triangles, origin, shape, resolution):
+    """Highest upward facing surface over each cell centre of a grid, NaN
+    where there is none."""
+    height = np.full(shape, np.nan)
+    r = resolution
+    xs = origin[0] + (np.arange(shape[0]) + 0.5) * r
+    ys = origin[1] + (np.arange(shape[1]) + 0.5) * r
+
+    for a, b, c in triangles:
+        normal = np.cross(b - a, c - a)
+        normal_z = normal[2]
+        area = np.linalg.norm(normal)
+
+        # Walls are not ground. Undersides are kept: they are under
+        # the top, so the highest surface still wins.
+        if area == 0 or abs(normal_z) < 0.3 * area:
+            continue
+
+        lo = np.floor((np.minimum(np.minimum(a, b), c)[:2]
+                       - origin) / r - 0.5).astype(int)
+        hi = np.ceil((np.maximum(np.maximum(a, b), c)[:2]
+                      - origin) / r - 0.5).astype(int)
+        lo = np.clip(lo, 0, None)
+        hi = np.minimum(hi, np.array(shape) - 1)
+
+        if (hi < lo).any():
+            continue
+
+        x, y = np.meshgrid(xs[lo[0]:hi[0] + 1], ys[lo[1]:hi[1] + 1],
+                           indexing="ij")
+
+        # Barycentric coordinates of each cell centre.
+        u = ((b[1] - c[1]) * (x - c[0])
+             + (c[0] - b[0]) * (y - c[1])) / normal_z
+        v = ((c[1] - a[1]) * (x - c[0])
+             + (a[0] - c[0]) * (y - c[1])) / normal_z
+        w = 1 - u - v
+        inside = (u >= -1e-9) & (v >= -1e-9) & (w >= -1e-9)
+        z = u * a[2] + v * b[2] + w * c[2]
+
+        patch = height[lo[0]:hi[0] + 1, lo[1]:hi[1] + 1]
+        patch[inside] = np.fmax(patch[inside], z[inside])
+
+    return height
+
+
+def step_edges(height, origin, resolution):
+    """Points half way between neighbouring cells of a height map that a
+    step lies between, the edge of the map included, as rows of x, y and
+    the ground height below and above the step, -inf below for none."""
+    padded = np.pad(height, 1, constant_values=np.nan)
+    xs = origin[0] + (np.arange(-1, height.shape[0] + 1) + 0.5) * resolution
+    ys = origin[1] + (np.arange(-1, height.shape[1] + 1) + 0.5) * resolution
+    rows = []
+
+    for a, b, di, dj in ((padded[:-1], padded[1:], 1, 0),
+                         (padded[:, :-1], padded[:, 1:], 0, 1)):
+        with np.errstate(invalid="ignore"):
+            edge = (np.isnan(a) != np.isnan(b)) | (np.abs(a - b) > STEP)
+
+        i, j = np.nonzero(edge)
+        ha = np.nan_to_num(a[i, j], nan=-np.inf)
+        hb = np.nan_to_num(b[i, j], nan=-np.inf)
+        rows.append(np.stack([(xs[i] + xs[i + di]) / 2,
+                              (ys[j] + ys[j + dj]) / 2,
+                              np.minimum(ha, hb), np.maximum(ha, hb)],
+                             axis=1))
+
+    return np.concatenate(rows)
+
+
+def shifted(array, di, dj, fill):
+    """array moved so that out[i, j] is array[i + di, j + dj]."""
+    out = np.full_like(array, fill)
+    w, h = array.shape[:2]
+    out[max(0, -di):w - max(0, di), max(0, -dj):h - max(0, dj)] = \
+        array[max(0, di):w - max(0, -di), max(0, dj):h - max(0, -dj)]
+    return out
+
+
+def line_axis(dx, dy):
+    """The grid axis, 0 to 3, a line along dx, dy runs along to within
+    LINE_TOLERANCE, or None."""
+    angle = math.atan2(dy, dx) % math.pi
+    axis = int(round(angle / (math.pi / 4)))
+    off = abs(angle - axis * math.pi / 4)
+
+    return axis % 4 if off <= LINE_TOLERANCE else None
+
+
 class Terrain:
-    """Height map of the arena, with the cells a robot can drive on."""
+    """Height map of the arena, with the cells a robot can drive on, and
+    the way it must face in those it cannot turn in."""
 
     def __init__(self, triangles, resolution=RESOLUTION):
-        self.resolution = resolution
-        points = triangles.reshape(-1, 3)
-        self.origin = points[:, :2].min(axis=0)
-        shape = np.ceil(
-            (points[:, :2].max(axis=0) - self.origin) / resolution
-        ).astype(int)
-        self.shape = (int(shape[0]), int(shape[1]))
+        self.resolution = r = resolution
+        corners = triangles.reshape(-1, 3)[:, :2]
+        # Cell centres on multiples of the resolution.
+        first = np.floor(corners.min(axis=0) / r + 0.5)
+        last = np.ceil(corners.max(axis=0) / r - 0.5)
+        self.origin = (first - 0.5) * r
+        self.shape = (int(last[0] - first[0]) + 1,
+                      int(last[1] - first[1]) + 1)
+        self.xs = self.origin[0] + (np.arange(self.shape[0]) + 0.5) * r
+        self.ys = self.origin[1] + (np.arange(self.shape[1]) + 0.5) * r
 
-        self.height = self.rasterise(triangles)
-        self.find_steps()
+        self.height = rasterise(triangles, self.origin, self.shape, r)
+        fine = rasterise(triangles, self.origin,
+                         (self.shape[0] * FINE, self.shape[1] * FINE),
+                         r / FINE)
+        edges = step_edges(fine, self.origin, r / FINE)
+
+        self.find_clearance(edges)
         self.find_slopes()
+        self.find_room(edges)
+        self.build_graph()
+        self.index_edges(edges)
 
     @classmethod
     def from_sdf(cls, path, resolution=RESOLUTION):
@@ -169,87 +318,81 @@ class Terrain:
     # -- building the map -------------------------------------------------
 
     def centres(self):
+        return np.meshgrid(self.xs, self.ys, indexing="ij")
+
+    def near_edges(self, edges, reach):
+        """For every offset within reach cells, the cell each step edge
+        point lands in moved by it, those inside the map, the point's
+        offset from that cell's centre, and whether the step is a drop
+        seen from that cell: whether the cell is on its high side."""
         r = self.resolution
-        xs = self.origin[0] + (np.arange(self.shape[0]) + 0.5) * r
-        ys = self.origin[1] + (np.arange(self.shape[1]) + 0.5) * r
-        return np.meshgrid(xs, ys, indexing="ij")
+        ci = np.floor((edges[:, 0] - self.origin[0]) / r).astype(int)
+        cj = np.floor((edges[:, 1] - self.origin[1]) / r).astype(int)
+        level = np.nan_to_num(self.height, nan=-np.inf)
 
-    def rasterise(self, triangles):
-        """Highest upward facing surface over each cell centre, NaN where
-        there is none."""
-        height = np.full(self.shape, np.nan)
-        cx, cy = self.centres()
-        r = self.resolution
+        for di in range(-reach, reach + 1):
+            for dj in range(-reach, reach + 1):
+                i, j = ci + di, cj + dj
+                ok = ((i >= 0) & (i < self.shape[0])
+                      & (j >= 0) & (j < self.shape[1]))
+                i, j, near = i[ok], j[ok], edges[ok]
+                h = level[i, j]
 
-        for a, b, c in triangles:
-            normal = np.cross(b - a, c - a)
-            normal_z = normal[2]
-            area = np.linalg.norm(normal)
+                with np.errstate(invalid="ignore"):
+                    drop = h - near[:, 2] > near[:, 3] - h
 
-            # Walls are not ground. Undersides are kept: they are under
-            # the top, so the highest surface still wins.
-            if area == 0 or abs(normal_z) < 0.3 * area:
-                continue
+                yield (i, j, near[:, 0] - self.xs[i],
+                       near[:, 1] - self.ys[j], drop)
 
-            lo = np.floor((np.minimum(np.minimum(a, b), c)[:2]
-                           - self.origin) / r - 0.5).astype(int)
-            hi = np.ceil((np.maximum(np.maximum(a, b), c)[:2]
-                          - self.origin) / r - 0.5).astype(int)
-            lo = np.clip(lo, 0, None)
-            hi = np.minimum(hi, np.array(self.shape) - 1)
+    def find_clearance(self, edges):
+        """Distance from each cell centre to the nearest wall, a step up,
+        and to the nearest drop, as far as SOFT_CLEARANCE, inf beyond.
 
-            if (hi < lo).any():
-                continue
+        clearance is the two in one, a drop counting as a wall that much
+        further off as the wheels sit in from the body's corners, so a
+        cell is free, with room to turn, where clearance is at least
+        TURN_CLEARANCE.
+        """
+        wall = np.full(self.shape, np.inf)
+        drop = np.full(self.shape, np.inf)
+        reach = int(math.ceil(SOFT_CLEARANCE / self.resolution)) + 1
 
-            x = cx[lo[0]:hi[0] + 1, lo[1]:hi[1] + 1]
-            y = cy[lo[0]:hi[0] + 1, lo[1]:hi[1] + 1]
+        for i, j, dx, dy, is_drop in self.near_edges(edges, reach):
+            distance = np.hypot(dx, dy)
+            np.minimum.at(wall, (i[~is_drop], j[~is_drop]),
+                          distance[~is_drop])
+            np.minimum.at(drop, (i[is_drop], j[is_drop]), distance[is_drop])
 
-            # Barycentric coordinates of each cell centre.
-            u = ((b[1] - c[1]) * (x - c[0])
-                 + (c[0] - b[0]) * (y - c[1])) / normal_z
-            v = ((c[1] - a[1]) * (x - c[0])
-                 + (a[0] - c[0]) * (y - c[1])) / normal_z
-            w = 1 - u - v
-            inside = (u >= -1e-9) & (v >= -1e-9) & (w >= -1e-9)
-            z = u * a[2] + v * b[2] + w * c[2]
-
-            patch = height[lo[0]:hi[0] + 1, lo[1]:hi[1] + 1]
-            patch[inside] = np.fmax(patch[inside], z[inside])
-
-        return height
-
-    def find_steps(self):
-        h = self.height
-        step = np.isnan(h)
-        padded = np.pad(h, 1, constant_values=np.nan)
-
-        for di, dj in MOVES:
-            neighbour = padded[1 + di:1 + di + h.shape[0],
-                               1 + dj:1 + dj + h.shape[1]]
-            with np.errstate(invalid="ignore"):
-                step |= np.isnan(neighbour) | (np.abs(neighbour - h) > STEP)
-
-        cx, cy = self.centres()
-        steps = np.stack([cx[step], cy[step]], axis=1)
-        self.clearance = np.full(self.shape, np.inf)
-
-        # Distance from each cell centre to the nearest step, in chunks so
-        # the arrays stay small.
-        flat = np.stack([cx.ravel(), cy.ravel()], axis=1)
-        nearest = np.full(len(flat), np.inf)
-
-        for start in range(0, len(steps), 256):
-            chunk = steps[start:start + 256]
-            d = np.hypot(flat[:, None, 0] - chunk[None, :, 0],
-                         flat[:, None, 1] - chunk[None, :, 1])
-            nearest = np.minimum(nearest, d.min(axis=1))
-
-        self.clearance = nearest.reshape(self.shape)
-        self.clearance[step] = 0.0
-        self.free = self.clearance >= CLEARANCE
-        self.cost = 1.0 + 4.0 * np.clip(
+        ground = ~np.isnan(self.height)
+        self.clearance = np.where(ground, np.minimum(
+            wall, drop + TURN_CLEARANCE - DROP_TURN_CLEARANCE), 0.0)
+        self.room = (ground & (wall >= CLEARANCE)
+                     & (drop >= DROP_HALF_WIDTH))
+        self.free = self.clearance >= TURN_CLEARANCE
+        self.cost = 1.0 + 2.0 * np.clip(
             (SOFT_CLEARANCE - self.clearance)
-            / (SOFT_CLEARANCE - CLEARANCE), 0.0, 1.0)
+            / (SOFT_CLEARANCE - TURN_CLEARANCE), 0.0, 1.0)
+
+    def find_room(self, edges):
+        """lined_up[a]: the robot's body fits in the cell facing along
+        axis a, either way, though it may not be able to turn there."""
+        sizes = ((HALF_LENGTH + END_MARGIN, HALF_WIDTH + SIDE_MARGIN),
+                 (DROP_HALF_LENGTH, DROP_HALF_WIDTH))
+        blocked = np.zeros((4,) + self.shape, dtype=bool)
+        reach = int(math.ceil(math.hypot(*sizes[0]) / self.resolution)) + 1
+
+        for i, j, dx, dy, is_drop in self.near_edges(edges, reach):
+            half_length = np.where(is_drop, sizes[1][0], sizes[0][0])
+            half_width = np.where(is_drop, sizes[1][1], sizes[0][1])
+
+            for a, angle in enumerate(AXES):
+                c, s = math.cos(angle), math.sin(angle)
+                inside = ((np.abs(dx * c + dy * s) < half_length)
+                          & (np.abs(dy * c - dx * s) < half_width))
+                blocked[a, i[inside], j[inside]] = True
+
+        self.lined_up = self.room & ~blocked
+        self.cost[~self.free] = NARROW_COST
 
     def find_slopes(self):
         """The slope direction that moves on and around a ramp must follow,
@@ -257,7 +400,7 @@ class Terrain:
         h = np.where(np.isnan(self.height), 0.0, self.height)
         gx, gy = np.gradient(h, self.resolution)
         magnitude = np.hypot(gx, gy)
-        sloped = self.free & (magnitude > SLOPE)
+        sloped = self.room & (magnitude > SLOPE)
         self.sloped = (magnitude > SLOPE) & ~np.isnan(self.height)
 
         cx, cy = self.centres()
@@ -286,7 +429,142 @@ class Terrain:
         axis[has, 1] = sum_y[has] / norm[has]
         self.axis = axis.reshape(self.shape + (2,))
 
+    def build_graph(self):
+        """The states A* plans over and the moves between them.
+
+        A state is a cell and, in a cell the robot cannot turn in, the axis
+        it faces along there. Moves are symmetric, so a path back is the
+        same path reversed, and which states can reach which is worked out
+        here once.
+        """
+        # kinds[0] is turning on the spot, kinds[1 + a] lined up on axis a.
+        kinds = np.zeros((5,) + self.shape, dtype=bool)
+        kinds[0] = self.free
+        kinds[1:] = self.lined_up & ~self.free
+        self.state_id = np.full(kinds.shape, -1)
+        self.state_id[kinds] = np.arange(int(kinds.sum()))
+        self.state_kind, self.state_i, self.state_j = np.nonzero(kinds)
+        count = len(self.state_i)
+
+        passable = self.free | self.lined_up
+        ax, ay = self.axis[..., 0], self.axis[..., 1]
+        level = (ax == 0.0) & (ay == 0.0)
+        edges = [[] for _ in range(count)]
+
+        for d, (di, dj) in enumerate(MOVES):
+            a = d % 4
+            length = math.hypot(di, dj)
+            # The ramp rule for moving along di, dj, in a cell.
+            along = level | (np.abs(ax * di + ay * dj) >= ALIGN * length)
+            there_ok = shifted(passable[a] & along, di, dj, False)
+            ci, cj = np.nonzero(passable[a] & along & there_ok)
+            ni, nj = ci + di, cj + dj
+
+            here = np.where(self.free[ci, cj], self.state_id[0, ci, cj],
+                            self.state_id[1 + a, ci, cj])
+            there = np.where(self.free[ni, nj], self.state_id[0, ni, nj],
+                             self.state_id[1 + a, ni, nj])
+            step = (self.resolution * length * 0.5
+                    * (self.cost[ci, cj] + self.cost[ni, nj]))
+
+            for s, t, c in zip(here.tolist(), there.tolist(), step.tolist()):
+                edges[s].append((t, c))
+
+        # Lane changes, on level ground along the x and y axes: both lanes
+        # must have room lined up all the way along.
+        m = LANE_CHANGE
+        step = self.resolution * math.hypot(m, 1) * NARROW_COST
+
+        for a, (fi, fj) in ((0, (1, 0)), (2, (0, 1))):
+            lane = passable[a] & level
+
+            for sf in (1, -1):
+                for sp in (1, -1):
+                    di, dj = sf * fi, sf * fj
+                    pi, pj = sp * fj, sp * fi
+                    ok = np.ones(self.shape, dtype=bool)
+                    for k in range(m + 1):
+                        ok &= shifted(lane, k * di, k * dj, False)
+                        ok &= shifted(lane, pi + k * di, pj + k * dj, False)
+                    ni_off, nj_off = pi + m * di, pj + m * dj
+                    ok &= ~(self.free & shifted(self.free, ni_off, nj_off,
+                                                False))
+                    ci, cj = np.nonzero(ok)
+                    ni, nj = ci + ni_off, cj + nj_off
+
+                    here = np.where(self.free[ci, cj],
+                                    self.state_id[0, ci, cj],
+                                    self.state_id[1 + a, ci, cj])
+                    there = np.where(self.free[ni, nj],
+                                     self.state_id[0, ni, nj],
+                                     self.state_id[1 + a, ni, nj])
+
+                    for s, t in zip(here.tolist(), there.tolist()):
+                        edges[s].append((t, step))
+
+        self.edges = edges
+        self.state_x = self.xs[self.state_i].tolist()
+        self.state_y = self.ys[self.state_j].tolist()
+
+        # Which states can reach which, by flood fill.
+        label = [-1] * count
+        for seed in range(count):
+            if label[seed] >= 0:
+                continue
+            label[seed] = seed
+            frontier = [seed]
+            while frontier:
+                for t, _ in edges[frontier.pop()]:
+                    if label[t] < 0:
+                        label[t] = seed
+                        frontier.append(t)
+        self.label = np.array(label)
+        self.label_size = np.bincount(self.label, minlength=count)
+
+    def index_edges(self, edges):
+        """Keeps the step edge points sorted by the cell they are in, so
+        clearance_at can find those near any point."""
+        r = self.resolution
+        ci = np.floor((edges[:, 0] - self.origin[0]) / r).astype(int)
+        cj = np.floor((edges[:, 1] - self.origin[1]) / r).astype(int)
+        key = ci * self.shape[1] + cj
+        order = np.argsort(key, kind="stable")
+        self.edge_key = key[order]
+        self.edge_rows = edges[order]
+
     # -- queries ----------------------------------------------------------
+
+    def room_at(self, x, y):
+        """Distance from x, y itself, not its cell's centre, to the nearest
+        wall and the nearest drop, as far as TURN_CLEARANCE and inf
+        beyond."""
+        ci, cj = self.cell(x, y)
+        reach = int(math.ceil(TURN_CLEARANCE / self.resolution)) + 1
+        width = self.shape[1]
+        parts = []
+
+        for i in range(max(0, ci - reach), min(self.shape[0], ci + reach + 1)):
+            lo = np.searchsorted(self.edge_key, i * width + max(0, cj - reach))
+            hi = np.searchsorted(self.edge_key,
+                                 i * width + min(width - 1, cj + reach),
+                                 side="right")
+            if hi > lo:
+                parts.append(self.edge_rows[lo:hi])
+
+        if not parts:
+            return math.inf, math.inf
+
+        level = self.height_at(x, y)
+        if math.isnan(level):
+            # Off the ground altogether.
+            return 0.0, 0.0
+
+        near = np.concatenate(parts)
+        distance = np.hypot(near[:, 0] - x, near[:, 1] - y)
+        drop = level - near[:, 2] > near[:, 3] - level
+        wall = distance[~drop].min() if (~drop).any() else math.inf
+        fall = distance[drop].min() if drop.any() else math.inf
+        return float(wall), float(fall)
 
     def cell(self, x, y):
         i = int(math.floor((x - self.origin[0]) / self.resolution))
@@ -295,8 +573,8 @@ class Terrain:
 
     def centre(self, cell):
         i, j = cell
-        return (self.origin[0] + (i + 0.5) * self.resolution,
-                self.origin[1] + (j + 0.5) * self.resolution)
+        return (float(self.xs[0] + i * self.resolution),
+                float(self.ys[0] + j * self.resolution))
 
     def inside(self, cell):
         return 0 <= cell[0] < self.shape[0] and 0 <= cell[1] < self.shape[1]
@@ -306,11 +584,53 @@ class Terrain:
         return self.inside(cell) and bool(self.sloped[cell])
 
     def height_at(self, x, y):
+        """Ground height at x, y: between the four nearest cell centres
+        where they are one smooth surface, as on a ramp, else its cell's."""
         cell = self.cell(x, y)
-        return self.height[cell] if self.inside(cell) else math.nan
+
+        if not self.inside(cell):
+            return math.nan
+
+        fx = (x - self.xs[0]) / self.resolution
+        fy = (y - self.ys[0]) / self.resolution
+        i, j = int(math.floor(fx)), int(math.floor(fy))
+
+        if 0 <= i < self.shape[0] - 1 and 0 <= j < self.shape[1] - 1:
+            corners = self.height[i:i + 2, j:j + 2]
+            if (not np.isnan(corners).any()
+                    and corners.max() - corners.min() <= STEP):
+                tx, ty = fx - i, fy - j
+                return float(
+                    corners[0, 0] * (1 - tx) * (1 - ty)
+                    + corners[1, 0] * tx * (1 - ty)
+                    + corners[0, 1] * (1 - tx) * ty
+                    + corners[1, 1] * tx * ty)
+
+        return self.height[cell]
+
+    def clearance_at(self, x, y):
+        """clearance at x, y itself, as far as TURN_CLEARANCE, else that of
+        its cell."""
+        cell = self.cell(x, y)
+
+        if not self.inside(cell) or math.isnan(self.height[cell]):
+            return 0.0
+
+        wall, drop = self.room_at(x, y)
+        exact = min(wall, drop + TURN_CLEARANCE - DROP_TURN_CLEARANCE)
+        return exact if exact < TURN_CLEARANCE else float(
+            max(self.clearance[cell], TURN_CLEARANCE))
+
+    def can_turn(self, x, y):
+        """Whether a robot at x, y has room to turn on the spot."""
+        return self.clearance_at(x, y) >= TURN_CLEARANCE
+
+    def passable(self, cell):
+        return self.inside(cell) and bool(
+            self.free[cell] or self.lined_up[(slice(None),) + cell].any())
 
     def aligned(self, cell, dx, dy):
-        """Whether moving along dx, dy is allowed in cell."""
+        """Whether moving along dx, dy is allowed in cell by the ramps."""
         ax, ay = self.axis[cell]
 
         if ax == 0.0 and ay == 0.0:
@@ -319,100 +639,169 @@ class Terrain:
         length = math.hypot(dx, dy)
         return length < 1e-12 or abs(ax * dx + ay * dy) >= ALIGN * length
 
-    def clear_line(self, ax, ay, bx, by):
-        """Whether a robot can drive straight from a to b."""
+    def line_cells(self, ax, ay, bx, by):
+        """The cells under a line from a to b, every half cell along it,
+        or None if it leaves the map."""
         dx, dy = bx - ax, by - ay
         samples = max(1, int(math.hypot(dx, dy) / (self.resolution / 2)))
+        t = np.arange(samples + 1) / samples
+        i = np.floor((ax + dx * t - self.origin[0])
+                     / self.resolution).astype(int)
+        j = np.floor((ay + dy * t - self.origin[1])
+                     / self.resolution).astype(int)
 
-        for k in range(samples + 1):
-            cell = self.cell(ax + dx * k / samples, ay + dy * k / samples)
+        if (i.min() < 0 or j.min() < 0 or i.max() >= self.shape[0]
+                or j.max() >= self.shape[1]):
+            return None
 
-            if (not self.inside(cell) or not self.free[cell]
-                    or not self.aligned(cell, dx, dy)):
+        return i, j
+
+    def free_line(self, ax, ay, bx, by):
+        """Whether a robot has room to turn all the way from a to b."""
+        cells = self.line_cells(ax, ay, bx, by)
+        return cells is not None and bool(self.free[cells].all())
+
+    def clear_line(self, ax, ay, bx, by):
+        """Whether a robot can drive straight from a to b: through cells it
+        can turn in, or lined up with the line in those it cannot, and
+        along the slope on and around a ramp."""
+        dx, dy = bx - ax, by - ay
+        length = math.hypot(dx, dy)
+        cells = self.line_cells(ax, ay, bx, by)
+
+        if cells is None:
+            return False
+
+        i, j = cells
+
+        if not self.free[i, j].all():
+            a = line_axis(dx, dy)
+            if a is None or not (self.free[i, j]
+                                 | self.lined_up[a, i, j]).all():
+                return False
+
+        slope = self.axis[i, j]
+        on_ramp = (slope[:, 0] != 0.0) | (slope[:, 1] != 0.0)
+
+        if on_ramp.any() and length > 1e-12:
+            along = np.abs(slope[on_ramp, 0] * dx + slope[on_ramp, 1] * dy)
+            if (along < ALIGN * length).any():
                 return False
 
         return True
 
+    def open_line(self, ax, ay, bx, by, margin=0.015):
+        """clear_line, keeping margin more than room to turn from steps
+        along the way, or as far as either end is if that is less."""
+        cells = self.line_cells(ax, ay, bx, by)
+
+        if cells is None or not self.clear_line(ax, ay, bx, by):
+            return False
+
+        room = self.clearance[cells]
+        return room.min() >= min(room[0], room[-1], TURN_CLEARANCE + margin)
+
+    def start_states(self, cell, heading=None):
+        """The states a robot in cell may be in: the one it is lined up
+        nearest to, when it cannot turn there and its heading is known."""
+        ids = [int(s) for s in self.state_id[(slice(None),) + cell] if s >= 0]
+
+        if heading is None or len(ids) < 2:
+            return ids
+
+        def off(state):
+            angle = AXES[self.state_kind[state] - 1]
+            return abs(math.sin(heading - angle))
+
+        return [min(ids, key=off)]
+
     def nearest_free(self, x, y, level, reach=0.15):
-        """The free cell nearest x, y on ground within STEP of level."""
-        centre = self.cell(x, y)
+        """The cell nearest x, y the robot can be in, on ground within STEP
+        of level."""
         cells = int(reach / self.resolution) + 1
-        best, best_distance = None, math.inf
+        ci, cj = self.cell(x, y)
+        i0, i1 = max(0, ci - cells), min(self.shape[0], ci + cells + 1)
+        j0, j1 = max(0, cj - cells), min(self.shape[1], cj + cells + 1)
 
-        for di in range(-cells, cells + 1):
-            for dj in range(-cells, cells + 1):
-                cell = (centre[0] + di, centre[1] + dj)
+        if i0 >= i1 or j0 >= j1:
+            return None
 
-                if not self.inside(cell) or not self.free[cell]:
-                    continue
+        ok = (self.state_id[:, i0:i1, j0:j1] >= 0).any(axis=0)
+        if not math.isnan(level):
+            with np.errstate(invalid="ignore"):
+                ok &= np.abs(self.height[i0:i1, j0:j1] - level) <= STEP
 
-                if not math.isnan(level) and abs(
-                        self.height[cell] - level) > STEP:
-                    continue
+        if not ok.any():
+            return None
 
-                cx, cy = self.centre(cell)
-                distance = math.hypot(cx - x, cy - y)
+        x_grid, y_grid = np.meshgrid(self.xs[i0:i1], self.ys[j0:j1],
+                                     indexing="ij")
+        distance = np.where(ok, np.hypot(x_grid - x, y_grid - y), np.inf)
+        i, j = np.unravel_index(np.argmin(distance), distance.shape)
+        return int(i0 + i), int(j0 + j)
 
-                if distance < best_distance:
-                    best, best_distance = cell, distance
+    def search(self, starts, goal):
+        """Cheapest chain of states from any of starts to a state in the
+        goal cell, as cells, or None."""
+        # Only goals the starts connect to, so a search for one they do not
+        # fails at once rather than after trying everywhere.
+        labels = {int(self.label[s]) for s in starts}
+        goals = {int(s) for s in self.state_id[(slice(None),) + goal]
+                 if s >= 0 and int(self.label[s]) in labels}
+        if not goals:
+            return None
 
-        return best
+        gx, gy = self.centre(goal)
+        xs, ys, edges = self.state_x, self.state_y, self.edges
+        hypot, push, pop = math.hypot, heapq.heappush, heapq.heappop
 
-    def plan(self, start, goal):
-        """Cheapest chain of cells from start to goal, or None."""
-        r = self.resolution
-        goal_x, goal_y = self.centre(goal)
-
-        def estimate(cell):
-            x, y = self.centre(cell)
-            return math.hypot(goal_x - x, goal_y - y)
-
-        cost = {start: 0.0}
+        cost = {s: 0.0 for s in starts}
         previous = {}
-        frontier = [(estimate(start), start)]
+        frontier = [(hypot(gx - xs[s], gy - ys[s]), s) for s in starts]
+        heapq.heapify(frontier)
         closed = set()
 
         while frontier:
-            _, here = heapq.heappop(frontier)
+            _, here = pop(frontier)
 
-            if here == goal:
-                path = [here]
+            if here in goals:
+                states = [here]
                 while here in previous:
                     here = previous[here]
-                    path.append(here)
-                return path[::-1]
+                    states.append(here)
+                return [(int(self.state_i[s]), int(self.state_j[s]))
+                        for s in reversed(states)]
 
             if here in closed:
                 continue
             closed.add(here)
+            base = cost[here]
 
-            for di, dj in MOVES:
-                there = (here[0] + di, here[1] + dj)
-
-                if (there in closed or not self.inside(there)
-                        or not self.free[there]
-                        or not self.aligned(here, di, dj)
-                        or not self.aligned(there, di, dj)):
-                    continue
-
-                step = r * math.hypot(di, dj) * 0.5 * (
-                    self.cost[here] + self.cost[there])
-                total = cost[here] + step
-
+            for there, step in edges[here]:
+                total = base + step
                 if total < cost.get(there, math.inf):
                     cost[there] = total
                     previous[there] = here
-                    heapq.heappush(frontier, (total + estimate(there), there))
+                    push(frontier,
+                         (total + hypot(gx - xs[there], gy - ys[there]),
+                          there))
 
         return None
 
-    def route(self, hunter_x, hunter_y, goal_x, goal_y, target_x, target_y):
+    def plan(self, start, goal, heading=None):
+        """Cheapest chain of cells from start to goal, or None."""
+        return self.search(self.start_states(start, heading), goal)
+
+    def route(self, hunter_x, hunter_y, goal_x, goal_y, target_x, target_y,
+              hunter_yaw=None):
         """Path for the hunter to the target, as points from the hunter's
         position on, pulled straight wherever it can drive straight.
 
         goal is where the hunter means to meet the target, used if it is
-        open ground at the target's height, else the target is used. A
-        path of just [hunter, goal] means the straight line is clear.
+        ground the hunter can be on at the target's height, else the target
+        is used. A path of just [hunter, goal] means the straight line is
+        clear. hunter_yaw, when given, says which way the hunter is lined
+        up in a gap it cannot turn in.
 
         If the target is somewhere the hunter cannot get to, such as on a
         platform no ramp leads to, the path goes to the nearest place it
@@ -425,95 +814,181 @@ class Terrain:
         if math.isnan(target_level) or math.isnan(hunter_level):
             return None
 
-        start_cell = self.cell(hunter_x, hunter_y)
-        if not self.inside(start_cell) or not self.free[start_cell]:
-            start_cell = self.nearest_free(hunter_x, hunter_y, hunter_level)
-            if start_cell is None:
-                return None
-
         goal_cell = self.cell(goal_x, goal_y)
-        if (not self.inside(goal_cell) or not self.free[goal_cell]
+        if (not self.passable(goal_cell)
                 or abs(self.height[goal_cell] - target_level) > STEP):
             goal_cell = self.nearest_free(target_x, target_y, target_level)
             if goal_cell is not None:
                 goal_x, goal_y = self.centre(goal_cell)
 
+        goals = [] if goal_cell is None else [
+            int(s) for s in self.state_id[(slice(None),) + goal_cell]
+            if s >= 0]
+        start = self.start_for(hunter_x, hunter_y, hunter_yaw, hunter_level,
+                               goals)
+        if start is None:
+            return None
+        starts = start[1]
+
         if goal_cell is not None:
-            if self.clear_line(hunter_x, hunter_y, goal_x, goal_y):
+            if self.open_line(hunter_x, hunter_y, goal_x, goal_y):
                 return Path([(hunter_x, hunter_y), (goal_x, goal_y)])
 
-            cells = self.plan(start_cell, goal_cell)
+            cells = self.search(starts, goal_cell)
             if cells is not None:
                 return self.path_along(hunter_x, hunter_y, cells,
                                        (goal_x, goal_y))
 
         return self.closest_approach(
-            hunter_x, hunter_y, start_cell, target_x, target_y)
+            hunter_x, hunter_y, starts, target_x, target_y)
 
-    def closest_approach(self, hunter_x, hunter_y, start_cell, x, y):
-        """Path to the place nearest x, y that the hunter can drive to."""
-        seen = self.reachable(*self.centre(start_cell))
-        if seen is None:
+    def start_for(self, x, y, heading, level, goals=(), reach=0.08):
+        """The cell and states to plan from for a robot at x, y: its own,
+        lined up as it is, if they lead to any of the states goals; else
+        the nearest within reach that do, so a robot that has ended up
+        somewhere awkward heads there first. With none, the nearest that
+        lead to about the biggest stretch of ground round about. None if
+        there is no ground it can be on near x, y."""
+        here = self.cell(x, y)
+        candidates = []
+
+        if self.passable(here):
+            candidates.append((here, self.start_states(here, heading)))
+            candidates.append((here, self.start_states(here)))
+
+        cells = int(reach / self.resolution) + 1
+        i0 = max(0, here[0] - cells)
+        i1 = min(self.shape[0], here[0] + cells + 1)
+        j0 = max(0, here[1] - cells)
+        j1 = min(self.shape[1], here[1] + cells + 1)
+
+        if i0 < i1 and j0 < j1:
+            ok = (self.state_id[:, i0:i1, j0:j1] >= 0).any(axis=0)
+            if not math.isnan(level):
+                with np.errstate(invalid="ignore"):
+                    ok &= np.abs(self.height[i0:i1, j0:j1] - level) <= STEP
+            ii, jj = np.nonzero(ok)
+            dx, dy = self.xs[i0 + ii] - x, self.ys[j0 + jj] - y
+            distance = np.hypot(dx, dy)
+            # Rather one ahead or beside it than behind, so it is not sent
+            # backing into the corner it has just come round.
+            order = distance
+            if heading is not None:
+                ahead = dx * math.cos(heading) + dy * math.sin(heading)
+                behind = ahead < -0.005
+                order = distance + 0.05 * behind
+            for k in np.argsort(order):
+                if distance[k] <= reach:
+                    cell = (int(i0 + ii[k]), int(j0 + jj[k]))
+                    candidates.append((cell, self.start_states(cell)))
+
+        if not candidates:
             return None
 
+        wanted = {int(self.label[s]) for s in goals}
+        for cell, states in candidates:
+            leading = [s for s in states if int(self.label[s]) in wanted]
+            if leading:
+                return cell, leading
+
+        def size(candidate):
+            return max(self.label_size[self.label[s]] for s in candidate[1])
+
+        biggest = max(size(c) for c in candidates)
+        return next(c for c in candidates if size(c) >= biggest / 2)
+
+    def reachable_from(self, starts):
+        """Which cells a robot in any of the states starts can drive to."""
+        seen = np.zeros(self.shape, dtype=bool)
+        mask = np.isin(self.label, self.label[list(starts)])
+        seen[self.state_i[mask], self.state_j[mask]] = True
+        return seen
+
+    def reachable(self, x, y):
+        """Which cells a robot starting at x, y can drive to, as a boolean
+        array, or None if x, y is not ground it can be on."""
+        start = self.cell(x, y)
+
+        if not self.passable(start):
+            return None
+
+        return self.reachable_from(self.start_states(start))
+
+    def closest_approach(self, hunter_x, hunter_y, starts, x, y):
+        """Path to the place nearest x, y that the hunter can drive to."""
+        if not starts:
+            return None
+
+        seen = self.reachable_from(starts)
         cx, cy = self.centres()
+        # Somewhere it can turn, to wait in, if there is anywhere.
+        if (seen & self.free).any():
+            seen &= self.free
         distance = np.where(seen, np.hypot(cx - x, cy - y), np.inf)
-        best = np.unravel_index(np.argmin(distance), self.shape)
+        best = tuple(int(n) for n in
+                     np.unravel_index(np.argmin(distance), self.shape))
         end = self.centre(best)
 
-        if self.clear_line(hunter_x, hunter_y, *end):
+        if self.open_line(hunter_x, hunter_y, *end):
             return Path([(hunter_x, hunter_y), end], partial=True)
 
-        cells = self.plan(start_cell, best)
+        cells = self.search(starts, best)
         if cells is None:
             return None
 
         return self.path_along(hunter_x, hunter_y, cells, end, partial=True)
 
     def path_along(self, hunter_x, hunter_y, cells, end, partial=False):
+        # A hunter that has been pushed off the cells it can be in heads
+        # back to the one the path starts from first, unless it is about
+        # there anyway.
+        first = 1 if (self.cell(hunter_x, hunter_y) == cells[0]
+                      or math.dist((hunter_x, hunter_y),
+                                   self.centre(cells[0])) < 0.025) else 0
         points = ([(hunter_x, hunter_y)]
-                  + [self.centre(c) for c in cells[1:-1]] + [end])
+                  + [self.centre(c) for c in cells[first:-1]] + [end])
         return Path(self.pull_straight(points), partial)
 
-    def reachable(self, x, y):
-        """Which cells a robot starting at x, y can drive to, as a boolean
-        array, or None if x, y is not open ground."""
-        start = self.cell(x, y)
-
-        if not self.inside(start) or not self.free[start]:
-            return None
-
-        seen = np.zeros(self.shape, dtype=bool)
-        seen[start] = True
-        frontier = [start]
-
-        while frontier:
-            here = frontier.pop()
-
-            for di, dj in MOVES:
-                there = (here[0] + di, here[1] + dj)
-
-                if (self.inside(there) and not seen[there]
-                        and self.free[there]
-                        and self.aligned(here, di, dj)
-                        and self.aligned(there, di, dj)):
-                    seen[there] = True
-                    frontier.append(there)
-
-        return seen
-
     def pull_straight(self, points):
-        """Drops the points that can be driven past in a straight line."""
+        """Drops the points that can be driven past in a straight line that
+        keeps as far from steps as the points it replaces did, so a
+        shortcut does not shave a corner the planned path stayed off."""
+        room = [self.clearance[cell] if self.inside(cell) else 0.0
+                for cell in (self.cell(*p) for p in points)]
+
+        # Only the corners of a run of cells in a line need trying, each
+        # with the least room along the run to it.
+        corners, least_to = [points[0]], [room[0]]
+        for k in range(1, len(points)):
+            least_to[-1] = min(least_to[-1], room[k])
+            if k == len(points) - 1 or not math.isclose(
+                    (points[k][0] - points[k - 1][0])
+                    * (points[k + 1][1] - points[k][1]),
+                    (points[k][1] - points[k - 1][1])
+                    * (points[k + 1][0] - points[k][0]), abs_tol=1e-12):
+                corners.append(points[k])
+                least_to.append(room[k])
+        points, room = corners, [room[0]] + least_to[:-1]
+
         pulled = [points[0]]
         index = 0
 
         while index < len(points) - 1:
             ax, ay = points[index]
             reach = index + 1
+            least = min(room[index], room[reach])
 
-            while (reach + 1 < len(points)
-                   and self.clear_line(ax, ay, *points[reach + 1])):
+            while reach + 1 < len(points):
+                bx, by = points[reach + 1]
+                need = min(least, room[reach + 1])
+                cells = self.line_cells(ax, ay, bx, by)
+
+                if (cells is None or self.clearance[cells].min() < need
+                        or not self.clear_line(ax, ay, bx, by)):
+                    break
+
                 reach += 1
+                least = need
 
             pulled.append(points[reach])
             index = reach
@@ -524,6 +999,18 @@ class Terrain:
 def path_length(points):
     return sum(math.hypot(bx - ax, by - ay)
                for (ax, ay), (bx, by) in zip(points, points[1:]))
+
+
+def point_along(points, distance):
+    """The point distance along a path, or its end if it is shorter."""
+    for (ax, ay), (bx, by) in zip(points, points[1:]):
+        leg = math.hypot(bx - ax, by - ay)
+        if distance <= leg and leg > 0.0:
+            return (ax + (bx - ax) * distance / leg,
+                    ay + (by - ay) * distance / leg)
+        distance -= leg
+
+    return points[-1]
 
 
 def corner_angle(a, b, c):

@@ -209,74 +209,123 @@ after robot 2 was moved onto the 2" platform, climbed both levels (height
 0.071 m) and stopped 0.23 m from it. F and 3 put the view on robots 2 and
 3, and Ctrl-C stopped every process, robot 3's included.
 
-The hunter predicts where the target is going. From the target's poses it
-measures its speed and turn rate, assumes it keeps both, and so follows a
-robot driving an arc round the arc rather than off its tangent. Along that
-path it finds the earliest point it can reach in time, counting its own
-turning and driving at `intercept_speed` (0.25 m/s), and heads there. A
-target that is still or close is aimed at directly, a fast or far one is
-led by up to `prediction_horizon` (1.5 s), and predicted points stay 6 cm
-inside the edge of the floor. Once it has caught up, the hunter adds the target's speed to its
-own so it keeps pace instead of trailing, fading that out over the last
-2 cm so a target that stops is not run into.
+Before it sets off, the hunter stows its arm: shoulder straight up, elbow
+folded back over the chassis. It sends `+` and `X` on
+`/robot_N/arm_command` one a tick, as the BLE bridge takes them, and holds
+still until the arm is up. In the sim it sees that on
+`/robot_N/joint_states`, in about 2 s; on a real robot it sends all 72
+steps, which take 3.6 s and leave both servos at 180 degrees from wherever
+they were. Stowed, the arm cannot catch on a wall as the hunter turns, and
+its footprint is just its body, 10 by 7 cm with the wheels. It stows it
+again whenever it starts tracking after losing a pose, in case the robot
+was restarted, and `stow_arm:=false` leaves the arm alone.
 
-Forward speed falls off with heading error, and the hunter turns on the
-spot if its aim point is more than about 57 degrees off its nose. It stops
-with its fingertips `clearance` (3 cm) short of the target. The arm reaches
-15 cm past the centre, so the stopping distance depends on which way the
-target faces: 0.33 m between centres head on, about 0.22 m from behind. If
-it ends up too close, it backs off. If either pose is older than 0.5 s, it
-stops. Speeds, gains and the prediction are parameters (see the top of
-`chase_node.py`).
+It always heads for the target. When the way is clear it drives straight
+at it, aiming where the target will be by the time it gets there. That
+comes from the target's speed and turn rate, so a robot driving an arc is
+led round the arc, and never more than `lead_time` (0.6 s) ahead, so it is
+not sent off after a guess. Once it has caught up it adds the target's
+speed to its own so it keeps pace, fading that out over the last 2 cm. It
+stops with its front `clearance` (3 cm) short of the target: 0.13 m between
+centres from behind or beside it, 0.23 m head on to an arm that is out. In
+the sim it reads where the target's arm is from its `joint_states`; on the
+real arena it takes the arm to be out. If the target comes closer it holds
+its ground facing it, rather than backing off, and when the target circles
+it, it drives after it rather than turning on the spot. If either pose is
+older than 0.5 s, it stops.
 
 The hunter knows the arena's terrain and plans its way to the target
 (`terrain.py`). At start up it builds the arena from the same layout as the
 sim (see Arena layouts below; `layout:=cad` reads
 `models/robogame_arena_cad/model.sdf` instead) and turns its collision
-geometry into a 2 cm height map. Wherever the height jumps between
-cells, at a platform's edge, a ramp's sides or the edge of the floor
-tiles, is a step the wheels cannot climb, and the hunter's centre is kept
-5.3 cm from it, enough to turn on the spot. On and within 7 cm of sloped
-ground it may only drive within 15 degrees of the slope, so it lines up
-before a ramp and goes straight up or down it. On a ramp it keeps to at
-least `ramp_speed` (0.15 m/s) going forward, so it does not stall on the
-steep top, and holds still rather than backing down it. Nothing about the
-layout is written into the code.
+geometry into a height map on a half inch grid. On a layout every module
+edge is on that grid, so the middle of every gap between two modules is a
+cell centre. The steps, walls, platform and ramp sides and the edge of the
+floor, are found on a raster four times finer, so each cell knows how far
+it is from the nearest wall and the nearest drop to a couple of millimetres.
 
-Every control step it checks whether it can drive straight at the target.
-If so it chases as above. If not, say the platform is in the way or the
-target is up on it, it plans the cheapest path over the height map with
-A*, pulls it straight, and drives it, slowing before sharp corners such as
-the turn at the foot of a ramp. So it goes round the near side of a
-platform to a target behind it, takes the ramp up to a target on top, and
-comes back down the ramp after a target that has left. A target it
-cannot get to, on a platform no ramp leads to, it waits for at the
-nearest place it can reach. It takes about 15 ms a step.
+- Where it has 6.3 cm to any wall, it can turn on the spot.
+- Where it has less, down to 4.5 cm either side, it can still drive
+  through lined up with the gap, along the grid or a diagonal, if its body
+  fits that way round. A 4.5 inch gap at the end of a wall, or the 4 inch
+  strip between a wall and the edge of the floor, is a way through, where
+  before only gaps it could turn in were.
+- A drop, the edge of the floor or of the platform it is on, only has to
+  stay clear of its wheels, so the ends of its body may hang over it.
+- On and within 7 cm of sloped ground it may only drive within 15 degrees
+  of the slope, so it lines up before a ramp and goes straight up or down
+  it, at least `ramp_speed` (0.15 m/s) either way so it does not stall on
+  the steep top.
 
-Checked headless on 2026-10-16 with the CAD arena, robot 2 still, robot 1
-placed by hand. Height is the true height of robot 1 from Gazebo:
+Whenever it cannot drive straight at the target, it plans with A* over the
+cells and, in the narrow ones, the way it faces. A plan can step sideways
+into a lane beside it, a cell over in six along. It then pulls the path
+straight, but never closer to a wall than the plan went, so a shortcut does
+not shave a corner. It curves round corners in the open without slowing.
+At a corner where the next leg goes into a gap too narrow to turn in, it
+stops on it, turns to line up, and drives in. Lined up in such a gap it
+backs out when the target goes the other way, heads for a point 12 cm on
+along the gap so it eases back to the middle, and straightens up only
+gently as it goes. Where it would creep a wheel over an edge doing that,
+it turns where it stands instead, and where only a drop, not a wall,
+stops it turning, as in a corner of the floor, it pivots slowly. It slows to `narrow_speed`
+(0.15 m/s) in narrow gaps and a little near walls. If it has been pressed
+against something for a second, or got nowhere for three, it backs off or
+pulls forward for half a second, the other way the next time, but never a
+way that would leave it over an edge. A target it
+cannot get to, on a platform no ramp leads to, it waits for at the nearest
+place it can turn. A step takes about 3 ms, 25 ms at worst on a maze.
 
-| Robot 1 from | Robot 2 at | What robot 1 did |
+Try it without Gazebo:
+
+```
+python3 -m robogame_sim.chase_sim mazetest default --seeds 4
+```
+
+`chase_sim` runs `Chaser`, the steering `chase_node` uses, in a 2D stand-in
+for the sim: both robots accelerate like the light robots they are, pose
+noise and a tick of latency included, and a move is refused when the body
+would hit a wall or a step or put a wheel over a drop. The target drives
+itself still, wandering the arena, orbiting a spot, circling the hunter,
+running from it or like a person on a joystick, and each run reports how
+soon the hunter reached it, how much of the time after it stayed within
+6 cm, and the longest it got nowhere while not with the target.
+
+Checked on 2026-10-17. In `chase_sim`, 6 runs of 40 s for each kind of
+target on each of seven layouts (the default, a flat floor, a maze and four
+layouts with ramps, towers and walls), against the chase as it was before:
+
+| | Before | Now |
 | --- | --- | --- |
-| floor north of the platform | on the platform | round the east side, lined up in front of the ramp, up it (height +2.54 cm), stopped 0.23 m from robot 2 at 9 s |
-| floor east of the platform | on the platform | round the south east corner and up the ramp, stopped 0.22 m away at 6 s |
-| on the platform | floor north of it | down the ramp (height -2.53 cm), round the east side, stopped 0.23 m away at 10 s |
-| floor west of the platform | floor east of it | round the north side on the floor, stopped 0.24 m away at 6 s |
+| Runs the target was reached in, six layouts | 155 of 216 | 216 of 216 |
+| With the seventh | | 252 of 252 |
+| Longest the hunter got nowhere | 40 s, the whole run | 3.5 s |
+| Moves refused, body or arm against something | thousands a layout | tens |
+| Planning a step, average | 2 to 14 ms | 1 to 4 ms |
 
-Checked headless on 2026-10-16, robot 2 steered round a 0.3 m orbit of the
-arena from the start, robot 1 hunting it from 0.7 m away. Gap is distance
-past the stopping distance, measured after the first 5 s:
+Before, the hunter's arm caught on walls as it turned and it never found
+the 4.5 inch gaps it could only drive through lined up, so in the maze and
+walled layouts it mostly sat stuck from the start.
 
-| Target | Before prediction | With prediction |
-| --- | --- | --- |
-| 0.15 m/s | reached 1.9 s, gap 6.2 cm, engaged 4% | reached 1.7 s, gap 1.0 cm, engaged 100% |
-| 0.22 m/s | reached 2.2 s, gap 8.5 cm, engaged 0% | reached 1.3 s, gap 0.9 cm, engaged 100% |
-| 0.22 m/s, 3 s go 2 s stop | gap 5.6 cm, engaged 45% | gap 0.6 cm, engaged 100%, closest -0.2 cm |
+Headless in Gazebo, robot 2 driven by a script, robot 1 hunting it. With
+it is the time after first reaching it that its front was within 6 cm:
 
-Before, the hunter sat behind the target and never caught it. A still
-target is still approached and held 1 cm outside the stopping distance. The
-maths is covered by `test/test_chase.py`, the terrain and paths by
-`test/test_terrain.py`.
+| Layout | Robot 2 | Reached | With it | Longest stall |
+| --- | --- | --- | --- | --- |
+| default | circling robot 1 | 2.3 s | 100% | 0.2 s |
+| default | joystick-like | 2.4 s | 100% | 0.2 s |
+| maze | to the far room, up the 4 inch strip by the floor's edge | 9.8 s | 100% | 1.5 s |
+| maze | joystick-like, two runs | 9.4, 11.1 s | 100, 99% | 1.7 s |
+| maze | wandering | 8.2 s | 100% | 1.6 s |
+| maze | running away | 10.0 s | 100% | 1.6 s |
+| ramps and walls | wandering | 3.6 s | 85% | 1.6 s |
+| ramps and walls | joystick-like | 3.6 s | 98% | 0.8 s |
+| ramps, towers | wandering | 3.4 s | 100% | 0.9 s |
+
+In every run the arm was up within 2 s and stayed there (shoulder +1.57,
+elbow +1.48 rad). The maze runs also found three ways the hunter could end
+up over the floor's edge in a corner, which the 2D stand-in had not shown,
+and each is now guarded against.
 
 ## Arena layouts
 
@@ -331,9 +380,9 @@ meant to reach (a 1" one, or one a ramp leads to) that no robot can get
 onto from the floor. Ramps chain, so a ramp on a platform can carry on
 from the top of one on the floor, and a chain can turn on a one module
 landing. The checks go by which module edges meet at the same height;
-chase_node's planner is more cautious, keeping the robot about 5.3 cm
-clear of every edge, so it may not path over one module landings and
-ramps that a robot driven by hand gets over. Name the layout and Save,
+chase_node's planner is more cautious: the robot only turns where it has
+6.3 cm to any wall, so it may not get round a one module landing against
+a wall that a robot driven by hand gets over. Name the layout and Save,
 and it is written to
 `src/robogame_sim/layouts/NAME.json`, one module per line so it diffs
 well. `http://localhost:8766/#NAME` opens a saved one directly.
@@ -398,12 +447,15 @@ with an old 9 x 9 layout.
 ## Tests
 
 ```
-cd src/robogame_sim && python3 -m pytest test
+cd src/robogame_sim && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test
 ```
 
-These check the firmware maths against motors.cpp and arm.cpp, the racing
-controls and steering wheel maths, that the robot model is valid XML, the
-chase and path planning, and the arena layouts and their editor. Print a robot's SDF with `ros2 run robogame_sim
+With ROS sourced, its pytest plugins stop pytest finding the tests, hence
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD`. These check the firmware maths against
+motors.cpp and arm.cpp, the racing controls and steering wheel maths, that
+the robot model is valid XML, the chase and path planning, the chase
+against moving targets in `chase_sim` (`test_chase_dynamic.py`), and the
+arena layouts and their editor. Print a robot's SDF with `ros2 run robogame_sim
 robot_sdf 2`, and check it with `gz sdf -k` once Gazebo is installed.
 
 ## Checked in Gazebo
