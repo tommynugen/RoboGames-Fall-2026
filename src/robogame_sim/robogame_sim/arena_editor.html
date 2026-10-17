@@ -124,7 +124,7 @@
   }
   #board { width: 100%; height: auto; display: block; touch-action: none;
            user-select: none; }
-  #board .cell { cursor: pointer; }
+  #board { cursor: pointer; }
   .caption { color: var(--muted); font-size: 12.5px; margin: 8px 4px 0; }
   .caption.warn { color: var(--bad); }
 
@@ -146,7 +146,7 @@
     border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
   }
   .tool svg { width: 30px; height: 30px; }
-  #stack[aria-pressed=true] {
+  #stack[aria-pressed=true], #halves[aria-pressed=true] {
     border-color: var(--accent); background: var(--accent);
     color: var(--accent-ink);
   }
@@ -224,18 +224,25 @@ middle"></select>
           <button id="stack" style="margin-top:4px" aria-pressed="false"
                   title="Place on top of platforms instead of replacing
 them. Shift does the same while held">Stack <kbd>S</kbd></button>
+          <button id="halves" style="margin-top:4px" aria-pressed="true"
+                  title="Place on the peg holes half a square apart, across
+floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
+          </button>
         </div>
       </div>
       <ul class="help">
-        <li>Click or drag to place.</li>
+        <li>Click or drag to place. The peg holes are evenly spaced across
+          the floor tiles, so modules go where the pointer is, to the
+          nearest half square, and can stand across two tiles.</li>
+        <li>Walls and thwomps take one row of two holes, on the line of
+          holes under the pointer, so two fit on a tile side by side, or
+          one each way.</li>
         <li>Click a ramp, wall or thwomp with its own tool to turn it a
           quarter turn; <kbd>R</kbd> turns the one under the pointer.</li>
-        <li>Walls and the thwomp peg in on the side of the square they
-          face, an inch from the middle.</li>
-        <li>Shift-click, or turn on Stack, to put a module on top of a
-          platform: a ramp, wall, thwomp or another platform. The corner
-          shows how high the top platform is.</li>
-        <li>Right-click to take the top module off a square.</li>
+        <li>Shift-click, or turn on Stack, to put a module on top of
+          platforms: a ramp, wall, thwomp or another platform, across two
+          if they are as high. The corner shows how high the top is.</li>
+        <li>Right-click to take the top module off.</li>
       </ul>
     </div>
 
@@ -297,10 +304,12 @@ const TOOLS = [
 ];
 
 let size = info.size;
-// "col,row" -> the square's stack, bottom first: [{type, col, row, rotation}]
-let modules = new Map();
+// Every module on the board, as {type, col, row, level, rotation}. col and
+// row go in halves, since modules peg in anywhere on the grid of holes.
+let modules = [];
 let tool = "platform";
 let newRotation = 0;
+// The pointer, in squares like col and row: {x, y}.
 let hover = null;
 let problems = [];
 let highlighted = null;
@@ -310,6 +319,7 @@ let painting = false;
 let paintedThisStroke = new Set();
 let stacking = false;
 let shiftHeld = false;
+let halves = true;
 
 const board = document.getElementById("board");
 const statusEl = document.getElementById("status");
@@ -317,51 +327,123 @@ const nameEl = document.getElementById("name");
 const savedEl = document.getElementById("saved");
 const sizeEl = document.getElementById("size");
 
-const key = (c, r) => `${c},${r}`;
+const cellKey = ([x, y]) => `${x},${y}`;
 const snapshot = () => JSON.stringify(layout());
 const turns = type => !!(info.types[type] && info.types[type].turns);
 const label = type => (info.types[type] || { label: type }).label;
 const isPlatform = type => type === "platform" || type === "platform_2";
-const topOf = stack => stack && stack[stack.length - 1];
-const allModules = () => [...modules.values()].flat();
+const isSide = type => (info.types[type] || {}).mount === "side";
+const heightOf = type => (info.types[type] || {}).height || 0;
+const inches = height => Math.round(height / 0.0254);
+// A module as the checks name it, to find the module a problem is with.
+const moduleKey = m => [m.type, m.col, m.row, m.level || 0,
+                        turns(m.type) ? m.rotation : 0].join("|");
 
-// Inches the platforms of a stack come to, which is where a robot drives
-// or the module on top stands.
-function platformInches(stack) {
-  let height = 0;
-  for (const m of stack) {
-    if (!isPlatform(m.type)) break;
-    height += info.types[m.type].height || 0;
+// The way a ramp at a rotation rises, and the side a wall at it faces.
+const uphill = rotation => ({ 0: [0, 1], 90: [-1, 0], 180: [0, -1],
+                              270: [1, 0] })[rotation];
+
+// The 2 inch cells a module covers, one peg hole in the middle of each and
+// two to a square each way, as arena_layout.cells: a platform or ramp
+// 2 x 2 of them, and a wall or thwomp the 1 x 2 on the side it faces.
+function cellsOf(m) {
+  let x = Math.round(2 * m.col), y = Math.round(2 * m.row);
+  if (!isSide(m.type)) return [[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]];
+  const [ux, uy] = uphill(m.rotation);
+  if (ux === 0) {
+    if (uy > 0) y += 1;
+    return [[x, y], [x + 1, y]];
   }
-  return Math.round(height / 0.0254);
+  if (ux > 0) x += 1;
+  return [[x, y], [x, y + 1]];
+}
+
+const onGrid = ([x, y], n = size) => x >= 0 && y >= 0 && x < 2 * n &&
+                                      y < 2 * n;
+
+// The modules over each cell, bottom first.
+function columns(list = modules) {
+  const found = new Map();
+  for (const m of list) {
+    for (const cell of cellsOf(m)) {
+      const k = cellKey(cell);
+      if (!found.has(k)) found.set(k, []);
+      found.get(k).push(m);
+    }
+  }
+  for (const column of found.values()) {
+    column.sort((a, b) => a.level - b.level);
+  }
+  return found;
+}
+
+function topAt(cols, cell) {
+  const column = cols.get(cellKey(cell));
+  return column && column[column.length - 1];
+}
+
+// How high a module stands: the platforms under it, on one of its cells.
+function standing(m, cols, cell = cellsOf(m)[0]) {
+  return (cols.get(cellKey(cell)) || [])
+    .filter(p => p.level < m.level)
+    .reduce((sum, p) => sum + heightOf(p.type), 0);
+}
+
+// Whether a module above the floor is on platforms under every cell, all
+// as high, as arena_layout.normalise wants.
+function supported(m, list, cols) {
+  if (!m.level) return true;
+  const cells = cellsOf(m);
+  const on = cell => list.some(p => p.level === m.level - 1 &&
+                                    isPlatform(p.type) &&
+                                    cellsOf(p).some(c => c[0] === cell[0] &&
+                                                         c[1] === cell[1]));
+  if (!cells.every(on)) return false;
+  const heights = cells.map(cell => standing(m, cols, cell));
+  return heights.every(h => Math.abs(h - heights[0]) < 1e-4);
+}
+
+// Whether every module is on the grid, on cells of its own and supported.
+function fits(list) {
+  const taken = new Set();
+  for (const m of list) {
+    for (const cell of cellsOf(m)) {
+      const k = `${cellKey(cell)},${m.level}`;
+      if (!onGrid(cell) || taken.has(k)) return false;
+      taken.add(k);
+    }
+  }
+  const cols = columns(list);
+  return list.every(m => supported(m, list, cols));
+}
+
+// The modules left standing once those with nothing under them fall off.
+function settle(list) {
+  for (;;) {
+    const cols = columns(list);
+    const kept = list.filter(m => supported(m, list, cols));
+    if (kept.length === list.length) return kept;
+    list = kept;
+  }
 }
 
 function layout() {
-  const list = [];
-  for (const stack of modules.values()) {
-    stack.forEach((m, level) => {
-      const entry = { type: m.type, col: m.col, row: m.row };
-      if (level) entry.level = level;
-      if (turns(m.type)) entry.rotation = m.rotation;
-      list.push(entry);
-    });
-  }
+  const list = modules.map(m => {
+    const entry = { type: m.type, col: m.col, row: m.row };
+    if (m.level) entry.level = m.level;
+    if (turns(m.type)) entry.rotation = m.rotation;
+    return entry;
+  });
   list.sort((a, b) => a.row - b.row || a.col - b.col ||
-                      (a.level || 0) - (b.level || 0));
+                      (a.level || 0) - (b.level || 0) ||
+                      a.type.localeCompare(b.type) ||
+                      (a.rotation || 0) - (b.rotation || 0));
   return { size, modules: list };
 }
 
 function setLayout(data) {
   size = data.size || info.size;
-  modules = new Map();
-  const sorted = [...(data.modules || [])].sort(
-    (a, b) => (a.level || 0) - (b.level || 0));
-  for (const m of sorted) {
-    const k = key(m.col, m.row);
-    if (!modules.has(k)) modules.set(k, []);
-    const { level, ...rest } = m;
-    modules.get(k).push({ rotation: 0, ...rest });
-  }
+  modules = (data.modules || []).map(m => ({ rotation: 0, level: 0, ...m }));
 }
 
 function remember() {
@@ -484,19 +566,6 @@ function drawPegs(parent, x, y, s) {
   }
 }
 
-// A square's modules bottom first. Each platform above the first is drawn
-// a little inside the one under it, like a tier.
-function drawStack(parent, stack, x, y, s, prefix) {
-  let inset = 0;
-  stack.forEach((m, level) => {
-    if (level && isPlatform(m.type)) inset = Math.min(inset + s * 0.08,
-                                                       s * 0.24);
-    const i = isPlatform(m.type) ? inset : 0;
-    drawModule(parent, m.type, x + i, y + i, s - 2 * i, m.rotation, prefix);
-  });
-  if (stack.length > 1) drawBadge(parent, x, y, s, platformInches(stack));
-}
-
 // How high a stack's top platform is, in the square's corner.
 function drawBadge(parent, x, y, s, inches) {
   const w = s * 0.34, h = s * 0.26;
@@ -524,61 +593,88 @@ function cellXY(col, row) {
   return [PAD + col * CELL, PAD + (size - 1 - row) * CELL];
 }
 
+// The box round some cells on the board.
+function footprint(cells) {
+  const half = CELL / 2;
+  const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]);
+  const x = PAD + Math.min(...xs) * half;
+  const y = PAD + (2 * size - 1 - Math.max(...ys)) * half;
+  return { x, y, width: PAD + (Math.max(...xs) + 1) * half - x,
+           height: PAD + (2 * size - Math.min(...ys)) * half - y };
+}
+
+function outline(parent, box, colour, width = 3, dash = "") {
+  el("rect", { x: box.x + 1.5, y: box.y + 1.5, width: box.width - 3,
+               height: box.height - 3, rx: 3, fill: "none", stroke: colour,
+               "stroke-width": width, "stroke-dasharray": dash,
+               "pointer-events": "none" }, parent);
+}
+
+// A module where it stands. Each platform above the floor is drawn a little
+// inside its square, like a tier.
+function drawPlaced(parent, m, prefix, opacity = 1) {
+  const [x, y] = cellXY(m.col, m.row);
+  const i = m.level && isPlatform(m.type) ?
+    Math.min(m.level * 0.08, 0.24) * CELL : 0;
+  drawModule(parent, m.type, x + i, y + i, CELL - 2 * i, m.rotation, prefix,
+             opacity);
+}
+
 function render() {
   const total = PAD * 2 + size * CELL;
   board.setAttribute("viewBox", `0 0 ${total} ${total}`);
   board.replaceChildren();
   defs(board, "board");
 
-  const bad = new Map();
-  for (const p of problems) {
-    const k = key(p.col, p.row);
-    bad.set(k, [...(bad.get(k) || []), p.message]);
-  }
-
   for (let row = 0; row < size; row++) {
     for (let col = 0; col < size; col++) {
       const [x, y] = cellXY(col, row);
-      const k = key(col, row);
-      const g = el("g", { class: "cell", "data-col": col, "data-row": row },
-                   board);
+      const g = el("g", {}, board);
       el("rect", { x, y, width: CELL, height: CELL, fill: "var(--floor)",
                    stroke: "var(--floor-line)", "stroke-width": 1 }, g);
-
-      const stack = modules.get(k) || [];
-      const m = topOf(stack);
-      if (!stack.some(p => isPlatform(p.type))) drawPegs(g, x, y, CELL);
-      drawStack(g, stack, x, y, CELL, "board");
-
-      if (hover && hover.col === col && hover.row === row && !painting) {
-        if (tool !== "erase" && !(m && m.type === tool && !stacksOn(m))) {
-          const i = stacksOn(m) && isPlatform(tool) ? CELL * 0.08 : 0;
-          drawModule(g, tool, x + i, y + i, CELL - 2 * i, newRotation,
-                     "board", 0.5);
-        }
-        el("rect", { x: x + 1.5, y: y + 1.5, width: CELL - 3,
-                     height: CELL - 3, fill: "none",
-                     stroke: tool === "erase" ? "var(--bad)" : "var(--accent)",
-                     "stroke-width": 3, rx: 3 }, g);
-      }
-
-      if (bad.has(k)) {
-        const strong = highlighted === k;
-        el("rect", { x: x + 2, y: y + 2, width: CELL - 4, height: CELL - 4,
-                     fill: "none", stroke: "var(--bad)", rx: 3,
-                     "stroke-width": strong ? 5 : 3,
-                     "stroke-dasharray": strong ? "" : "6 4" }, g);
-      }
-
-      const tip = [m ? `${stack.map(p => label(p.type)).join(" + ")} at ` +
-                       `${col}, ${row}`
-                     : `Floor at ${col}, ${row}`, ...(bad.get(k) || [])];
-      if (stack.length > 1) {
-        tip.splice(1, 0, `Top platform ${platformInches(stack)} inches up`);
-      }
-      el("title", {}, g).textContent = tip.join("\n");
+      drawPegs(g, x, y, CELL);
+      el("title", {}, g).textContent = `Floor at ${col}, ${row}`;
     }
   }
+
+  const bad = new Map();
+  for (const p of problems) {
+    const k = moduleKey(p);
+    bad.set(k, [...(bad.get(k) || []), p.message]);
+  }
+
+  const cols = columns();
+  const drawn = [...modules].sort((a, b) => a.level - b.level);
+  for (const m of drawn) {
+    const g = el("g", {}, board);
+    drawPlaced(g, m, "board");
+    const tip = [`${label(m.type)} at ${m.col}, ${m.row}`];
+    if (m.level) {
+      tip.push(`On platforms ${inches(standing(m, cols))} inches up`);
+    }
+    el("title", {}, g).textContent =
+      [...tip, ...(bad.get(moduleKey(m)) || [])].join("\n");
+  }
+
+  // How high the top of each stack is, in its corner.
+  for (const m of drawn) {
+    if (!m.level || !cellsOf(m).every(cell => topAt(cols, cell) === m)) {
+      continue;
+    }
+    const [x, y] = cellXY(m.col, m.row);
+    drawBadge(board, x, y, CELL, inches(
+      standing(m, cols) + (isPlatform(m.type) ? heightOf(m.type) : 0)));
+  }
+
+  for (const m of drawn) {
+    const k = moduleKey(m);
+    if (!bad.has(k)) continue;
+    const strong = highlighted === k;
+    outline(board, footprint(cellsOf(m)), "var(--bad)", strong ? 5 : 3,
+            strong ? "" : "6 4");
+  }
+
+  if (hover && !painting) drawHover();
 
   // Axes and grid numbers.
   const text = (content, x, y) => {
@@ -599,6 +695,22 @@ function render() {
   t.textContent = "row  →  +y";
 
   drawPanel();
+}
+
+// What a click would do: the module it would place, faded, or the one it
+// would take off. Red where it does not fit.
+function drawHover() {
+  const g = el("g", { "pointer-events": "none" }, board);
+  if (tool === "erase") {
+    const m = under(hover);
+    outline(g, footprint(m ? cellsOf(m) : [hoverCell(hover)]), "var(--bad)");
+    return;
+  }
+  const result = plan(hover, false, false);
+  const placed = result ? result.placed : candidate(hover);
+  if (result && !result.turned) drawPlaced(g, placed, "board", 0.5);
+  outline(g, footprint(cellsOf(placed)),
+          result ? "var(--accent)" : "var(--bad)");
 }
 
 // The tool buttons, the rotation preview, the size picker and the caption.
@@ -626,9 +738,10 @@ function drawPanel() {
   const way = FACING[newRotation];
   document.getElementById("stack").setAttribute("aria-pressed",
                                                 stacking || shiftHeld);
+  document.getElementById("halves").setAttribute("aria-pressed", halves);
   if (tool === "ramp") facing.innerHTML = `New ramps rise toward <b>${way}</b>`;
   else if (turns(tool)) {
-    facing.innerHTML = `New ${tool}s stand on the <b>${way}</b> side`;
+    facing.innerHTML = `New ${tool}s face <b>${way}</b>`;
   } else facing.innerHTML = `Ramps, walls and thwomps face <b>${way}</b>`;
 
   if (+sizeEl.value !== size) sizeEl.value = size;
@@ -639,9 +752,9 @@ function drawPanel() {
     caption.className = "caption";
     caption.textContent = `Seen from above. Each square is one ` +
       `${(info.module * 100).toFixed(2)} cm (${inches} inch) module with ` +
-      `a floor tile under it, and its four peg holes. Arrows point ` +
-      `uphill. On a stack, the corner says how many inches up its top ` +
-      `platform is.`;
+      `a floor tile under it, and its four peg holes; modules peg into ` +
+      `any of them, across tiles too. Arrows point uphill. On a stack, ` +
+      `the corner says how many inches up its top is.`;
   } else {
     caption.className = "caption warn";
     caption.textContent = `This layout is ${size} × ${size}, but the ` +
@@ -686,81 +799,134 @@ function buildTools() {
 
 // -- editing ---------------------------------------------------------------
 
-function cellFrom(event) {
-  const g = event.target.closest && event.target.closest(".cell");
-  if (!g) return null;
-  return { col: +g.dataset.col, row: +g.dataset.row };
+// The pointer in squares, like col and row, or null off the grid.
+function pointFrom(event) {
+  const ctm = board.getScreenCTM();
+  if (!ctm) return null;
+  const p = new DOMPoint(event.clientX, event.clientY)
+    .matrixTransform(ctm.inverse());
+  const x = (p.x - PAD) / CELL - 0.5;
+  const y = size - 0.5 - (p.y - PAD) / CELL;
+  const inside = v => v >= -0.5 && v < size - 0.5;
+  return inside(x) && inside(y) ? { x, y } : null;
 }
 
-// Whether the tool would go on top of m rather than replace it.
-function stacksOn(m) {
-  return !!m && (stacking || shiftHeld) && isPlatform(m.type);
+const hoverCell = point => [Math.floor(2 * point.x + 1),
+                            Math.floor(2 * point.y + 1)];
+
+// The tool's module where the pointer is: centred on it, to the nearest
+// half square, or whole square with Half squares off. A wall or thwomp
+// goes on the line of holes the pointer is over, along the way it faces.
+function candidate(point) {
+  const snap = v => Math.min(Math.max(
+    halves ? Math.round(2 * v) / 2 : Math.round(v), 0), size - 1);
+  const m = { type: tool, col: snap(point.x), row: snap(point.y),
+              rotation: newRotation, level: 0 };
+  if (!isSide(tool) || !halves) return m;
+
+  const [ux, uy] = uphill(newRotation);
+  const [cx, cy] = hoverCell(point);
+  if (ux === 0) m.row = (cy - (uy > 0 ? 1 : 0)) / 2;
+  else m.col = (cx - (ux > 0 ? 1 : 0)) / 2;
+  return m;
 }
 
-// Places the tool on a square, or with erase takes its top module off.
-// Otherwise it works on the top of the stack: on a platform while
-// stacking it goes on top, on a module of its own kind it turns it, and
-// anything else it replaces.
-function apply(cell, erase, stroke) {
-  const k = key(cell.col, cell.row);
-  const stack = modules.get(k);
-  const m = topOf(stack);
-  const placed = { type: tool, col: cell.col, row: cell.row,
-                   rotation: newRotation };
+// The top module on the cell under the pointer.
+function under(point) {
+  return topAt(columns(), hoverCell(point)) || null;
+}
 
+// What a click with the tool does, as {modules, placed, turned}, or null
+// when it does nothing. Erasing takes the top module under the pointer off.
+// Otherwise, while stacking on platforms the module goes on top of them; on
+// a module of its own kind it turns it, and anything else it replaces, at
+// the height of what is there. Whatever stood on what is taken away goes
+// too.
+function plan(point, erase, stroke) {
   if (erase || tool === "erase") {
-    if (!m) return false;
-    stack.pop();
-    if (!stack.length) modules.delete(k);
-    return true;
+    const m = under(point);
+    return m && { modules: settle(modules.filter(p => p !== m)) };
   }
-  if (stacksOn(m)) {
-    stack.push(placed);
-    return true;
+
+  const placed = candidate(point);
+  const cells = cellsOf(placed);
+  if (!cells.every(cell => onGrid(cell))) return null;
+  const cols = columns();
+  const tops = cells.map(cell => topAt(cols, cell));
+
+  if ((stacking || shiftHeld) && tops.every(t => t && isPlatform(t.type))) {
+    placed.level = Math.max(...tops.map(t => t.level)) + 1;
+    const next = [...modules, placed];
+    return fits(next) ? { modules: next, placed } : null;
   }
-  // A click on a module of the tool's kind turns it, if it turns.
-  if (m && m.type === tool) {
-    if (stroke || !turns(tool)) return false;
-    m.rotation = (m.rotation + 90) % 360;
-    newRotation = m.rotation;
-    return true;
+
+  placed.level = Math.max(0, ...tops.filter(Boolean).map(t => t.level));
+  const same = modules.find(m =>
+    m.type === placed.type && m.col === placed.col && m.row === placed.row &&
+    m.level === placed.level &&
+    (!isSide(m.type) || m.rotation === placed.rotation));
+  if (same) {
+    if (stroke || !turns(same.type)) return null;
+    const turned = { ...same, rotation: (same.rotation + 90) % 360 };
+    const next = modules.map(m => m === same ? turned : m);
+    return fits(next) ? { modules: next, placed: turned, turned: true }
+                      : null;
   }
-  if (m) stack[stack.length - 1] = placed;
-  else modules.set(k, [placed]);
+
+  const covered = new Set(cells.map(cellKey));
+  const next = settle([
+    ...modules.filter(m => m.level !== placed.level ||
+                           !cellsOf(m).some(c => covered.has(cellKey(c)))),
+    placed]);
+  return next.includes(placed) && fits(next) ? { modules: next, placed }
+                                             : null;
+}
+
+function apply(point, erase, stroke) {
+  const result = plan(point, erase, stroke);
+  if (!result) return false;
+  modules = result.modules;
+  if (result.turned) newRotation = result.placed.rotation;
   return true;
 }
 
+// What a stroke has been over already: a cell when erasing, or where the
+// tool's module would go.
+function strokeKey(point, erase) {
+  return erase || tool === "erase" ? cellKey(hoverCell(point))
+                                   : moduleKey(candidate(point));
+}
+
 board.addEventListener("pointerdown", event => {
-  const cell = cellFrom(event);
-  if (!cell) return;
+  const point = pointFrom(event);
+  if (!point) return;
   event.preventDefault();
   const erase = event.button === 2;
   remember();
   painting = true;
-  paintedThisStroke = new Set([key(cell.col, cell.row)]);
+  paintedThisStroke = new Set([strokeKey(point, erase)]);
   board.setPointerCapture(event.pointerId);
   board.dataset.erase = erase ? "1" : "";
-  if (apply(cell, erase, false)) changed(); else history.pop();
+  if (apply(point, erase, false)) changed(); else history.pop();
 });
 
 board.addEventListener("pointermove", event => {
-  const target = document.elementFromPoint(event.clientX, event.clientY);
-  const cell = target ? cellFrom({ target }) : null;
-  const moved = (cell && (!hover || hover.col !== cell.col ||
-                          hover.row !== cell.row)) || (!cell && hover);
-  hover = cell;
+  const point = pointFrom(event);
+  const erase = board.dataset.erase === "1";
+  const before = hover && strokeKey(hover, erase);
+  hover = point;
 
-  if (painting && cell) {
-    const k = key(cell.col, cell.row);
+  if (painting && point) {
+    const k = strokeKey(point, erase);
     if (!paintedThisStroke.has(k)) {
       paintedThisStroke.add(k);
-      if (apply(cell, board.dataset.erase === "1", true)) {
+      if (apply(point, erase, true)) {
         changed();
         return;
       }
     }
   }
-  if (moved) render();
+  if ((point && strokeKey(point, erase)) !== before) render();
 });
 
 const endStroke = () => { painting = false; render(); };
@@ -779,17 +945,23 @@ function setTool(name) {
   render();
 }
 
+// Turns the module under the pointer a quarter turn if it can, or else
+// the way new modules face.
 function rotate() {
-  const m = hover && topOf(modules.get(key(hover.col, hover.row)));
+  const m = hover && under(hover);
   if (m && turns(m.type)) {
-    remember();
-    m.rotation = (m.rotation + 90) % 360;
-    newRotation = m.rotation;
-    changed();
-  } else {
-    newRotation = (newRotation + 90) % 360;
-    render();
+    const turned = { ...m, rotation: (m.rotation + 90) % 360 };
+    const next = modules.map(p => p === m ? turned : p);
+    if (fits(next)) {
+      remember();
+      modules = next;
+      newRotation = turned.rotation;
+      changed();
+      return;
+    }
   }
+  newRotation = (newRotation + 90) % 360;
+  render();
 }
 
 document.getElementById("rotate").addEventListener("click", rotate);
@@ -801,16 +973,22 @@ function toggleStacking() {
 
 document.getElementById("stack").addEventListener("click", toggleStacking);
 
+function toggleHalves() {
+  halves = !halves;
+  render();
+}
+
+document.getElementById("halves").addEventListener("click", toggleHalves);
+
 // Grows or shrinks the grid about its middle, so modules stay where they
 // are on the table as far as whole squares allow.
 function resize(next) {
   if (next === size) return;
   const shift = Math.floor((next - size) / 2);
-  const moved = [...modules.values()].map(stack => stack.map(m => ({
-    ...m, col: m.col + shift, row: m.row + shift })));
-  const kept = moved.filter(([m]) => m.col >= 0 && m.row >= 0 &&
-                                     m.col < next && m.row < next);
-  const lost = moved.flat().length - kept.flat().length;
+  const kept = settle(modules
+    .map(m => ({ ...m, col: m.col + shift, row: m.row + shift }))
+    .filter(m => cellsOf(m).every(cell => onGrid(cell, next))));
+  const lost = modules.length - kept.length;
   if (lost && !confirm(`${lost} module${lost === 1 ? " is" : "s are"} ` +
                        `off a ${next} × ${next} grid and will be removed. ` +
                        `Resize?`)) {
@@ -819,8 +997,7 @@ function resize(next) {
   }
   remember();
   size = next;
-  modules = new Map(kept.map(stack => [key(stack[0].col, stack[0].row),
-                                       stack]));
+  modules = kept;
   changed();
 }
 
@@ -835,9 +1012,9 @@ function undo() {
 document.getElementById("undo").addEventListener("click", undo);
 
 document.getElementById("clear").addEventListener("click", () => {
-  if (!modules.size) return;
+  if (!modules.length) return;
   remember();
-  modules.clear();
+  modules = [];
   changed();
 });
 
@@ -854,11 +1031,13 @@ document.addEventListener("keydown", event => {
              event.key.toLowerCase() === "z") {
     event.preventDefault();
     undo();
+  } else if (event.ctrlKey || event.metaKey) {
+    return;
   } else if (/^[1-9]$/.test(event.key) && TOOLS[+event.key - 1]) {
     setTool(TOOLS[+event.key - 1][0]);
   } else if (event.key.toLowerCase() === "r") rotate();
-  else if (event.key.toLowerCase() === "s" && !event.ctrlKey &&
-           !event.metaKey) toggleStacking();
+  else if (event.key.toLowerCase() === "s") toggleStacking();
+  else if (event.key.toLowerCase() === "h") toggleHalves();
 });
 
 // Shift stacks while it is held.
@@ -925,12 +1104,12 @@ function showProblems() {
                     `${p.col}, ${p.row}`;
     li.append(b, `: ${p.message}.`);
     li.addEventListener("mouseenter", () => {
-      highlighted = key(p.col, p.row); render(); });
+      highlighted = moduleKey(p); render(); });
     li.addEventListener("mouseleave", () => { highlighted = null; render(); });
     list.appendChild(li);
   }
   const counts = new Map();
-  for (const m of allModules()) {
+  for (const m of modules) {
     counts.set(m.type, (counts.get(m.type) || 0) + 1);
   }
   const parts = TOOLS.filter(([type]) => counts.has(type)).map(([type]) => {

@@ -292,9 +292,15 @@ moved about between games:
 | Wall | `wall` | 1 x 4 inches, 2 high, pegged on one side of a square |
 | Thwomp | `thwomp` | 1 x 4 inches, 6 high, pegged like a wall; fixed in the sim |
 
+Every module pegs into the same 2 inch grid of holes, four to a tile and
+evenly spaced across the joins between tiles, so a module can go half a
+square along and stand across two tiles. A wall or thwomp takes one row of
+two holes, so two fit on a tile side by side, or one each way.
+
 Any module can stand on a platform of either height, and platforms stack,
 so a ramp on a 1" platform climbs onto a 2" platform or onto two 1"
-platforms stacked.
+platforms stacked. A module can stand across two platforms if they are as
+high.
 
 Map how they are set up on the table in the layout editor:
 
@@ -306,13 +312,16 @@ It opens http://localhost:8766 in the browser (only this computer can
 reach it; `--port` and `--no-browser` change that). Pick a module (keys 1
 to 5) and click or drag on the grid, which is seen from above with +x to
 the right and +y up, each square drawn with its tile's four peg holes.
+The module goes where the pointer is, to the nearest half square; turn off
+Half squares (H) to keep to whole squares. A wall or thwomp goes on the
+line of peg holes under the pointer, along the way it faces.
 Click a ramp, wall or thwomp with its own tool to turn it a quarter turn,
-or press R over it. A ramp's arrow points uphill; a wall or thwomp stands
-on the line of peg holes an inch from the middle, on the side it faces.
-Shift-click, or turn on Stack (S), to put the tool on top of a platform
-instead of replacing it; a stacked square shows how many inches up its top
-platform is in its corner. A plain click works on the top of a stack.
-Right-click or the Floor tool (6) takes the top module off a square, and
+or press R over it. A ramp's arrow points uphill.
+Shift-click, or turn on Stack (S), to put the tool on top of platforms
+instead of replacing them; a stack shows how many inches up its top is in
+its corner. A plain click replaces whatever is in the way, at the height
+of the top of what is there. Right-click or the Floor tool (6) takes the
+top module under the pointer off, along with anything standing on it, and
 Ctrl+Z undoes. As
 you edit it checks the layout and outlines in red any ramp whose low end
 runs into the edge, a module, a wall facing it or a drop, any ramp whose
@@ -346,7 +355,9 @@ export as it is, MAIN ASSEMBLY's modules where it puts them. A module on a platf
 without one on the floor. `rotation`
 in the file is degrees anticlockwise from above: a ramp at 0 rises toward
 +y, 90 toward -x, 180 toward -y, 270 toward +x, and a wall or thwomp at
-those stands on the +y, -x, -y or +x side of its square.
+those stands on the +y, -x, -y or +x side of its square, an inch from
+the middle. `col` and `row` go in halves: `"col": 5.5` is across the tiles
+at cols 5 and 6.
 
 Robots spawn on a circle round the middle, and one whose spot is on a
 ramp or wedged against a module (closer than 8 cm, as at the corners of
