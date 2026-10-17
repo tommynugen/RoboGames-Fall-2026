@@ -1121,14 +1121,14 @@ function showProblems() {
 }
 
 // Run it is the sim as the real arena runs. Test it adds what only the sim
-// can do: a robot for every controller, and FPV.
+// can do: a robot for every controller.
 function updateCommand() {
   const name = nameEl.value.trim() || "default";
   const run = `ros2 launch robogame_sim sim.launch.py layout:=${name} ` +
               `robots:=1,2 chase:=1,2`;
   document.getElementById("command").textContent = run;
   document.getElementById("test-command").textContent =
-    `${run} controller:=hotplug drive:=2 fpv:=true`;
+    `${run} controller:=hotplug drive:=2`;
 }
 
 nameEl.addEventListener("input", updateCommand);

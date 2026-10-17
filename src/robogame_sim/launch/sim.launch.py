@@ -9,9 +9,9 @@
     ros2 launch robogame_sim sim.launch.py drive_model:=firmware gui:=false
     ros2 launch robogame_sim sim.launch.py layout:=my_setup
     ros2 launch robogame_sim sim.launch.py partition:=second
-    ros2 launch robogame_sim sim.launch.py fpv:=true controller:=joy
+    ros2 launch robogame_sim sim.launch.py fpv:=false controller:=joy
     ros2 launch robogame_sim sim.launch.py robots:=1,2 chase:=1,2 \
-        controller:=hotplug drive:=2 fpv:=true
+        controller:=hotplug drive:=2
 
 layout names an arena layout made with arena_editor (or a path to one), and
 the world is built from it; cad uses the Onshape export as it is.
@@ -30,9 +30,11 @@ The controller drives robot drive, the first in robots unless set.
 controller:=hotplug gives it the first controller connected, and every
 controller connected after that a new robot of its own (controller_robots).
 That is for the sim only: the real arena binds controllers to robots by
-address.
+address. Virtual pads, such as Sunshine's for a Moonlight stream, are left
+out while a real controller drives.
 
-fpv:=true puts an FPV camera on the front of every robot's chassis. Click
+With the window up, every robot's chassis carries an FPV camera on its
+front, unless fpv:=false. Click
 the Gazebo window's 3D view, then F switches it between the arena and the
 driven robot's camera, and a robot's number key looks through that robot's
 instead. See fpv_toggle.py.
@@ -508,9 +510,10 @@ def generate_launch_description():
                         "run beside one already going; empty keeps "
                         "GZ_PARTITION as it is"),
         DeclareLaunchArgument(
-            "fpv", default_value="false",
-            description="true mounts an FPV camera on the front of every "
-                        "robot. F in the Gazebo window toggles the view "
-                        "through it, number keys pick the robot"),
+            "fpv", default_value="true",
+            description="Mounts an FPV camera on the front of every robot. "
+                        "F in the Gazebo window toggles the view through "
+                        "it, number keys pick the robot. false leaves the "
+                        "cameras and keys out"),
         OpaqueFunction(function=launch_setup),
     ])

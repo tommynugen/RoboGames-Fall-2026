@@ -11,7 +11,7 @@ so the arm moving does not move it.
 Talks to the Gazebo GUI over gz-transport, not ROS: it reads the keys the
 KeyPublisher GUI plugin publishes on /keyboard/keypress, and moves the GUI
 camera with the CameraTracking plugin's /gui/track and /gui/move_to/pose.
-sim.launch.py starts it, and adds KeyPublisher, when fpv:=true.
+sim.launch.py starts it, and adds KeyPublisher, unless fpv:=false.
 """
 
 import argparse

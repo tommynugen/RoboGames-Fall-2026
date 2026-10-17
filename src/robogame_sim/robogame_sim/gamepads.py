@@ -10,6 +10,7 @@ publish, so racing_teleop reads it unchanged.
 import fcntl
 import glob
 import os
+import re
 import struct
 
 from robogame_sim.motion_sensor import _read_sysfs
@@ -30,6 +31,18 @@ AXIS_LIMIT = 32767.0
 # else with a js node, like a virtual pointer or the motion sensor.
 MIN_AXES = 6
 MIN_BUTTONS = 10
+
+MAC_ADDRESS = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
+
+
+def is_virtual(path, address):
+    """Whether the js device at sysfs path, links followed, is made by
+    software rather than a controller, like the X-Box pad Sunshine makes
+    for a Moonlight stream or the one Steam Input makes mirroring a
+    controller. Bluetooth LE controllers come through uhid too, but they
+    carry their own address."""
+    return (path.startswith("/sys/devices/virtual/")
+            and not MAC_ADDRESS.match(address))
 
 
 def convert_axis(raw_value, deadzone):
@@ -61,9 +74,9 @@ def counts(fd):
 
 
 def find_gamepads():
-    """Lists (device path, name, address) for each connected gamepad. The
-    address is the Bluetooth one, upper case, or the device path for a
-    controller that has none."""
+    """Lists (device path, name, address, virtual) for each connected
+    gamepad. The address is the Bluetooth one, upper case, or the device
+    path for a controller that has none. virtual is is_virtual's."""
     pads = []
 
     for sysfs in sorted(glob.glob("/sys/class/input/js*")):
@@ -88,8 +101,9 @@ def find_gamepads():
         if axes < MIN_AXES or buttons < MIN_BUTTONS:
             continue
 
-        address = _read_sysfs(os.path.join(sysfs, "device", "uniq"))
-        pads.append((device, name, address.upper() or device))
+        address = _read_sysfs(os.path.join(sysfs, "device", "uniq")).upper()
+        pads.append((device, name, address or device,
+                     is_virtual(os.path.realpath(sysfs), address)))
 
     return pads
 

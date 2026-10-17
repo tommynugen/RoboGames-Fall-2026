@@ -12,6 +12,7 @@ from robogame_sim.gamepads import (
     JS_EVENT_INIT,
     Gamepad,
     convert_axis,
+    is_virtual,
 )
 from robogame_sim.spawning import CLEAR_AHEAD, clear_ahead, spawn_spot
 
@@ -64,3 +65,21 @@ def test_gamepad_reads_joydev_events(tmp_path):
 
     pad.close()
     os.close(writer)
+
+
+def test_streamed_and_uinput_pads_are_virtual():
+    sunshine = ("/sys/devices/virtual/misc/uhid/0005:045E:0B13.0016/input/"
+                "input76/js2")
+    assert is_virtual(sunshine, "045E:0B13/SUNSHINE-GAMEPAD-0")
+    assert is_virtual("/sys/devices/virtual/input/input30/js0", "")
+
+
+def test_controllers_are_not_virtual():
+    dualsense = ("/sys/devices/pci0000:00/0000:00:14.0/usb1/1-4/1-4:1.0/"
+                 "bluetooth/hci0/hci0:256/0005:054C:0CE6.0017/input/"
+                 "input80/js3")
+    assert not is_virtual(dualsense, "BC:C7:46:16:F5:6F")
+    # A Bluetooth LE controller comes through uhid, with its address.
+    assert not is_virtual(
+        "/sys/devices/virtual/misc/uhid/0005:045E:0B13.0018/input/"
+        "input81/js4", "AC:8E:BD:12:34:56")

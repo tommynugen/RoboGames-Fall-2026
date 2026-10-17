@@ -72,12 +72,12 @@ ros2 launch robogame_sim sim.launch.py                    # robot 1
 ros2 launch robogame_sim sim.launch.py robots:=0,1,2,3    # several robots
 ros2 launch robogame_sim sim.launch.py gui:=false         # no window
 ros2 launch robogame_sim sim.launch.py drive_model:=firmware
-ros2 launch robogame_sim sim.launch.py fpv:=true          # onboard camera
+ros2 launch robogame_sim sim.launch.py fpv:=false         # no onboard camera
 ```
 
-`fpv:=true` puts an FPV camera low on the front of every robot's chassis,
-under the arm, so it does not move when the arm does. Click the Gazebo
-window's 3D view, then:
+Every robot has an FPV camera low on the front of its chassis, under the
+arm, so it does not move when the arm does; `fpv:=false` leaves it out.
+Click the Gazebo window's 3D view, then:
 
 | Key | |
 |---|---|
@@ -178,7 +178,7 @@ The editor's Test it command, for the sim only:
 
 ```
 ros2 launch robogame_sim sim.launch.py layout:=NAME robots:=1,2 chase:=1,2 \
-    controller:=hotplug drive:=2 fpv:=true
+    controller:=hotplug drive:=2
 ```
 
 Robot 1 chases robot 2, and the first controller connected drives robot 2.
@@ -193,6 +193,14 @@ FPV on robot 2, and 3 looks through robot 3's camera.
 address and reads its `/dev/input/jsN` itself, publishing `/robot_N/joy`
 as `joy_node` would: `joy_node` picks a controller by index or by name, and
 every DualSense has the same name.
+
+Virtual pads are left out while a real controller is connected or has
+driven: Sunshine makes an X-Box pad for a Moonlight stream, and Steam Input
+a copy of a controller already there, so each would otherwise spawn a robot
+nobody holds. One drives while it is all there is, and a real controller
+connecting later takes over its robot. A pad counts as virtual when the
+kernel has it under `/sys/devices/virtual` with no Bluetooth address, so
+Bluetooth LE controllers, which come through `uhid` too, still count.
 
 This is not in the editor's Run it command, which stays as the real arena
 runs. There `robot_control.launch.py` binds each controller to the robot

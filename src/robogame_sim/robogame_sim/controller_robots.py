@@ -10,6 +10,11 @@ bridge and racing_teleop, as sim.launch.py spawns one. A controller that
 drops and comes back drives the same robot again, found by its Bluetooth
 address, and its robot waits where it stopped.
 
+Virtual pads, like the X-Box pad Sunshine makes for a Moonlight stream or
+Steam Input's copy of a controller, only drive while no real controller
+has: they are often a second view of one already connected. A real
+controller connecting later takes over the robot a virtual pad drove.
+
 For the sim only. On the real arena robot_control.launch.py binds each
 controller to the robot controllers.yaml gives it, and this would bind them
 in the order they connect instead.
@@ -58,9 +63,10 @@ def executable(package, name):
 class Binding:
     """A controller and the robot it drives."""
 
-    def __init__(self, robot_id, address):
+    def __init__(self, robot_id, address, virtual=False):
         self.robot_id = robot_id
         self.address = address
+        self.virtual = virtual
         self.pad = None
         self.publisher = None
         self.teleop = None
@@ -94,6 +100,7 @@ class ControllerRobots(Node):
 
         self.ground = self.load_ground(param("layout"))
         self.bindings = {}
+        self.standing_aside = set()
         self.processes = []
         self.poses = {}
         self.robots = set()
@@ -131,22 +138,26 @@ class ControllerRobots(Node):
     # -- controllers -----------------------------------------------------
 
     def scan(self):
-        for device, name, address in find_gamepads():
+        pads = find_gamepads()
+        real = (any(not virtual for *_, virtual in pads)
+                or any(not b.virtual for b in self.bindings.values()))
+
+        for device, name, address, virtual in pads:
             binding = self.bindings.get(address)
 
             if binding is not None and binding.pad is not None:
                 continue
 
             if binding is None:
-                robot_id = (self.first_robot if not self.bindings
-                            else max(self.robots) + 1)
-                binding = Binding(robot_id, address)
-                self.bindings[address] = binding
-                binding.publisher = self.create_publisher(
-                    Joy, f"/robot_{robot_id}/joy", 10)
+                if virtual and real:
+                    if address not in self.standing_aside:
+                        self.standing_aside.add(address)
+                        self.get_logger().info(
+                            f"Leaving out {name} {address} on {device}, a "
+                            f"virtual pad, while a real controller drives")
+                    continue
 
-                if robot_id not in self.robots:
-                    self.spawn(robot_id)
+                binding = self.bind(address, virtual, name)
 
             try:
                 binding.pad = Gamepad(device, self.deadzone)
@@ -164,6 +175,36 @@ class ControllerRobots(Node):
             self.get_logger().info(
                 f"{name} {address} on {device} drives robot "
                 f"{binding.robot_id}")
+
+    def bind(self, address, virtual, name):
+        stand_in = next(
+            (b for b in self.bindings.values() if b.virtual), None)
+
+        if stand_in is not None and not virtual:
+            # Its robot goes to the real controller, rather than a new one.
+            del self.bindings[stand_in.address]
+            if stand_in.pad is not None:
+                stand_in.pad.close()
+            self.stop(stand_in.teleop)
+            binding = Binding(stand_in.robot_id, address)
+            binding.publisher = stand_in.publisher
+            self.bindings[address] = binding
+            self.get_logger().info(
+                f"{name} {address} takes robot {binding.robot_id} over from "
+                f"the virtual pad {stand_in.address}")
+            return binding
+
+        robot_id = (self.first_robot if not self.bindings
+                    else max(self.robots) + 1)
+        binding = Binding(robot_id, address, virtual)
+        self.bindings[address] = binding
+        binding.publisher = self.create_publisher(
+            Joy, f"/robot_{robot_id}/joy", 10)
+
+        if robot_id not in self.robots:
+            self.spawn(robot_id)
+
+        return binding
 
     def poll(self):
         now = self.get_clock().now()
