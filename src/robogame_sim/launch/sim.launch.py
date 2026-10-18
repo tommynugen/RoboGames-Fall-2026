@@ -34,10 +34,11 @@ address. Virtual pads, such as Sunshine's for a Moonlight stream, are left
 out while a real controller drives.
 
 With the window up, every robot's chassis carries an FPV camera on its
-front, unless fpv:=false. Click
-the Gazebo window's 3D view, then F switches it between the arena and the
-driven robot's camera, and a robot's number key looks through that robot's
-instead. See fpv_toggle.py.
+front, unless fpv:=false. Click the Gazebo window's 3D view, then 1 looks
+straight down on the arena, 2 over its front, 3 over its front right
+corner, 4 switches to the driven robot's camera and back, and F1 to F9
+look through that robot's instead. The Camera view card in the side panel
+does the same, when robogame_gui is built. See fpv_toggle.py.
 """
 
 import difflib
@@ -104,6 +105,16 @@ KEY_PUBLISHER = """
 </plugin>
 """
 
+# Drop downs in the side panel for fpv_toggle's views, from robogame_gui.
+VIEW_CARD = """
+<plugin filename="RobogameView" name="Camera view">
+  <gz-gui>
+    <title>Camera view</title>
+    <property key="state" type="string">docked</property>
+  </gz-gui>
+</plugin>
+"""
+
 # The FPV view sits 2 cm under the arm, nearer than the default near clip.
 CAMERA_CLIP = "<camera_clip><near>0.005</near><far>50</far></camera_clip>"
 
@@ -123,9 +134,23 @@ def default_gui_config():
     return found[-1] if found else None
 
 
-def fpv_gui_config():
+def view_card_path():
+    """Where robogame_gui put the Camera view card, or None if it is not
+    built."""
+    try:
+        prefix = get_package_prefix("robogame_gui")
+    except PackageNotFoundError:
+        return None
+
+    path = os.path.join(prefix, "lib", "robogame_gui")
+    return path if os.path.exists(
+        os.path.join(path, "libRobogameView.so")) else None
+
+
+def view_gui_config(card):
     """The default Gazebo GUI, starting over the arena and publishing keys
-    for fpv_toggle, or None if the default cannot be found."""
+    for fpv_toggle, with the Camera view card if card, or None if the
+    default cannot be found."""
     default = default_gui_config()
     if default is None:
         return None
@@ -138,6 +163,8 @@ def fpv_gui_config():
                   f"<camera_pose>{overview}</camera_pose>{CAMERA_CLIP}",
                   text, count=1)
     text += KEY_PUBLISHER
+    if card:
+        text += VIEW_CARD
 
     path = os.path.join(
         tempfile.mkdtemp(prefix="robogame_sim_"), "gui.config")
@@ -296,30 +323,37 @@ def launch_setup(context):
 
     gui_cmd = gui_command()
 
-    if fpv and gui:
-        config = fpv_gui_config()
+    if gui:
+        card = view_card_path()
+        if card is None:
+            print("[sim.launch] robogame_gui is not built, so no Camera view "
+                  "card; the 1 to 4 keys still work")
+        else:
+            actions.append(AppendEnvironmentVariable(
+                "GZ_GUI_PLUGIN_PATH", card))
+
+        config = view_gui_config(card is not None)
 
         if config is None:
             raise RuntimeError(
-                "fpv:=true could not find Gazebo's default gui.config to add "
-                "the key publisher to")
+                "Could not find Gazebo's default gui.config to add the key "
+                "publisher to")
 
         gui_cmd += ["--gui-config", config]
 
-    if gui:
         actions.append(ExecuteProcess(
             cmd=gui_cmd, name="gazebo_gui", output="screen"))
 
-    if fpv and gui:
-        # F in the Gazebo window toggles FPV, see fpv_toggle.py. The driven
-        # robot first, so F looks through the one being driven.
+        # 1 to 4 in the Gazebo window change the view, see fpv_toggle.py.
+        # The driven robot first, so 4 looks through the one being driven.
         order = [driven] + [r for r in robot_ids if r != driven]
         actions.append(Node(
             package="robogame_sim",
             executable="fpv_toggle",
             output="screen",
             arguments=["--robots", ",".join(str(r) for r in order),
-                       "--world", WORLD_NAME],
+                       "--world", WORLD_NAME]
+                      + ([] if fpv else ["--no-fpv"]),
         ))
 
     topics = ["/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock"]
@@ -558,8 +592,8 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "fpv", default_value="true",
             description="Mounts an FPV camera on the front of every robot. "
-                        "F in the Gazebo window toggles the view through "
-                        "it, number keys pick the robot. false leaves the "
-                        "cameras and keys out"),
+                        "4 in the Gazebo window toggles the view through "
+                        "it, F1 to F9 pick the robot. false leaves the "
+                        "cameras out; 1 to 3 still change the view"),
         OpaqueFunction(function=launch_setup),
     ])

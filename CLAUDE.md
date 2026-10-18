@@ -1,7 +1,8 @@
 # CLAUDE.md
 
 A private Gazebo sim for the ROBOGAME-2.0 robots: ROS 2 Lyrical, Gazebo
-Jetty (gz-sim 10), one ament_python package, `src/robogame_sim`. No remote;
+Jetty (gz-sim 10), one ament_python package, `src/robogame_sim`, and
+`src/robogame_gui`, a small C++ Gazebo GUI plugin (the Camera view card). No remote;
 nothing here goes to GitHub. README.md is the full manual: what each launch
 argument does, how the chase and planner behave, the layout file format, and
 what was checked in Gazebo and when. Read the section you need rather than
@@ -41,7 +42,8 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `robot_console.py` + `robot_console.html` | the robot console at localhost:8767: bind controllers, make robots autonomous, send them places |
 | `autopilot.py` | the console's driving: command queue and chase mode, on `Chaser` |
 | `active_arena.py` | publishes the arena in use on `/arena/layout`, latched; the sim launch starts one |
-| `robot_sdf.py`, `spawning.py`, `fpv_toggle.py` | robot model, spawn placement, FPV camera |
+| `robot_sdf.py`, `spawning.py`, `fpv_toggle.py` | robot model, spawn placement, FPV camera and the 1 to 4 views |
+| `src/robogame_gui/src/RobogameView.*` | the Camera view card in the Gazebo side panel, talks to `fpv_toggle` |
 | `launch/sim.launch.py` | the one launch file; checks its arguments |
 | `layouts/*.json` | arena layouts, one module per line |
 | `scripts/` | Onshape export, Gazebo chase suite and scoring, arena_perception sync |
