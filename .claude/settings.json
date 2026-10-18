@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./build/**)",
+      "Read(./install/**)",
+      "Read(./log/**)",
+      "Read(**/*.stl)",
+      "Edit(./src/arena_perception/**)",
+      "Write(./src/arena_perception/**)"
+    ]
+  }
+}

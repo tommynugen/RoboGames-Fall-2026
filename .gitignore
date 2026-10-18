@@ -4,4 +4,5 @@ log/
 __pycache__/
 *.pyc
 src/arena_perception/
-.claude/
+.claude/*
+!.claude/settings.json
