@@ -14,6 +14,7 @@ source /opt/ros/lyrical/setup.bash && colcon build --symlink-install && source i
 cd src/robogame_sim && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test   # tests, no Gazebo
 python3 -m robogame_sim.chase_sim mazetest default --seeds 4                     # chase in 2D, from src/robogame_sim
 ros2 launch robogame_sim sim.launch.py gui:=false fpv:=false speed:=0 step:=0.002 layout:=NAME robots:=1,2 chase:=1,2
+ros2 run robogame_sim robot_console                                              # the robot console, beside a sim
 scripts/gazebo_chase_suite.sh /tmp/chase_runs [SCENARIO]                         # 14 test4 runs, a few minutes
 ```
 
@@ -33,10 +34,13 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `chase_node.py` | ROS node around `Chaser` |
 | `chase_sim.py` | 2D stand-in for Gazebo to try `Chaser` against moving targets |
 | `arena_layout.py` (890 lines) | layout JSON load/save, `PARTS`, `check()` (the editor's red outlines), world SDF building, spawn spots |
-| `arena_editor.py` + `arena_editor.html` | the layout editor at localhost:8766; the html is one big file, grep it |
+| `arena_editor.py` + `arena_editor.html` | the layout editor at localhost:8766; the html is one big file, grep it. Its module drawing is in `arena_draw.js`, shared with the console |
 | `sim_firmware.py`, `firmware_model.py` | stand in for the ESP32 firmware and BLE bridge |
 | `racing_teleop.py`, `drive_controls.py`, `motion_sensor.py` | PS4/PS5 racing controls and wheel steering |
-| `controller_robots.py`, `gamepads.py` | a robot for every controller connected (hotplug) |
+| `controller_robots.py`, `gamepads.py` | a robot for every controller connected (hotplug); takes rebinds from the console |
+| `robot_console.py` + `robot_console.html` | the robot console at localhost:8767: bind controllers, make robots autonomous, send them places |
+| `autopilot.py` | the console's driving: command queue and chase mode, on `Chaser` |
+| `active_arena.py` | publishes the arena in use on `/arena/layout`, latched; the sim launch starts one |
 | `robot_sdf.py`, `spawning.py`, `fpv_toggle.py` | robot model, spawn placement, FPV camera |
 | `launch/sim.launch.py` | the one launch file; checks its arguments |
 | `layouts/*.json` | arena layouts, one module per line |

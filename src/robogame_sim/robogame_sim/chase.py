@@ -263,6 +263,9 @@ class Chaser:
         # How far forward the target's arm reaches. Taken to be out until
         # set_target_arm says otherwise.
         self.target_reach = ARM_REACH
+        # True when the target is a spot on the floor rather than a robot:
+        # the hunter then drives its centre onto it, with no standoff.
+        self.point = False
         self.history = deque()
         self.recovery = None
         self.last_recovery = None
@@ -312,8 +315,8 @@ class Chaser:
         t = self.target
         terrain = self.terrain
         self.distance = distance = math.hypot(t.x - x, t.y - y)
-        standoff = standoff_distance(x, y, t.x, t.y, t.yaw, self.clearance,
-                                     self.target_reach)
+        standoff = 0.0 if self.point else standoff_distance(
+            x, y, t.x, t.y, t.yaw, self.clearance, self.target_reach)
         self.gap = gap = distance - standoff
         aim_x, aim_y = self.aim(x, y, distance, standoff)
 

@@ -403,6 +403,91 @@ running away can now loop round the arena over the corner platforms, which
 both robots can use now, and in two runs stayed ahead for the whole 40 s.
 On test4 moves refused fell from 54 to 12.
 
+## Robot console
+
+A page for every robot in the arena: which controller drives which
+robot, which robots drive themselves, and where those go.
+
+```
+ros2 run robogame_sim robot_console
+```
+
+It opens http://localhost:8767 in the browser (only this computer can
+reach it; `--port` and `--no-browser` change that). Start it beside a sim,
+or on the real arena: it finds robots by their `/model/robot_N/odometry`,
+which the sim and the arena camera both publish, and leaves a robot off
+the page 10 s after its odometry goes.
+
+The arena is drawn as the editor draws it, with every robot on it, in its
+colour and the way it faces. It is the arena in use:
+
+- In the sim, the layout `sim.launch.py` built the world from. The launch
+  publishes it, latched, on `/arena/layout` (`active_arena`).
+- With nothing published there, as on the real arena, the layout last
+  saved in the arena editor, since that is where the modules on the table
+  are mapped. To pin one, run
+  `ros2 run robogame_sim active_arena --ros-args -p layout:=NAME`.
+- The Arena list on the page picks any saved layout, or `cad`, over both.
+
+The planner uses the same arena, and a new one is loaded as soon as it
+changes, a layout saved again included.
+
+Controllers: each one `controller_robots` has is listed with the robot it
+drives, and picking another robot moves it there, its racing controls
+and wheel steering with it. A controller moved onto a robot another one
+drives swaps robots with it; No robot takes it off every robot. This needs
+`controller_robots`, so in the sim launch with `controller:=hotplug`. On
+the real arena `robot_control.launch.py` binds controllers from
+`controllers.yaml`, and the page says no `controller_robots` is running.
+
+Pick a robot in the list, or with keys 1 to 9, and make it Autonomous.
+The console then drives it on `/robot_N/cmd_vel` with `Chaser`, the
+steering `chase_node` uses, so it plans round platforms, lines up for
+narrow gaps and climbs ramps the same way. It first stows its arm, as
+`chase_node` does. Its controller is taken off it while it is autonomous,
+and given back when it is made Manual again. If anything else publishes
+its `cmd_vel`, such as `chase_node` or the real arena's
+`controller_input`, the page names it, since the two would fight. Its
+planned path is drawn on the arena in its colour, bold for the robot
+picked and faint for the others.
+
+It has two modes:
+
+- Commands, the default. Go to a robot, picked from a list, stops just
+  short of it as the chase does. Go to a spot takes x and y in metres from
+  the middle of the arena, +x right and +y up, or a click on the arena.
+  Clicking a robot goes to it. Go replaces what it is doing; Queue, or a
+  Shift-click, adds the command to the end of its queue, and it does them
+  one after another. Queued spots are numbered on the arena. A spot is
+  reached within 3 cm. A spot it cannot reach, on a platform no ramp leads
+  to, it goes as close to as it can and moves on. Stop and clear, or Esc,
+  stops it.
+- Chase follows the robot picked, or clicked, for as long as it is left
+  on, as `chase_node` does.
+
+When a robot's pose is older than 0.5 s it is stopped, and it stows its
+arm again when the pose comes back. Ctrl-C in the console's terminal stops
+every robot it drives.
+
+Checked on 2026-10-18. 17 tests: `test_autopilot.py` runs the autopilot
+in `chase_sim`'s 2D stand-in (up the default platform's ramp to a spot on
+top, a spot then a robot from its queue, a spot it cannot reach, a chase
+after a robot that moves, the arm stowed first), and
+`test_robot_console.py` runs the console on a ROS domain of its own
+against a stand-in sim and `controller_robots`, through the page's API.
+Then headless in Gazebo on test4 with three robots: robot 1, sent to the
+top of the tower by the page, climbed the spiral to it (z 0.223 m) in
+about 45 s and stopped within 3 cm of the spot; robot 2 in chase mode
+went after robot 3 and held beside it; clicks on the arena, in headless
+Chromium, queued spots and robots where they were clicked to a millimetre,
+and the Chase and Manual buttons switched mode. With `controller_robots`
+and a DualSense, the controller moved from robot 3 to robot 1, came off
+robot 1 when it was made autonomous and back when it was made manual, and
+went to no robot and back to 3. Stopping the sim stopped robot 2 and
+switched the arena to the layout last saved in the editor. The editor,
+which now loads its drawing code from `arena_draw.js` shared with the
+console, was checked in headless Chromium to draw test4 as before.
+
 ## Arena layouts
 
 The arena is a 12 x 12 grid of 4 inch (10.16 cm) floor tiles, 48 inches
@@ -530,8 +615,10 @@ With ROS sourced, its pytest plugins stop pytest finding the tests, hence
 `PYTEST_DISABLE_PLUGIN_AUTOLOAD`. These check the firmware maths against
 motors.cpp and arm.cpp, the racing controls and steering wheel maths, that
 the robot model is valid XML, the chase and path planning, the chase
-against moving targets in `chase_sim` (`test_chase_dynamic.py`), and the
-arena layouts and their editor. Print a robot's SDF with `ros2 run robogame_sim
+against moving targets in `chase_sim` (`test_chase_dynamic.py`), the
+arena layouts and their editor, and the robot console
+(`test_autopilot.py`, and `test_robot_console.py`, which needs ROS
+sourced). Print a robot's SDF with `ros2 run robogame_sim
 robot_sdf 2`, and check it with `gz sdf -k` once Gazebo is installed.
 
 ## Checked in Gazebo

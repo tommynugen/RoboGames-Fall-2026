@@ -22,8 +22,10 @@ from urllib.parse import unquote
 
 from robogame_sim import arena_layout
 
-PAGE = os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                    "arena_editor.html")
+HERE = os.path.dirname(os.path.realpath(__file__))
+PAGE = os.path.join(HERE, "arena_editor.html")
+# Draws the modules, shared with the robot console.
+DRAW = os.path.join(HERE, "arena_draw.js")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -56,6 +58,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in ("/", "/index.html"):
                 with open(PAGE, "rb") as page:
                     self.reply(200, page.read(), "text/html; charset=utf-8")
+            elif self.path == "/arena_draw.js":
+                with open(DRAW, "rb") as script:
+                    self.reply(200, script.read(),
+                               "text/javascript; charset=utf-8")
             elif self.path == "/api/modules":
                 self.reply(200, arena_layout.modules_info())
             elif self.path == "/api/layouts":

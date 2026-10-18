@@ -15,12 +15,20 @@ Steam Input's copy of a controller, only drive while no real controller
 has: they are often a second view of one already connected. A real
 controller connecting later takes over the robot a virtual pad drove.
 
+The robot console (robot_console.py) moves a controller to another robot,
+or takes it off every robot, with a JSON message on
+/controller_robots/assign: {"address": "AA:BB:...", "robot": 2}, or
+"robot": null. A controller moved onto a robot another one drives swaps
+robots with it. Every controller and the robot it drives are published,
+latched, on /controller_robots/state.
+
 For the sim only. On the real arena robot_control.launch.py binds each
 controller to the robot controllers.yaml gives it, and this would bind them
 in the order they connect instead.
 """
 
 import ctypes
+import json
 import math
 import os
 import signal
@@ -33,9 +41,11 @@ from ament_index_python.packages import (
 )
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import Joy
+from std_msgs.msg import String
 
 from robogame_sim import arena_layout
 from robogame_sim.gamepads import Gamepad, find_gamepads
@@ -49,6 +59,9 @@ from robogame_sim.terrain import Terrain
 
 PR_SET_PDEATHSIG = 1
 
+# Kept for anyone subscribing later, as the robot console does.
+LATCHED = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+
 
 def die_with_parent():
     # So a robot's processes stop with this node even if it is killed.
@@ -61,12 +74,14 @@ def executable(package, name):
 
 
 class Binding:
-    """A controller and the robot it drives."""
+    """A controller and the robot it drives, None when the robot console
+    has taken it off every robot."""
 
-    def __init__(self, robot_id, address, virtual=False):
+    def __init__(self, robot_id, address, virtual=False, name=""):
         self.robot_id = robot_id
         self.address = address
         self.virtual = virtual
+        self.name = name
         self.pad = None
         self.publisher = None
         self.teleop = None
@@ -105,6 +120,11 @@ class ControllerRobots(Node):
         self.poses = {}
         self.robots = set()
 
+        self.state_publisher = self.create_publisher(
+            String, "/controller_robots/state", LATCHED)
+        self.create_subscription(
+            String, "/controller_robots/assign", self.on_assign, 10)
+
         for robot_id in param("robots"):
             self.track(robot_id)
 
@@ -114,6 +134,7 @@ class ControllerRobots(Node):
         self.get_logger().info(
             f"The first controller drives robot {self.first_robot}, and "
             f"each one connected after it gets a robot of its own")
+        self.publish_state()
         self.scan()
 
     def load_ground(self, layout):
@@ -166,19 +187,29 @@ class ControllerRobots(Node):
                     f"Cannot open {device} for {name} {address}: {error}")
                 continue
 
-            binding.teleop = self.start(
-                "racing_teleop", binding.robot_id,
-                executable("robogame_sim", "racing_teleop"),
-                "--ros-args", "-r", f"__ns:=/robot_{binding.robot_id}",
-                "-p", f"robot_id:={binding.robot_id}",
-                "-p", f"controller_address:={address}")
+            self.drive(binding)
             self.get_logger().info(
-                f"{name} {address} on {device} drives robot "
-                f"{binding.robot_id}")
+                f"{name} {address} on {device} drives "
+                + (f"robot {binding.robot_id}"
+                   if binding.robot_id is not None else "no robot"))
+            self.publish_state()
+
+    def drive(self, binding):
+        """Starts racing_teleop for a connected controller's robot."""
+        if binding.pad is None or binding.robot_id is None:
+            return
+
+        binding.teleop = self.start(
+            "racing_teleop", binding.robot_id,
+            executable("robogame_sim", "racing_teleop"),
+            "--ros-args", "-r", f"__ns:=/robot_{binding.robot_id}",
+            "-p", f"robot_id:={binding.robot_id}",
+            "-p", f"controller_address:={binding.address}")
 
     def bind(self, address, virtual, name):
         stand_in = next(
-            (b for b in self.bindings.values() if b.virtual), None)
+            (b for b in self.bindings.values()
+             if b.virtual and b.robot_id is not None), None)
 
         if stand_in is not None and not virtual:
             # Its robot goes to the real controller, rather than a new one.
@@ -186,7 +217,7 @@ class ControllerRobots(Node):
             if stand_in.pad is not None:
                 stand_in.pad.close()
             self.stop(stand_in.teleop)
-            binding = Binding(stand_in.robot_id, address)
+            binding = Binding(stand_in.robot_id, address, name=name)
             binding.publisher = stand_in.publisher
             self.bindings[address] = binding
             self.get_logger().info(
@@ -196,14 +227,14 @@ class ControllerRobots(Node):
 
         robot_id = (self.first_robot if not self.bindings
                     else max(self.robots) + 1)
-        binding = Binding(robot_id, address, virtual)
+        binding = Binding(robot_id, address, virtual, name)
         self.bindings[address] = binding
-        binding.publisher = self.create_publisher(
-            Joy, f"/robot_{robot_id}/joy", 10)
+        binding.publisher = self.joy_publisher(robot_id)
 
         if robot_id not in self.robots:
             self.spawn(robot_id)
 
+        self.publish_state()
         return binding
 
     def poll(self):
@@ -211,6 +242,12 @@ class ControllerRobots(Node):
 
         for binding in self.bindings.values():
             if binding.pad is None:
+                continue
+
+            if binding.publisher is None:
+                # On no robot: read on, so a dropped controller is noticed.
+                if binding.pad.poll() is None:
+                    self.drop(binding)
                 continue
 
             changed = binding.pad.poll()
@@ -242,6 +279,73 @@ class ControllerRobots(Node):
         self.get_logger().warning(
             f"Controller {binding.address} disconnected, robot "
             f"{binding.robot_id} waits for it to come back")
+        self.publish_state()
+
+    # -- the robot console -----------------------------------------------
+
+    def joy_publisher(self, robot_id):
+        if robot_id is None:
+            return None
+        return self.create_publisher(Joy, f"/robot_{robot_id}/joy", 10)
+
+    def on_assign(self, message):
+        try:
+            asked = json.loads(message.data)
+            address = asked["address"]
+            robot_id = asked.get("robot")
+            robot_id = None if robot_id is None else int(robot_id)
+        except (ValueError, KeyError, TypeError) as error:
+            self.get_logger().warning(
+                f"Bad assignment {message.data!r}: {error}")
+            return
+
+        binding = self.bindings.get(address)
+        if binding is None:
+            self.get_logger().warning(f"No controller {address} to move")
+            return
+        if robot_id is not None and robot_id not in self.robots:
+            self.get_logger().warning(
+                f"No robot {robot_id} to give {address}")
+            return
+        if robot_id == binding.robot_id:
+            self.publish_state()
+            return
+
+        # The controller on that robot already, if any, gets this one's.
+        other = next((b for b in self.bindings.values()
+                      if b is not binding and robot_id is not None
+                      and b.robot_id == robot_id), None)
+        moves = [(binding, robot_id)]
+        if other is not None:
+            moves.append((other, binding.robot_id))
+
+        for moved, _ in moves:
+            self.stop(moved.teleop)
+            moved.teleop = None
+            if moved.publisher is not None:
+                self.destroy_publisher(moved.publisher)
+
+        for moved, new_robot in moves:
+            moved.robot_id = new_robot
+            moved.publisher = self.joy_publisher(new_robot)
+            moved.last_publish = None
+            self.drive(moved)
+            self.get_logger().info(
+                f"Controller {moved.address} now drives "
+                + (f"robot {new_robot}" if new_robot is not None
+                   else "no robot"))
+
+        self.publish_state()
+
+    def publish_state(self):
+        controllers = [
+            {"address": b.address, "name": b.name, "robot": b.robot_id,
+             "connected": b.pad is not None, "virtual": b.virtual}
+            for b in self.bindings.values()]
+        self.state_publisher.publish(String(data=json.dumps({
+            "controllers": controllers,
+            "robots": sorted(self.robots),
+        })))
 
     # -- robots ----------------------------------------------------------
 

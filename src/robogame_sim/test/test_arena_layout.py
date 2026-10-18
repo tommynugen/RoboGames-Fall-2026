@@ -222,6 +222,8 @@ def test_editor_serves_saves_and_checks(editor):
     url, folder = editor
     status, page = call(url + "/")
     assert status == 200 and b"Arena layout" in page
+    status, script = call(url + "/arena_draw.js")
+    assert status == 200 and b"function drawModule" in script
 
     status, body = call(url + "/api/modules")
     modules = json.loads(body)

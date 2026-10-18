@@ -8,7 +8,8 @@ setup(
     name=package_name,
     version='0.0.1',
     packages=find_packages(exclude=['test']),
-    package_data={package_name: ['arena_editor.html']},
+    package_data={package_name: ['arena_editor.html', 'arena_draw.js',
+                                 'robot_console.html']},
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -36,6 +37,8 @@ setup(
             'arena_editor = robogame_sim.arena_editor:main',
             'fpv_toggle = robogame_sim.fpv_toggle:main',
             'controller_robots = robogame_sim.controller_robots:main',
+            'active_arena = robogame_sim.active_arena:main',
+            'robot_console = robogame_sim.robot_console:main',
         ],
     },
 )

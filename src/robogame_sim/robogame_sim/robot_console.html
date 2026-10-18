@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot Console</title>
+<style>
+  /* The arena colours are the arena editor's, so the arena looks the same. */
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --ink: #1d2433;
+    --muted: #5d6677;
+    --line: #d9dde4;
+    --accent: #2f5fb4;
+    --accent-ink: #ffffff;
+    --floor: #c9cbcf;
+    --floor-line: #b3b6bc;
+    --peg: #a9adb4;
+    --platform: #3b61b4;
+    --platform-edge: #2a4a8f;
+    --platform2: #22396e;
+    --platform2-edge: #142447;
+    --platform2-ink: #c9d6f2;
+    --ramp-low: #d6e9f6;
+    --ramp-high: #7fb3dd;
+    --ramp-arrow: #1f3f78;
+    --wall: #fafafa;
+    --wall-edge: #6b7280;
+    --thwomp: #e0a43a;
+    --thwomp-edge: #7a4e09;
+    --bad: #d23c3c;
+    --bad-soft: #fbe9e9;
+    --good: #2e8b57;
+    --path: #111827;
+    --path-halo: #ffffff;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d;
+      --panel: #1c2028;
+      --ink: #e6e9ef;
+      --muted: #9aa3b2;
+      --line: #2e3440;
+      --accent: #6d97e6;
+      --accent-ink: #0d1117;
+      --floor: #4a4e57;
+      --floor-line: #3c4048;
+      --peg: #3a3e46;
+      --platform: #4f78cf;
+      --platform-edge: #33589f;
+      --platform2: #2c4a8c;
+      --platform2-edge: #1a2f5c;
+      --platform2-ink: #d5e0f7;
+      --ramp-low: #a9c9e3;
+      --ramp-high: #5d93c4;
+      --ramp-arrow: #0f2650;
+      --wall: #e9ebef;
+      --wall-edge: #1d2129;
+      --thwomp: #e8ad45;
+      --thwomp-edge: #5c3a05;
+      --bad: #f06b6b;
+      --bad-soft: #3a2224;
+      --good: #5cc28a;
+      --path: #f8fafc;
+      --path-halo: #0b0d12;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+    --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+    --floor: #4a4e57; --floor-line: #3c4048; --peg: #3a3e46;
+    --platform: #4f78cf; --platform-edge: #33589f; --platform2: #2c4a8c;
+    --platform2-edge: #1a2f5c; --platform2-ink: #d5e0f7;
+    --ramp-low: #a9c9e3; --ramp-high: #5d93c4; --ramp-arrow: #0f2650;
+    --wall: #e9ebef; --wall-edge: #1d2129; --thwomp: #e8ad45;
+    --thwomp-edge: #5c3a05; --bad: #f06b6b; --bad-soft: #3a2224;
+    --good: #5cc28a; --path: #f8fafc; --path-halo: #0b0d12;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+    padding: 12px 20px; background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; font-weight: 650; }
+  .field { display: flex; align-items: center; gap: 6px; }
+  .field label { color: var(--muted); font-size: 13px; }
+  select, input[type=number] {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  input[type=number] { width: 78px; }
+  button {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button:disabled:hover { border-color: var(--line); }
+  button.primary {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); font-weight: 600;
+  }
+  button.danger { color: var(--bad); }
+  #arena-name { font-weight: 600; }
+  #arena-source { color: var(--muted); font-size: 13px; }
+  #status { color: var(--muted); font-size: 13px; margin-left: auto; }
+  #status.bad { color: var(--bad); }
+
+  main {
+    display: grid; grid-template-columns: 260px minmax(0, 1fr) 330px;
+    gap: 20px; padding: 20px; max-width: 1500px; margin: 0 auto;
+  }
+  @media (max-width: 1180px) {
+    main { grid-template-columns: minmax(0, 1fr) 330px; }
+    #left { grid-column: 1 / -1; display: grid;
+            grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 760px) {
+    main { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+    #left { grid-template-columns: minmax(0, 1fr); }
+  }
+  .column { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  #left { gap: 14px; }
+  .board-wrap {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px; align-self: start;
+  }
+  #board { width: 100%; height: auto; display: block; touch-action: none;
+           user-select: none; }
+  #board.clickable { cursor: crosshair; }
+  .caption { color: var(--muted); font-size: 12.5px; margin: 8px 4px 0;
+             min-height: 1.45em; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px;
+  }
+  .panel h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 650;
+  }
+  .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+  .warn { color: var(--bad); font-size: 12.5px; margin: 8px 0 0; }
+  .empty { color: var(--muted); font-size: 13px; }
+
+  .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none;
+            border: 1px solid rgba(0, 0, 0, .25); display: inline-block; }
+
+  #robots { display: flex; flex-direction: column; gap: 6px; }
+  .robot {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 2px 8px;
+    align-items: center; text-align: left; width: 100%;
+    padding: 8px 10px; background: var(--bg);
+  }
+  .robot[aria-current=true] {
+    border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .robot .name { font-weight: 600; }
+  .robot .what { grid-column: 2 / 4; color: var(--muted); font-size: 12.5px;
+                 white-space: nowrap; overflow: hidden;
+                 text-overflow: ellipsis; }
+  .robot.stale .name { color: var(--muted); }
+  .tag { font-size: 11.5px; border-radius: 999px; padding: 1px 8px;
+         border: 1px solid var(--line); color: var(--muted); }
+  .tag.auto { background: var(--accent); border-color: var(--accent);
+              color: var(--accent-ink); }
+
+  .controller { display: flex; flex-direction: column; gap: 4px;
+                padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .controller:last-child { border-bottom: 0; }
+  .controller select { width: 100%; }
+  .controller .addr { color: var(--muted);
+                      font: 11.5px ui-monospace, monospace; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+         margin-right: 6px; background: var(--muted); }
+  .dot.on { background: var(--good); }
+
+  .title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .title h3 { margin: 0; font-size: 16px; }
+  .pose { color: var(--muted); font: 12px ui-monospace, monospace; }
+  .switch { display: flex; gap: 0; margin: 12px 0; }
+  .switch button { border-radius: 0; flex: 1; }
+  .switch button:first-child { border-radius: 6px 0 0 6px; }
+  .switch button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+  .switch button[aria-pressed=true] {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); font-weight: 600; position: relative;
+  }
+  .group { margin-top: 12px; }
+  .group h4 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .row label { color: var(--muted); font-size: 13px; }
+  .live {
+    margin-top: 12px; padding: 8px 10px; border-radius: 6px;
+    background: var(--bg); border: 1px solid var(--line); font-size: 13px;
+  }
+  .live .last { color: var(--muted); font-size: 12.5px; }
+  #queue { list-style: none; margin: 6px 0 0; padding: 0; }
+  #queue li { display: flex; align-items: center; gap: 8px; padding: 4px 0;
+              font-size: 13px; }
+  #queue li .n { width: 20px; height: 20px; border-radius: 50%; flex: none;
+                 display: grid; place-items: center; font-size: 11px;
+                 font-weight: 700; background: var(--bg);
+                 border: 1px solid var(--line); }
+  #queue li.now .n { background: var(--accent); color: var(--accent-ink);
+                     border-color: var(--accent); }
+  #queue li span.what { flex: 1; }
+  #queue li button { padding: 0 8px; }
+  kbd {
+    font: 11px ui-monospace, monospace; border: 1px solid var(--line);
+    border-bottom-width: 2px; border-radius: 4px; padding: 0 4px;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Robot console</h1>
+  <div class="field">
+    <span id="arena-name">…</span>
+    <span id="arena-source"></span>
+  </div>
+  <div class="field">
+    <label for="arena-pick">Arena</label>
+    <select id="arena-pick" title="The arena to plan over and draw"></select>
+  </div>
+  <span id="status">Connecting…</span>
+</header>
+
+<main>
+  <div class="column" id="left">
+    <section class="panel">
+      <h2>Robots</h2>
+      <div id="robots"><p class="empty">Looking for robots…</p></div>
+      <p class="note">Robots are found by their
+        <code>/model/robot_N/odometry</code>. Keys <kbd>1</kbd> to
+        <kbd>9</kbd> pick one.</p>
+    </section>
+    <section class="panel">
+      <h2>Controllers</h2>
+      <div id="controllers"></div>
+    </section>
+  </div>
+
+  <section class="board-wrap">
+    <svg id="board" role="img" aria-label="Arena with the robots on it">
+    </svg>
+    <p class="caption" id="caption"></p>
+  </section>
+
+  <aside class="column">
+    <section class="panel" id="detail">
+      <p class="empty">Pick a robot.</p>
+    </section>
+  </aside>
+</main>
+
+<script src="arena_draw.js"></script>
+<script>
+"use strict";
+
+const CELL = 60;
+const PAD = 30;
+
+// Replaced by /api/modules, as in the arena editor.
+let info = {
+  module: 0.1016, size: 12, peg_line: 0.0254,
+  types: {
+    platform: { mount: "square", height: 0.0254 },
+    platform_2: { mount: "square", height: 0.0508 },
+    ramp: { mount: "square", height: 0.0254 },
+    wall: { mount: "side", depth: 0.0254, height: 0.0508 },
+    thwomp: { mount: "side", depth: 0.0254, height: 0.1524 },
+  },
+};
+let size = 12;
+let modules = [];
+
+let state = null;
+let arenaVersion = -1;
+let selected = null;
+let pointer = null;
+// The world spot under the pointer, and the robot there if any.
+let hoverRobot = null;
+// The signature each panel was last built from, so a panel is only built
+// again when what it shows changes, and a click or a field being typed in
+// is not lost to the next poll.
+const built = {};
+
+const board = document.getElementById("board");
+const statusEl = document.getElementById("status");
+const captionEl = document.getElementById("caption");
+const detailEl = document.getElementById("detail");
+const pickEl = document.getElementById("arena-pick");
+
+const arenaLayer = el("g", {}, board);
+const liveLayer = el("g", { "pointer-events": "none" }, board);
+
+// -- helpers ---------------------------------------------------------------
+
+function h(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (v === true) node.setAttribute(k, "");
+    else if (v !== false && v != null) node.setAttribute(k, v);
+  }
+  for (const child of children.flat()) {
+    if (child != null && child !== false) {
+      node.append(child instanceof Node ? child : String(child));
+    }
+  }
+  return node;
+}
+
+const robotById = id => state && state.robots.find(r => r.id === id);
+const fmt = v => v.toFixed(2);
+const degrees = yaw => Math.round(yaw * 180 / Math.PI);
+
+function describe(command) {
+  if (command.kind === "point") {
+    return `Go to ${fmt(command.x)}, ${fmt(command.y)}`;
+  }
+  return `Go to robot ${command.robot}`;
+}
+
+// A message stays up for hold milliseconds before a poll may clear it.
+let statusUntil = 0;
+
+function setStatus(text, bad = false, hold = 0) {
+  statusEl.textContent = text;
+  statusEl.className = bad ? "bad" : "";
+  statusUntil = Date.now() + hold;
+}
+
+async function api(path, body) {
+  const options = body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+  const response = await fetch(path, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+async function send(path, body) {
+  try {
+    await api(path, body);
+    await poll();
+  } catch (error) {
+    setStatus(error.message, true, 4000);
+  }
+}
+
+const changeRobot = (id, body) => send(`/api/robots/${id}`, body);
+
+// -- the board ---------------------------------------------------------------
+
+const toBoard = (x, y) => [PAD + (x / info.module + size / 2) * CELL,
+                           PAD + (size / 2 - y / info.module) * CELL];
+const toWorld = (px, py) => [((px - PAD) / CELL - size / 2) * info.module,
+                             (size / 2 - (py - PAD) / CELL) * info.module];
+
+function cellXY(col, row) {
+  return [PAD + col * CELL, PAD + (size - 1 - row) * CELL];
+}
+
+// A module where it stands, each platform above the floor a little inside
+// its square like a tier, as the editor draws it.
+function drawPlaced(parent, m) {
+  const [x, y] = cellXY(m.col, m.row);
+  const i = m.level && isPlatform(m.type) ?
+    Math.min(m.level * 0.08, 0.24) * CELL : 0;
+  drawModule(parent, m.type, x + i, y + i, CELL - 2 * i, m.rotation,
+             "board");
+}
+
+// An arena with no layout, the Onshape export, as the planner sees it:
+// floor, and anything higher shaded by how high it is.
+function drawHeights(parent, map) {
+  const [nx, ny] = map.shape;
+  const canvas = document.createElement("canvas");
+  canvas.width = nx;
+  canvas.height = ny;
+  const context = canvas.getContext("2d");
+  const image = context.createImageData(nx, ny);
+  const top = Math.max(1, ...map.mm);
+  for (let k = 0; k < map.mm.length; k++) {
+    const mm = map.mm[k];
+    if (mm < 5) continue;
+    const t = Math.min(mm / top, 1);
+    image.data.set([Math.round(110 - 60 * t), Math.round(150 - 80 * t),
+                    Math.round(220 - 90 * t), 235], 4 * k);
+  }
+  context.putImageData(image, 0, 0);
+  const [x0, y1] = toBoard(map.origin[0], map.origin[1] + ny * map.resolution);
+  const [x1, y0] = toBoard(map.origin[0] + nx * map.resolution, map.origin[1]);
+  el("image", { href: canvas.toDataURL(), x: x0, y: y1, width: x1 - x0,
+                height: y0 - y1, preserveAspectRatio: "none",
+                style: "image-rendering: pixelated" }, parent);
+}
+
+function drawArena(arena) {
+  size = arena.size;
+  modules = (arena.modules || []).map(m => ({ rotation: 0, level: 0, ...m }));
+  const total = PAD * 2 + size * CELL;
+  board.setAttribute("viewBox", `0 0 ${total} ${total}`);
+  arenaLayer.replaceChildren();
+  defs(arenaLayer, "board");
+
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      const [x, y] = cellXY(col, row);
+      el("rect", { x, y, width: CELL, height: CELL, fill: "var(--floor)",
+                   stroke: "var(--floor-line)", "stroke-width": 1 },
+         arenaLayer);
+      drawPegs(arenaLayer, x, y, CELL);
+    }
+  }
+
+  if (arena.heights) drawHeights(arenaLayer, arena.heights);
+
+  const cols = columns(modules);
+  const drawn = [...modules].sort((a, b) => a.level - b.level);
+  for (const m of drawn) drawPlaced(el("g", {}, arenaLayer), m);
+  for (const m of drawn) {
+    if (!m.level || !cellsOf(m).every(cell => topAt(cols, cell) === m)) {
+      continue;
+    }
+    const [x, y] = cellXY(m.col, m.row);
+    drawBadge(arenaLayer, x, y, CELL, inches(
+      standing(m, cols) + (isPlatform(m.type) ? heightOf(m.type) : 0)));
+  }
+
+  // Metres along the edges, the arena's middle being 0, 0.
+  const half = size / 2 * info.module;
+  for (const v of [-0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6]) {
+    if (Math.abs(v) > half + 1e-9) continue;
+    const [bx, by] = toBoard(v, v);
+    const label = (content, x, y) => {
+      const t = el("text", { x, y, "text-anchor": "middle", "font-size": 13,
+                             fill: "var(--muted)",
+                             "dominant-baseline": "middle" }, arenaLayer);
+      t.textContent = content;
+    };
+    label(v.toFixed(1), bx, PAD + size * CELL + 14);
+    label(v.toFixed(1), PAD - 15, by);
+  }
+  const t = el("text", { x: PAD + size * CELL / 2, y: PAD - 14,
+                         "text-anchor": "middle", "font-size": 13,
+                         fill: "var(--muted)",
+                         "dominant-baseline": "middle" }, arenaLayer);
+  t.textContent = "x  →  metres, y up";
+}
+
+function polyline(parent, points, attrs) {
+  el("polyline", {
+    points: points.map(p => toBoard(p[0], p[1]).join(",")).join(" "),
+    fill: "none", "stroke-linecap": "round", "stroke-linejoin": "round",
+    ...attrs,
+  }, parent);
+}
+
+// A robot's planned path, and where its queued commands take it after.
+function drawPlans(robot, mine) {
+  const pilot = robot.autopilot;
+  if (!pilot || !robot.pose) return;
+  const g = el("g", { opacity: mine ? 1 : 0.55 }, liveLayer);
+
+  // The queue past the current command, as straight dashes between spots.
+  const spots = pilot.mode === "command" ? pilot.queue.map(c => {
+    if (c.kind === "point") return [c.x, c.y];
+    const other = robotById(c.robot);
+    return other && other.pose ? other.pose.slice(0, 2) : null;
+  }) : [];
+  const ahead = spots.filter(Boolean);
+  if (ahead.length > 1) {
+    polyline(g, ahead, { stroke: robot.colour, "stroke-width": 3,
+                         "stroke-dasharray": "2 9", opacity: 0.9 });
+  }
+
+  if (pilot.path && pilot.path.length > 1) {
+    const path = [robot.pose.slice(0, 2), ...pilot.path.slice(1)];
+    polyline(g, path, { stroke: "var(--path-halo)",
+                        "stroke-width": mine ? 9 : 6, opacity: 0.8 });
+    polyline(g, path, { stroke: robot.colour, "stroke-width": mine ? 5 : 3 });
+    for (const p of pilot.path.slice(1, -1)) {
+      const [x, y] = toBoard(p[0], p[1]);
+      el("circle", { cx: x, cy: y, r: mine ? 4 : 3, fill: "var(--path-halo)",
+                     stroke: robot.colour, "stroke-width": 2 }, g);
+    }
+  }
+
+  // Each queued spot, numbered in the order it will be done.
+  pilot.queue.forEach((c, i) => {
+    if (pilot.mode !== "command" || c.kind !== "point") return;
+    const [x, y] = toBoard(c.x, c.y);
+    el("circle", { cx: x, cy: y, r: 11, fill: robot.colour,
+                   stroke: "var(--path-halo)", "stroke-width": 2.5 }, g);
+    const t = el("text", { x, y, "text-anchor": "middle",
+                           "dominant-baseline": "central", "font-size": 12,
+                           "font-weight": 700, fill: "#fff" }, g);
+    t.textContent = i + 1;
+  });
+
+  // The robot it is after, ringed.
+  const after = pilot.mode === "chase" ? pilot.chase_target :
+    (pilot.queue[0] && pilot.queue[0].kind === "robot" ?
+      pilot.queue[0].robot : null);
+  const target = after != null && robotById(after);
+  if (target && target.pose) {
+    const [x, y] = toBoard(target.pose[0], target.pose[1]);
+    el("circle", { cx: x, cy: y, r: 0.11 / info.module * CELL, fill: "none",
+                   stroke: robot.colour, "stroke-width": 3,
+                   "stroke-dasharray": pilot.mode === "chase" ? "" : "6 5" },
+       g);
+  }
+}
+
+function drawRobot(robot) {
+  if (!robot.pose) return;
+  const [x, y] = toBoard(robot.pose[0], robot.pose[1]);
+  const scale = CELL / info.module;
+  const [length, width] = state.body.map(v => v * scale);
+  const g = el("g", {
+    transform: `translate(${x} ${y}) rotate(${-degrees(robot.pose[2])})`,
+    opacity: robot.fresh ? 1 : 0.4,
+  }, liveLayer);
+  if (robot.id === selected) {
+    el("circle", { r: length * 0.85, fill: "none", stroke: "var(--accent)",
+                   "stroke-width": 3 }, g);
+  }
+  el("rect", { x: -length / 2, y: -width / 2, width: length, height: width,
+               rx: 4, fill: robot.colour, stroke: "var(--path-halo)",
+               "stroke-width": 2 }, g);
+  el("path", { d: `M${length / 2 - 2} 0 L${length / 2 - 12} -7 ` +
+                  `L${length / 2 - 12} 7 Z`,
+               fill: "var(--path-halo)", opacity: 0.85 }, g);
+  const t = el("text", {
+    x: -4, y: 0, "text-anchor": "middle", "dominant-baseline": "central",
+    "font-size": 15, "font-weight": 750, fill: "#fff",
+    transform: `rotate(${degrees(robot.pose[2])} -4 0)`,
+  }, g);
+  t.textContent = robot.id;
+}
+
+function drawLive() {
+  liveLayer.replaceChildren();
+  if (!state) return;
+  for (const robot of state.robots) {
+    if (robot.id !== selected) drawPlans(robot, false);
+  }
+  const mine = robotById(selected);
+  if (mine) drawPlans(mine, true);
+  for (const robot of state.robots) drawRobot(robot);
+
+  if (pointer) {
+    const [x, y] = toBoard(...pointer);
+    el("circle", { cx: x, cy: y, r: 5, fill: "none",
+                   stroke: "var(--accent)", "stroke-width": 2 }, liveLayer);
+  }
+}
+
+// -- clicking the arena ------------------------------------------------------
+
+function pointFrom(event) {
+  const p = new DOMPoint(event.clientX, event.clientY)
+    .matrixTransform(board.getScreenCTM().inverse());
+  return toWorld(p.x, p.y);
+}
+
+function robotAt(x, y) {
+  let best = null, bestDistance = 0.07;
+  for (const robot of (state ? state.robots : [])) {
+    if (!robot.pose) continue;
+    const d = Math.hypot(robot.pose[0] - x, robot.pose[1] - y);
+    if (d < bestDistance) [best, bestDistance] = [robot, d];
+  }
+  return best;
+}
+
+function onArena(x, y) {
+  const half = size / 2 * info.module;
+  return Math.abs(x) <= half && Math.abs(y) <= half;
+}
+
+// What a click there would do, as words for the caption.
+function clickAction(x, y, shift) {
+  const mine = robotById(selected);
+  const other = robotAt(x, y);
+  if (!mine || !mine.autonomous) {
+    return other ? { text: `Pick robot ${other.id}`, pick: other.id } : null;
+  }
+  const pilot = mine.autopilot;
+  if (other && other.id === mine.id) return null;
+  if (pilot.mode === "chase") {
+    return other ? { text: `Chase robot ${other.id}`,
+                     body: { chase: other.id } } : null;
+  }
+  const go = other ? { kind: "robot", robot: other.id } :
+    { kind: "point", x: +x.toFixed(3), y: +y.toFixed(3) };
+  return { text: `${shift ? "Queue" : "Send robot " + mine.id}: ` +
+                 describe(go).toLowerCase(),
+           body: { go, append: shift } };
+}
+
+board.addEventListener("pointermove", event => {
+  const [x, y] = pointFrom(event);
+  pointer = onArena(x, y) ? [x, y] : null;
+  updateCaption(event.shiftKey);
+  drawLive();
+});
+board.addEventListener("pointerleave", () => {
+  pointer = null;
+  updateCaption(false);
+  drawLive();
+});
+board.addEventListener("click", event => {
+  const [x, y] = pointFrom(event);
+  if (!onArena(x, y)) return;
+  const action = clickAction(x, y, event.shiftKey);
+  if (!action) return;
+  if (action.pick != null) return select(action.pick);
+  changeRobot(selected, action.body);
+});
+
+function updateCaption(shift) {
+  const mine = robotById(selected);
+  board.classList.toggle("clickable", !!(mine && mine.autonomous));
+  if (!pointer) {
+    captionEl.textContent = mine && mine.autonomous ?
+      (mine.autopilot.mode === "chase" ?
+        "Click a robot to chase it." :
+        "Click the arena to send the robot there, a robot to go to it. " +
+        "Shift-click adds to its queue.") :
+      "Pick an autonomous robot to send it somewhere.";
+    return;
+  }
+  const action = clickAction(pointer[0], pointer[1], shift);
+  captionEl.textContent = `x ${fmt(pointer[0])} m, y ${fmt(pointer[1])} m` +
+    (action ? `. Click: ${action.text}` : "");
+}
+
+// -- panels --------------------------------------------------------------------
+
+function select(id) {
+  selected = id;
+  built.detail = null;
+  render();
+}
+
+function robotSummary(robot) {
+  if (!robot.pose) return "no pose yet";
+  if (!robot.fresh) return "pose lost";
+  if (robot.autonomous) return robot.autopilot.status;
+  const pad = state.controllers &&
+    state.controllers.find(c => c.address === robot.controller);
+  return pad ? `driven by ${pad.name || pad.address}` : "driven by hand";
+}
+
+function renderRobots() {
+  const box = document.getElementById("robots");
+  const robots = state.robots;
+  const signature = JSON.stringify([selected, robots.map(r => [
+    r.id, r.colour, r.fresh, r.autonomous, robotSummary(r)])]);
+  if (built.robots === signature) return;
+  built.robots = signature;
+
+  if (!robots.length) {
+    box.replaceChildren(h("p", { class: "empty" },
+      "No robots yet. Start the sim, or the arena camera, and they show " +
+      "up here."));
+    return;
+  }
+  box.replaceChildren(...robots.map(r => h("button", {
+    class: "robot" + (r.fresh ? "" : " stale"),
+    "aria-current": String(r.id === selected),
+    onclick: () => select(r.id),
+  },
+    h("span", { class: "swatch", style: `background:${r.colour}` }),
+    h("span", { class: "name" }, `Robot ${r.id}`),
+    h("span", { class: "tag" + (r.autonomous ? " auto" : "") },
+      r.autonomous ? "autonomous" : "manual"),
+    h("span", { class: "what" }, robotSummary(r)))));
+}
+
+function renderControllers() {
+  const box = document.getElementById("controllers");
+  const pads = state.controllers;
+  const signature = JSON.stringify([pads, state.robots.map(r => [
+    r.id, r.autonomous])]);
+  if (built.controllers === signature) return;
+  built.controllers = signature;
+
+  if (!pads) {
+    box.replaceChildren(h("p", { class: "empty" },
+      "No controller_robots running. In the sim, launch with ",
+      h("code", {}, "controller:=hotplug"),
+      " to bind controllers to robots here."));
+    return;
+  }
+  if (!pads.length) {
+    box.replaceChildren(h("p", { class: "empty" },
+      "No controllers connected yet."));
+    return;
+  }
+  box.replaceChildren(...pads.map(pad => {
+    const choose = h("select", {
+      "aria-label": `Robot ${pad.name} drives`,
+      onchange: event => send("/api/controllers", {
+        address: pad.address,
+        robot: event.target.value === "" ? null : +event.target.value,
+      }),
+    }, h("option", { value: "" }, "No robot"),
+       state.robots.map(r => h("option", {
+         value: r.id, disabled: r.autonomous,
+         selected: pad.robot === r.id,
+       }, `Robot ${r.id}${r.autonomous ? " (autonomous)" : ""}`)));
+    if (pad.robot == null) choose.value = "";
+    return h("div", { class: "controller" },
+      h("span", {}, h("span", { class: "dot" + (pad.connected ? " on" : ""),
+                                title: pad.connected ? "connected" :
+                                  "disconnected" }),
+        (pad.name || "Controller") + (pad.virtual ? " (virtual)" : "")),
+      h("span", { class: "addr" }, pad.address),
+      choose);
+  }));
+}
+
+function robotOptions(except, chosen) {
+  const others = state.robots.filter(r => r.id !== except);
+  if (!others.length) return [h("option", { value: "" }, "No other robots")];
+  return others.map(r => h("option", { value: r.id,
+                                       selected: r.id === chosen },
+                           `Robot ${r.id}`));
+}
+
+function renderDetail() {
+  const robot = robotById(selected);
+  if (!robot) {
+    if (built.detail !== "none") {
+      built.detail = "none";
+      detailEl.replaceChildren(h("p", { class: "empty" }, "Pick a robot."));
+    }
+    return;
+  }
+
+  const pilot = robot.autopilot;
+  const others = state.robots.filter(r => r.id !== robot.id).map(r => r.id);
+  const signature = JSON.stringify([robot.id, robot.autonomous,
+    pilot && pilot.mode, pilot && pilot.chase_target, others,
+    robot.drivers, robot.controller]);
+  if (built.detail !== signature) {
+    built.detail = signature;
+    built.queue = null;
+    buildDetail(robot);
+  }
+
+  // What changes every poll, without building the panel again.
+  const pose = document.getElementById("pose");
+  pose.textContent = robot.pose ?
+    `x ${fmt(robot.pose[0])} m  y ${fmt(robot.pose[1])} m  ` +
+    `heading ${degrees(robot.pose[2])}°` + (robot.fresh ? "" : "  (stale)") :
+    "no pose yet";
+  if (!pilot) return;
+  document.getElementById("pilot-status").textContent = pilot.status;
+  document.getElementById("pilot-last").textContent =
+    pilot.last ? `Last: ${pilot.last}` : "";
+  if (pilot.mode === "command") renderQueue(robot);
+}
+
+function buildDetail(robot) {
+  const pilot = robot.autopilot;
+  const parts = [
+    h("div", { class: "title" },
+      h("span", { class: "swatch", style: `background:${robot.colour}` }),
+      h("h3", {}, `Robot ${robot.id}`)),
+    h("div", { class: "pose", id: "pose" }),
+    h("div", { class: "switch", role: "group", "aria-label": "Driven by" },
+      h("button", { "aria-pressed": String(!robot.autonomous),
+                    onclick: () => changeRobot(robot.id,
+                                               { autonomous: false }) },
+        "Manual"),
+      h("button", { "aria-pressed": String(robot.autonomous),
+                    onclick: () => changeRobot(robot.id,
+                                               { autonomous: true }) },
+        "Autonomous")),
+  ];
+
+  const drivers = robot.drivers.filter(d => !d.startsWith("_"));
+  if (pilot && drivers.length) {
+    parts.push(h("p", { class: "warn" },
+      `Also driven by ${drivers.join(", ")}, which will fight the ` +
+      "autopilot. Stop it, or launch without it."));
+  }
+
+  if (!pilot) {
+    const pad = state.controllers &&
+      state.controllers.find(c => c.address === robot.controller);
+    parts.push(h("p", { class: "note" },
+      pad ? `${pad.name || "A controller"} drives it. Making it ` +
+            "autonomous takes the controller off it until it is manual " +
+            "again." :
+      "Autonomous, it stows its arm and then goes where it is sent, " +
+      "planning its way round the arena."));
+    detailEl.replaceChildren(...parts);
+    return;
+  }
+
+  parts.push(h("div", { class: "switch", role: "group", "aria-label": "Mode" },
+    h("button", { "aria-pressed": String(pilot.mode === "command"),
+                  onclick: () => changeRobot(robot.id, { mode: "command" }) },
+      "Commands"),
+    h("button", { "aria-pressed": String(pilot.mode === "chase"),
+                  onclick: () => changeRobot(robot.id, { mode: "chase" }) },
+      "Chase")));
+
+  if (pilot.mode === "command") {
+    const toRobot = h("select", { "aria-label": "Robot to go to" },
+                      robotOptions(robot.id));
+    const go = (body, append) => changeRobot(robot.id, { go: body, append });
+    const robotGo = append => {
+      if (toRobot.value !== "") go({ kind: "robot", robot: +toRobot.value },
+                                   append);
+    };
+    const xEl = h("input", { type: "number", step: "0.05", value: "0",
+                             "aria-label": "x in metres" });
+    const yEl = h("input", { type: "number", step: "0.05", value: "0",
+                             "aria-label": "y in metres" });
+    const spotGo = append => go({ kind: "point", x: +xEl.value,
+                                  y: +yEl.value }, append);
+    const noOthers = !state.robots.some(r => r.id !== robot.id);
+    parts.push(
+      h("div", { class: "group" }, h("h4", {}, "Go to a robot"),
+        h("div", { class: "row" }, toRobot,
+          h("button", { class: "primary", disabled: noOthers,
+                        onclick: () => robotGo(false) }, "Go"),
+          h("button", { disabled: noOthers, onclick: () => robotGo(true) },
+            "Queue"))),
+      h("div", { class: "group" }, h("h4", {}, "Go to a spot"),
+        h("div", { class: "row" },
+          h("label", {}, "x"), xEl, h("label", {}, "y"), yEl),
+        h("div", { class: "row", style: "margin-top:6px" },
+          h("button", { class: "primary", onclick: () => spotGo(false) },
+            "Go"),
+          h("button", { onclick: () => spotGo(true) }, "Queue")),
+        h("p", { class: "note" },
+          "Or click the arena: a click sends it, Shift-click queues. " +
+          "Metres from the middle, +x right, +y up.")),
+      h("div", { class: "group" }, h("h4", {}, "Queue"),
+        h("ol", { id: "queue" }),
+        h("div", { class: "row" },
+          h("button", { class: "danger", onclick: () => changeRobot(
+            robot.id, { stop: true }) }, "Stop and clear"))));
+  } else {
+    const target = h("select", { "aria-label": "Robot to chase" },
+                     robotOptions(robot.id, pilot.chase_target));
+    const noOthers = !state.robots.some(r => r.id !== robot.id);
+    parts.push(
+      h("div", { class: "group" }, h("h4", {}, "Chase"),
+        h("div", { class: "row" }, target,
+          h("button", { class: "primary", disabled: noOthers,
+                        onclick: () => target.value !== "" &&
+                          changeRobot(robot.id, { chase: +target.value }) },
+            pilot.chase_target == null ? "Chase" : "Switch"),
+          h("button", { class: "danger",
+                        disabled: pilot.chase_target == null,
+                        onclick: () => changeRobot(robot.id,
+                                                   { chase: null }) },
+            "Stop")),
+        h("p", { class: "note" },
+          "It heads for the robot, a little ahead of it when it moves, " +
+          "and stops just short of it, as chase_node does. Click a robot " +
+          "on the arena to chase it.")));
+  }
+
+  parts.push(h("div", { class: "live" },
+    h("div", { id: "pilot-status" }),
+    h("div", { class: "last", id: "pilot-last" })));
+  detailEl.replaceChildren(...parts);
+}
+
+function renderQueue(robot) {
+  const queue = robot.autopilot.queue;
+  const signature = JSON.stringify(queue);
+  if (built.queue === signature) return;
+  built.queue = signature;
+  const list = document.getElementById("queue");
+  if (!queue.length) {
+    list.replaceChildren(h("li", { class: "empty" }, "Nothing to do."));
+    return;
+  }
+  list.replaceChildren(...queue.map((command, i) => h("li",
+    { class: i === 0 ? "now" : "" },
+    h("span", { class: "n" }, i + 1),
+    h("span", { class: "what" }, describe(command)),
+    h("button", { title: "Take it off the queue",
+                  "aria-label": `Remove ${describe(command)}`,
+                  onclick: () => changeRobot(robot.id, { remove: i }) },
+      "×"))));
+}
+
+function renderArenaPicker(layouts) {
+  const arena = state.arena;
+  const signature = JSON.stringify([layouts, arena.picked, arena.published]);
+  if (built.picker === signature) return;
+  built.picker = signature;
+  pickEl.replaceChildren(
+    h("option", { value: "" },
+      arena.published ? "The sim's" : "Last saved in the editor"),
+    ...layouts.map(name => h("option", { value: name }, name)),
+    h("option", { value: "cad" }, "cad, the Onshape export"));
+  pickEl.value = arena.picked || "";
+}
+
+pickEl.addEventListener("change", () =>
+  send("/api/arena", { layout: pickEl.value || null }));
+
+function renderArenaLabel() {
+  const arena = state.arena;
+  document.getElementById("arena-name").textContent =
+    arena.loading ? "Loading arena…" : (arena.name || "No arena yet");
+  const source = { gazebo: "in Gazebo", editor:
+    "real arena, the layout last saved in the editor", picked: "picked here",
+    real: "real arena" }[arena.source] || arena.source || "";
+  document.getElementById("arena-source").textContent = source;
+}
+
+function render() {
+  if (!state) return;
+  if (selected == null || !robotById(selected)) {
+    const first = state.robots[0];
+    if (selected !== (first ? first.id : null)) {
+      selected = first ? first.id : null;
+      built.detail = null;
+    }
+  }
+  renderArenaLabel();
+  renderRobots();
+  renderControllers();
+  renderDetail();
+  updateCaption(false);
+  drawLive();
+}
+
+// -- polling -------------------------------------------------------------------
+
+let layouts = [];
+
+async function loadArena() {
+  try {
+    const arena = await api("/api/arena");
+    drawArena(arena);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+let polling = false;
+
+async function poll() {
+  if (polling) return;
+  polling = true;
+  try {
+    await update();
+  } finally {
+    polling = false;
+  }
+}
+
+async function update() {
+  try {
+    state = await api("/api/state");
+  } catch {
+    setStatus("Console not running: start it with ros2 run robogame_sim " +
+              "robot_console", true);
+    return;
+  }
+  if (state.arena.error) setStatus(state.arena.error, true);
+  else if (Date.now() > statusUntil) setStatus("");
+
+  if (state.arena.version !== arenaVersion && !state.arena.loading &&
+      state.arena.version > 0) {
+    arenaVersion = state.arena.version;
+    await loadArena();
+    try {
+      layouts = (await api("/api/layouts")).layouts;
+    } catch { /* keeps the old list */ }
+  }
+  renderArenaPicker(layouts);
+  render();
+}
+
+document.addEventListener("keydown", event => {
+  if (event.target.closest("input, select")) return;
+  if (/^[1-9]$/.test(event.key) && robotById(+event.key)) select(+event.key);
+  if (event.key === "Escape" && robotById(selected) &&
+      robotById(selected).autonomous) {
+    changeRobot(selected, { stop: true });
+  }
+});
+
+(async () => {
+  try {
+    info = await api("/api/modules");
+  } catch { /* the built in sizes do */ }
+  try {
+    layouts = (await api("/api/layouts")).layouts;
+  } catch { /* none yet */ }
+  await poll();
+  setInterval(poll, 150);
+})();
+</script>
+</body>
+</html>

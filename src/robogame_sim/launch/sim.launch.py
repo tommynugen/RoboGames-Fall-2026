@@ -367,6 +367,17 @@ def launch_setup(context):
         topics += bridge_topics(robot)
         remaps += ["-r", f"/model/{robot}/tf:=/tf"]
 
+    # Tells the robot console (robot_console.py) which arena this is.
+    actions.append(Node(
+        package="robogame_sim",
+        executable="active_arena",
+        output="screen",
+        parameters=[{
+            "layout": layout_path or "cad",
+            "source": "gazebo",
+        }],
+    ))
+
     actions.append(Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
