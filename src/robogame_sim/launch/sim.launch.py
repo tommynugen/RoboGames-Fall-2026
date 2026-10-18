@@ -36,8 +36,8 @@ out while a real controller drives.
 With the window up, every robot's chassis carries an FPV camera on its
 front, unless fpv:=false. Click the Gazebo window's 3D view, then 1 looks
 straight down on the arena, 2 over its front, 3 over its front right
-corner, 4 switches to the driven robot's camera and back, and F1 to F9
-look through that robot's instead. The Camera view card in the side panel
+corner, 4 looks through the driven robot's camera, and F1 to F9 through
+that robot's instead. The Camera view card in the side panel
 does the same, when robogame_gui is built. See fpv_toggle.py.
 """
 
@@ -68,7 +68,7 @@ from launch_ros.actions import Node
 from ros_gz_sim.actions import GzServer
 
 from robogame_sim import arena_layout
-from robogame_sim.fpv_toggle import OVERVIEW
+from robogame_sim.fpv_toggle import START_VIEW, view_pose
 from robogame_sim.robot_sdf import robot_sdf
 from robogame_sim.spawning import bridge_topics, spawn_pose, spawn_spot
 from robogame_sim.terrain import Terrain
@@ -158,7 +158,7 @@ def view_gui_config(card):
     with open(default) as config:
         text = config.read()
 
-    overview = " ".join(f"{value:.4f}" for value in OVERVIEW)
+    overview = " ".join(f"{value:.4f}" for value in view_pose(START_VIEW))
     text = re.sub(r"<camera_pose>[^<]*</camera_pose>",
                   f"<camera_pose>{overview}</camera_pose>{CAMERA_CLIP}",
                   text, count=1)
@@ -592,8 +592,8 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "fpv", default_value="true",
             description="Mounts an FPV camera on the front of every robot. "
-                        "4 in the Gazebo window toggles the view through "
-                        "it, F1 to F9 pick the robot. false leaves the "
-                        "cameras out; 1 to 3 still change the view"),
+                        "4 in the Gazebo window looks through it, F1 to "
+                        "F9 pick the robot. false leaves the cameras out; "
+                        "1 to 3 still change the view"),
         OpaqueFunction(function=launch_setup),
     ])

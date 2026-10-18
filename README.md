@@ -93,9 +93,16 @@ Click the Gazebo window's 3D view, then:
 | 1 | look straight down on the arena |
 | 2 | look over the arena's front (-y) edge, where the window starts |
 | 3 | look over the arena's front right corner |
-| 4 | toggle between the last of those and the driven robot's FPV |
+| 4 | look through the driven robot's FPV |
 | F1 to F9 | look through that robot's FPV instead, robots spawned for a controller too |
 | Esc | leave FPV where the camera is, rather than going back over the arena |
+
+Each key switches to its view; pressed again it does nothing, so a view
+you have moved with the mouse stays put. The three views over the arena
+come as close as the whole floor fits, with a little room for the walls,
+and keep it in the middle of the picture. They fit the 3D view's shape
+as the Camera view card reports it, and fit again when the window is
+resized.
 
 The Camera view card in the window's side panel does the same with two
 drop downs, View and Robot, and follows the keys. It is a Gazebo GUI
@@ -112,8 +119,15 @@ Checked on 2026-10-18 with the window up, robots 1 and 2: keys 1 to 4 and
 F1, F2 sent on `/keyboard/keypress`, and views asked for on
 `/robogame/view` as the card does, each moved `/gui/camera/pose` to the
 view asked for and `/robogame/view/state` followed; the card loaded with
-no errors. Tests check each view looks at the middle of the arena with
-its front edge at the bottom.
+no errors. Tests check each view looks down on the arena with its front
+edge at the bottom.
+
+Checked again on 2026-10-18: with the card reporting the 3D view as 577 x
+797 pixels (0.724), screenshots of 1, 2 and 3 show the floor across about
+95% of the picture and in the middle of it; 1 pressed twice and 4
+pressed twice each moved the camera once. Tests check every view fits
+the floor to 95% of the tighter side, centred, for tall, square and wide
+windows, and that a key pressed again does nothing.
 
 Drive with a PS4 or PS5 controller, like a racing game:
 
@@ -212,7 +226,7 @@ Every controller connected after it gets a robot of its own, numbered on
 from the highest there (3, 4, ...), spawned on open ground facing somewhere
 it can drive, with racing controls and wheel steering from that
 controller's own motion sensor. A controller that drops and comes back
-drives the same robot again; its robot waits where it stopped. F toggles
+drives the same robot again; its robot waits where it stopped. 4 shows
 FPV on robot 2, and F3 looks through robot 3's camera.
 
 `controller_robots` does this. It finds each controller by its Bluetooth

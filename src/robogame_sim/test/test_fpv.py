@@ -1,5 +1,7 @@
 import math
+import threading
 import xml.etree.ElementTree as ElementTree
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,12 +9,22 @@ from robogame_sim.robot_sdf import FPV_CAMERA, FPV_SIGHT, fpv_sight, robot_sdf
 
 pytest.importorskip("gz.msgs.cameratrack_pb2")
 from robogame_sim.fpv_toggle import (  # noqa: E402
+    ARENA_CORNERS,
+    ARENA_HALF,
+    FILL,
+    HFOV,
+    KEY_ESCAPE,
     KEY_F1,
+    START_VIEW,
     VIEWS,
+    FpvToggle,
+    camera_axes,
+    dot,
     fpv_track,
     key_action,
     release_track,
     view_camera,
+    view_pose,
 )
 
 
@@ -73,15 +85,82 @@ def rotate(q, v):
 
 
 @pytest.mark.parametrize("view", list(VIEWS))
-def test_every_view_looks_at_the_middle_of_the_arena_from_above(view):
+def test_every_view_looks_down_on_the_arena_front_edge_at_the_bottom(view):
     pose = view_camera(view).pose
     p = pose.position
     dx, dy, dz = rotate(pose.orientation, (1.0, 0.0, 0.0))
     assert dz < 0
     # Where the line of sight meets the floor.
     s = -p.z / dz
-    assert math.hypot(p.x + s * dx, p.y + s * dy) < 0.1
+    assert abs(p.x + s * dx) < ARENA_HALF and abs(p.y + s * dy) < ARENA_HALF
     # The arena's front edge at the bottom of the picture: up on screen is
     # away from -y.
     _, up_y, _ = rotate(pose.orientation, (0.0, 0.0, 1.0))
     assert up_y > 0
+
+
+@pytest.mark.parametrize("aspect", [577 / 797, 1.0, 16 / 9])
+@pytest.mark.parametrize("view", list(VIEWS))
+def test_every_view_fits_the_whole_arena_and_no_more(view, aspect):
+    x, y, z, _, pitch, yaw = view_pose(view, aspect)
+    forward, left, up = camera_axes(pitch, yaw)
+    across = math.tan(HFOV / 2)
+    upward = across / aspect
+    sides, highs = [], []
+    for p in ARENA_CORNERS:
+        offset = (p[0] - x, p[1] - y, p[2] - z)
+        ahead = dot(offset, forward)
+        sides.append(dot(offset, left) / ahead / across)
+        highs.append(dot(offset, up) / ahead / upward)
+    assert max(map(abs, sides + highs)) <= FILL + 1e-6
+    # As close as it fits: the arena spans the picture across or up, and
+    # sits in the middle of it.
+    across_span = max(sides) - min(sides)
+    up_span = max(highs) - min(highs)
+    assert max(across_span, up_span) == pytest.approx(2 * FILL, abs=1e-6)
+    assert max(sides) + min(sides) == pytest.approx(0, abs=1e-6)
+    assert max(highs) + min(highs) == pytest.approx(0, abs=1e-6)
+
+
+class FakeToggle(FpvToggle):
+    """FpvToggle without gz-transport: records what it would move to."""
+
+    def __init__(self):
+        self.robots = ["robot_1", "robot_2"]
+        self.has_fpv = True
+        self.robot = "robot_1"
+        self.current = START_VIEW
+        self.aspect = 1.0
+        self.lock = threading.Lock()
+        self.moves = []
+        self.requests = SimpleNamespace(
+            put=lambda request: self.moves.append("fly"))
+        self.track = SimpleNamespace(
+            publish=lambda message: self.moves.append(
+                message.follow_target.name))
+        self.state = SimpleNamespace(publish=lambda message: None)
+
+    def press(self, key):
+        self.on_key(SimpleNamespace(data=key))
+        moves, self.moves = self.moves, []
+        return moves
+
+
+def test_a_key_switches_to_its_view_and_again_does_nothing():
+    toggle = FakeToggle()
+    assert toggle.press(ord("1")) == ["fly"]
+    assert toggle.press(ord("1")) == []
+    assert toggle.press(ord("4")) == ["robot_1"]
+    assert toggle.press(ord("4")) == []
+    assert toggle.press(KEY_F1 + 1) == ["robot_2"]
+    assert toggle.press(KEY_F1 + 1) == []
+    # Out of FPV: let go of the robot, then fly.
+    assert toggle.press(ord("3")) == ["fpv_off", "fly"]
+    assert toggle.current == "front_right"
+
+
+def test_after_escape_the_same_view_key_moves_the_camera_again():
+    toggle = FakeToggle()
+    toggle.press(ord("4"))
+    toggle.press(KEY_ESCAPE)
+    assert toggle.press(ord("4")) == ["robot_1"]
