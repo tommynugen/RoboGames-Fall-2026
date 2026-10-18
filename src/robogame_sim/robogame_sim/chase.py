@@ -26,6 +26,7 @@ from robogame_sim.terrain import (
     HALF_WIDTH,
     SOFT_CLEARANCE,
     TURN_CLEARANCE,
+    Path,
     corner_angle,
     next_waypoint,
     path_length,
@@ -60,6 +61,14 @@ PIVOT_TURN_RATE = 1.0
 # corner sharper than LANE_CORNER.
 LANE_LOOKAHEAD = 0.12
 LANE_CORNER = math.radians(20)
+# A corner onto a ramp sharper than this it stops on to line up.
+RAMP_CORNER = math.radians(10)
+# How far back from a corner it may stop to line up for a gap, to have
+# more room to turn.
+TURN_BACK = 0.05
+# Following a path it curves at no more than this share of its top turn
+# rate, slowing for a tighter curve, so the turn keeps up with the curve.
+CURVE_TURN = 0.8
 WHEEL_REACH = math.hypot(WHEEL_X, HALF_WIDTH)
 
 
@@ -258,6 +267,10 @@ class Chaser:
         self.recovery = None
         self.last_recovery = None
         self.waiting = False
+        # Where the hunter last stopped to line up, and how far back from
+        # the corner it stopped there to have room to turn.
+        self.corner = None
+        self.turn = None
         self.status = "waiting"
         self.path = None
         self.engaged = False
@@ -308,6 +321,12 @@ class Chaser:
         if terrain is not None:
             path = terrain.route(x, y, aim_x, aim_y, t.x, t.y, yaw)
         self.path = path
+
+        if path is not None and not path.partial and len(path) > 2:
+            # The way to it goes round, as up a ramp to a target on the
+            # platform right above, so it is as far as the way round: the
+            # hunter is not with a target it is right under.
+            self.gap = gap = max(gap, path_length(path) - standoff)
 
         if self.recovery is not None and now < self.recovery[0]:
             linear, angular = self.recovery[1], 0.0
@@ -372,12 +391,26 @@ class Chaser:
             self.status = "path"
         else:
             # A corner where the next leg goes into a gap too narrow to turn
-            # in is where the hunter lines up for it, so it stops right on
-            # it rather than cutting it.
-            precise = len(path) > 2 and not terrain.free_line(
-                *path[1], *path[2])
-            wx, wy, remaining = next_waypoint(
-                path, standoff, reached=0.01 if precise else 0.03)
+            # in, or up or down a ramp, is where the hunter lines up for it,
+            # so it stops right on it rather than cutting it.
+            precise = len(path) > 2 and (
+                not terrain.free_line(*path[1], *path[2])
+                or (terrain.slope_line(*path[1], *path[2])
+                    and corner_angle((x, y), path[1], path[2]) > RAMP_CORNER))
+            reached = 0.03
+            if precise:
+                path = Path([path[0], self.turn_point(path, x, y)]
+                            + path[2:])
+                # Once on the corner it stays there while it turns, even as
+                # turning shifts it a few millimetres, rather than heading
+                # back onto the corner and off it again.
+                corner = math.dist((x, y), path[1])
+                if corner < 0.01:
+                    self.corner = tuple(path[1])
+                if self.corner is None or math.dist(
+                        self.corner, path[1]) > 0.015 or corner > 0.03:
+                    reached = 0.01
+            wx, wy, remaining = next_waypoint(path, standoff, reached=reached)
             if precise and (wx, wy) == tuple(path[1]):
                 remaining = min(remaining, math.dist((x, y), path[1]) + 0.005)
             elif not precise:
@@ -395,11 +428,22 @@ class Chaser:
             wx, wy, remaining, keep_up = t.x, t.y, 0.0, 0.0
             self.status = "with the target"
 
-        line_up = terrain is not None and not terrain.free_line(x, y, wx, wy)
-        linear, angular, _ = drive_command(
+        line_up = terrain is not None and (
+            not terrain.free_line(x, y, wx, wy)
+            or terrain.slope_line(x, y, wx, wy))
+        linear, angular, heading_error = drive_command(
             x, y, yaw, wx, wy, remaining, limit, self.max_angular,
             self.linear_gain, self.angular_gain, self.turn_in_place,
             can_turn, line_up, keep_up)
+
+        reach = math.hypot(wx - x, wy - y)
+        if self.status == "path" and can_turn and linear > 0.0 and reach > 0.01:
+            # No faster than it can turn onto the curve to the waypoint, so
+            # it does not swing wide round a corner into a wall beside it.
+            curvature = 2.0 * abs(math.sin(heading_error)) / reach
+            if curvature > 1e-6:
+                linear = min(linear,
+                             CURVE_TURN * self.max_angular / curvature)
 
         if pivot:
             angular = clamp(angular, -PIVOT_TURN_RATE, PIVOT_TURN_RATE)
@@ -416,6 +460,41 @@ class Chaser:
             angular = clamp(self.angular_gain * heading_error,
                             -NARROW_TURN_RATE, NARROW_TURN_RATE)
         return linear, angular
+
+    def turn_point(self, path, x, y):
+        """Where to stop and turn for the path's second leg, which goes into
+        a gap too narrow to turn in or onto a ramp: the corner, or a point
+        back from it along the line of that leg with more room to turn, as
+        the corner is often right at the edge of where the hunter can turn.
+        Stopping a centimetre wide of it there would leave it unable to
+        turn. Only as far back as the hunter is from the corner along that
+        line, so it is never sent back to it, and where it went last time
+        unless somewhere else has clearly more room."""
+        corner = tuple(path[1])
+        terrain = self.terrain
+        ux, uy = path[2][0] - corner[0], path[2][1] - corner[1]
+        length = math.hypot(ux, uy)
+        if length < 1e-9:
+            return corner
+
+        ux, uy = ux / length, uy / length
+        before = (corner[0] - x) * ux + (corner[1] - y) * uy
+        best, room = 0.0, terrain.clearance_at(*corner)
+        last = self.turn
+        for k in range(1, int(min(TURN_BACK, before) / 0.005) + 1):
+            back = 0.005 * k
+            px, py = corner[0] - ux * back, corner[1] - uy * back
+            here = terrain.clearance_at(px, py)
+            if here < TURN_CLEARANCE:
+                break
+            if last is not None and abs(back - last) < 0.003:
+                here += 0.002
+            if (here > room + 1e-4 and terrain.clear_line(x, y, px, py)
+                    and terrain.clear_line(px, py, *corner)):
+                best, room = back, here
+
+        self.turn = best
+        return corner[0] - ux * best, corner[1] - uy * best
 
     def cut_corner(self, path, x, y, lookahead=(0.12, 0.09, 0.06)):
         """A point past the path's first corner, at most lookahead along

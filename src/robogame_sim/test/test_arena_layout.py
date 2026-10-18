@@ -463,6 +463,101 @@ def test_ramps_chain_up_and_turn_on_one_module_landings():
     assert any("no robot can get onto" in m for m in found[(4, 6)])
 
 
+# Up toward -x onto a one module landing 3" up, then turning up toward +y
+# onto a 4" platform, as on the tower in the middle of test4.
+LANDING = [
+    ramp(7, 4, 90), platform(6, 4), on(ramp(6, 4, 90), 1),
+    platform(5, 4, "platform_2"), on(ramp(5, 4, 90), 1),
+    platform(4, 4, "platform_2"), on(platform(4, 4), 1),
+    platform(4, 5, "platform_2"), on(platform(4, 5), 1),
+    on(ramp(4, 5, 0), 2),
+    platform(4, 6, "platform_2"), on(platform(4, 6, "platform_2"), 1)]
+
+
+def test_chase_turns_up_a_ramp_chain_on_a_one_module_landing():
+    from test_terrain import assert_never_climbs_an_edge, drive
+
+    layout = {"size": 12, "modules": list(LANDING)}
+    ground = al.terrain(layout)
+    top = al.centre(layout, 4, 6)
+    assert not ground.route(0.3, -0.15, *top, *top, math.pi).partial
+
+    trail = drive(ground, 0.3, -0.15, math.pi, *top, steps=1500)
+    assert_never_climbs_an_edge(ground, trail)
+    # Turned on the 3" landing and up the ramp toward +y off it, short of
+    # a target whose arm may be out.
+    end_x, end_y = trail[-1]
+    assert ground.height_at(end_x, end_y) > 0.0762 + 0.005
+    assert end_x == pytest.approx(top[0], abs=0.01)
+
+
+def test_a_hunter_under_a_target_on_a_platform_is_not_with_it():
+    from robogame_sim.chase import Chaser
+
+    layout = {"size": 12, "modules": list(LANDING)}
+    ground = al.terrain(layout)
+    x, y = al.centre(layout, 4, 6)
+    chaser = Chaser(ground)
+    chaser.track(x, y, 0.0)
+    # On the floor beside the platform, 13 cm from the target.
+    chaser.update(0.0, x - 0.13, y, 0.0)
+
+    assert chaser.gap > 0.3
+    assert chaser.status != "with the target"
+
+
+# The walls round the tower in test4: two to a side, with an 8" gap in the
+# middle of each side and a diagonal slot at each corner, which the robot
+# only gets through lined up with it.
+WALL_BOX = (
+    [side("wall", c, 2, 180) for c in (3, 4, 7, 8)]
+    + [side("wall", c, 9, 0) for c in (3, 4, 7, 8)]
+    + [side("wall", 2, r, 90) for r in (3, 4, 7, 8)]
+    + [side("wall", 9, r, 270) for r in (3, 4, 7, 8)])
+
+
+def test_chase_squeezes_through_a_corner_slot():
+    from robogame_sim import chase_sim
+    from robogame_sim.chase import Chaser
+
+    layout = {"size": 12, "modules": list(WALL_BOX)}
+    world = chase_sim.load_world(layout)
+    ground = world.terrain
+    hunter = chase_sim.Robot(world, -0.30, -0.12, -math.pi / 2)
+    tx, ty = -0.43, -0.43
+    chaser = Chaser(ground)
+    # With the target's arm up the hunter comes right into the slot.
+    chaser.set_target_arm(math.pi / 2, math.pi / 2)
+    command = (0.0, 0.0)
+    slot = math.inf
+
+    for step in range(int(10.0 / chase_sim.TICK)):
+        chaser.track(tx, ty, step * chase_sim.TICK)
+        command = chaser.update(step * chase_sim.TICK, hunter.x, hunter.y,
+                                hunter.yaw)
+        for _ in range(int(chase_sim.TICK / chase_sim.DT)):
+            hunter.step(*command)
+        slot = min(slot, math.dist((hunter.x, hunter.y), (-0.343, -0.343)))
+
+    # It stops a centimetre short, its front through the slot's narrowest.
+    assert chaser.gap < 0.02
+    assert slot < 0.02, "into the slot, not round by the middle gap"
+    # Lined up with it, without once pressing against a wall.
+    assert abs(math.sin(hunter.yaw + 3 * math.pi / 4)) < math.sin(
+        math.radians(10))
+    assert hunter.blocked == 0
+
+
+def test_a_join_between_ramps_side_by_side_is_ramp():
+    # The meshes' float32 edges miss a cell centre right on the join.
+    layout = {"size": 12, "modules": [ramp(c, 2, 0) for c in (2, 3, 4)]}
+    ground = al.terrain(layout)
+    x = al.centre(layout, 3, 2)[0] + al.MODULE / 2
+    for y in (-0.38, -0.34):
+        assert ground.height_at(x, y) == pytest.approx(
+            ground.height_at(x - 0.02, y), abs=1e-3)
+
+
 def test_a_wall_closes_the_side_it_stands_on():
     layout = {"size": 12, "modules": [
         ramp(5, 4, 0), platform(5, 5), on(side("wall", 5, 5, 0), 1),

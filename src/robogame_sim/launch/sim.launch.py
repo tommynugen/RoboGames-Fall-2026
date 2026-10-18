@@ -172,8 +172,27 @@ def world_running(name, env):
 LAUNCH_ARGUMENTS = (
     "robots", "gui", "drive_model", "controller", "joy_device_id",
     "motion_device", "autonomy", "chase", "layout", "partition", "fpv",
-    "drive",
+    "drive", "speed", "step",
 )
+
+
+def set_physics(world, speed, step):
+    """A copy of the world file running at real time factor speed, with
+    physics steps of step seconds."""
+    with open(world) as file:
+        text = file.read()
+
+    text = re.sub(r"<real_time_factor>[^<]*</real_time_factor>",
+                  f"<real_time_factor>{speed}</real_time_factor>", text,
+                  count=1)
+    text = re.sub(r"<max_step_size>[^<]*</max_step_size>",
+                  f"<max_step_size>{step}</max_step_size>", text, count=1)
+    path = os.path.join(tempfile.mkdtemp(prefix="robogame_world_"),
+                        os.path.basename(world))
+    with open(path, "w") as file:
+        file.write(text)
+
+    return path
 
 
 def check_argument_names(context):
@@ -250,6 +269,11 @@ def launch_setup(context):
             print(f"[sim.launch] layout {layout_name}: {problem['type']} at "
                   f"col {problem['col']}, row {problem['row']}: "
                   f"{problem['message']}")
+
+    speed = float(LaunchConfiguration("speed").perform(context))
+    step = float(LaunchConfiguration("step").perform(context))
+    if speed != 1.0 or step != 0.001:
+        world = set_physics(world, speed, step)
 
     # GzServer runs the server inside a ROS process, so Ctrl-C stops it.
     # Through gz_sim.launch.py the ruby gz wrapper is stopped instead, and
@@ -509,6 +533,17 @@ def generate_launch_description():
             description="Gazebo partition to run in, so a second sim can "
                         "run beside one already going; empty keeps "
                         "GZ_PARTITION as it is"),
+        DeclareLaunchArgument(
+            "speed", default_value="1",
+            description="Real time factor the sim runs at: 3 runs three "
+                        "times faster than real time where the computer "
+                        "keeps up, 0 as fast as it can. Every node runs on "
+                        "sim time, so a chase goes as it would at 1"),
+        DeclareLaunchArgument(
+            "step", default_value="0.001",
+            description="Physics step in seconds. 0.002 about halves the "
+                        "work per sim second, so with speed:=0 a headless "
+                        "test runs two to three times faster"),
         DeclareLaunchArgument(
             "fpv", default_value="true",
             description="Mounts an FPV camera on the front of every robot. "

@@ -49,8 +49,11 @@ FINE = 4
 # Height change between neighbouring cells that is a step, not a slope.
 # The arena ramps rise at most about 0.006 m per cell, the platforms 0.025.
 STEP = 0.013
-# Gradient above which the ground counts as a ramp.
+# Gradient above which the ground counts as a ramp, and from which on it is
+# a step: a ramp rises at most about 0.5, a step of STEP between two cells
+# about 0.5 across the two either side of it, a module's edge more.
 SLOPE = 0.05
+STEP_GRADIENT = 0.75
 
 # The robot's body seen from above, wheels and all, with its arm stowed
 # over the chassis: the wheels stand out past both ends of the chassis.
@@ -76,6 +79,8 @@ DROP_TURN_CLEARANCE = math.hypot(WHEEL_X, HALF_WIDTH) + 0.004
 SOFT_CLEARANCE = 0.1
 NARROW_COST = 3.0
 LINE_UP = 0.07
+# Room round the body that keeps it off a ramp it is driving across.
+SLOPE_MARGIN = 0.015
 # Moves on and around a ramp must be within 15 degrees of its slope.
 ALIGN = math.cos(math.radians(15))
 # The robot steps sideways into a lane beside it, one cell over while it
@@ -84,6 +89,11 @@ ALIGN = math.cos(math.radians(15))
 # far off their axis.
 LANE_CHANGE = 6
 LINE_TOLERANCE = math.radians(10)
+# What backing out of a gap it is lined up in costs over driving on, in
+# metres of path.
+REVERSE_COST = 0.2
+# A robot counts as lined up along an axis within this of it.
+HEADING_FIT = math.radians(30)
 
 # Opposite moves are four apart, and d % 4 is the axis a move runs along.
 MOVES = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
@@ -230,7 +240,9 @@ def rasterise(triangles, origin, shape, resolution):
         v = ((c[1] - a[1]) * (x - c[0])
              + (a[0] - c[0]) * (y - c[1])) / normal_z
         w = 1 - u - v
-        inside = (u >= -1e-9) & (v >= -1e-9) & (w >= -1e-9)
+        # A cell centre on the join between two modules is on both, though
+        # their meshes' float32 edges miss it by a little.
+        inside = (u >= -1e-6) & (v >= -1e-6) & (w >= -1e-6)
         z = u * a[2] + v * b[2] + w * c[2]
 
         patch = height[lo[0]:hi[0] + 1, lo[1]:hi[1] + 1]
@@ -395,8 +407,16 @@ class Terrain:
         self.cost[~self.free] = NARROW_COST
 
     def find_slopes(self):
-        """The slope direction that moves on and around a ramp must follow,
-        as unit vectors, zero where moves are free."""
+        """The slope directions that moves on and around a ramp must follow,
+        as unit vectors, zero where moves are free.
+
+        axes holds one for each ramp near a cell, told apart by the grid
+        axis its slope runs along, and a move may follow any of them: on a
+        one module landing where a ramp comes up from one side and the next
+        goes on up from another, the robot drives along either, as it comes
+        off one and lines up for the other. Averaged, they would only allow
+        the diagonal between them. On a ramp itself only its own slope is
+        kept. axis is the strongest of them."""
         h = np.where(np.isnan(self.height), 0.0, self.height)
         gx, gy = np.gradient(h, self.resolution)
         magnitude = np.hypot(gx, gy)
@@ -404,30 +424,94 @@ class Terrain:
         self.sloped = (magnitude > SLOPE) & ~np.isnan(self.height)
 
         cx, cy = self.centres()
+        self.axes = np.zeros(self.shape + (len(AXES), 2))
         self.axis = np.zeros(self.shape + (2,))
+        self.over_slope = np.zeros((len(AXES),) + self.shape, dtype=bool)
 
         if not sloped.any():
             return
 
         sx, sy = cx[sloped], cy[sloped]
         ux, uy = gx[sloped] / magnitude[sloped], gy[sloped] / magnitude[sloped]
+        # Which grid axis each slope runs along, either way up it, turned
+        # to point the same way along it, so ramps facing each other add up
+        # rather than cancel.
+        bins = np.rint((np.arctan2(uy, ux) % math.pi)
+                       / (math.pi / 4)).astype(int) % len(AXES)
+        flip = (ux * np.cos(np.array(AXES))[bins]
+                + uy * np.sin(np.array(AXES))[bins]) < 0
+        ux, uy = np.where(flip, -ux, ux), np.where(flip, -uy, uy)
         flat = np.stack([cx.ravel(), cy.ravel()], axis=1)
-        sum_x = np.zeros(len(flat))
-        sum_y = np.zeros(len(flat))
+        sums = np.zeros((len(flat), len(AXES), 2))
 
         for start in range(0, len(sx), 256):
             part = slice(start, start + 256)
             near = np.hypot(flat[:, None, 0] - sx[None, part],
                             flat[:, None, 1] - sy[None, part]) <= LINE_UP
-            sum_x += near @ ux[part]
-            sum_y += near @ uy[part]
+            for b in range(len(AXES)):
+                mask = bins[part] == b
+                if mask.any():
+                    sums[:, b, 0] += near[:, mask] @ ux[part][mask]
+                    sums[:, b, 1] += near[:, mask] @ uy[part][mask]
 
-        norm = np.hypot(sum_x, sum_y)
-        has = norm > 1e-9
-        axis = np.zeros((len(flat), 2))
-        axis[has, 0] = sum_x[has] / norm[has]
-        axis[has, 1] = sum_y[has] / norm[has]
+        norm = np.hypot(sums[..., 0], sums[..., 1])
+        # A ramp counts where it is a good part of the slope round about, so
+        # a few odd cells at a ramp's side do not open up other directions.
+        keep = (norm > 1e-9) & (norm >= 0.3 * norm.max(axis=1, keepdims=True))
+        own = np.full(len(flat), -1)
+        own[np.flatnonzero(sloped.ravel())] = bins
+        on_ramp = own >= 0
+        keep[on_ramp] = False
+        keep[on_ramp, own[on_ramp]] = norm[on_ramp, own[on_ramp]] > 1e-9
+
+        axes = np.zeros_like(sums)
+        axes[keep] = sums[keep] / norm[keep][:, None]
+        strongest = np.argmax(np.where(keep, norm, -1.0), axis=1)
+        axis = axes[np.arange(len(flat)), strongest]
+        self.axes = axes.reshape(self.shape + (len(AXES), 2))
         self.axis = axis.reshape(self.shape + (2,))
+
+        # A robot driving across a slope only reaches its half width toward
+        # it, not the LINE_UP its front does, so off the top of a ramp it
+        # may turn and drive along the ramp's top edge once its body is
+        # clear of the slope. over_slope[a]: its body, facing along axis a,
+        # is over a ramp. That is all of the ramp, its sides too, which have
+        # no room to be on, but not the steps round it, which are steeper.
+        ramp = self.sloped & (magnitude < STEP_GRADIENT)
+        half_length = HALF_LENGTH + SLOPE_MARGIN
+        half_width = HALF_WIDTH + SLOPE_MARGIN
+        reach = int(math.ceil(math.hypot(half_length, half_width)
+                              / self.resolution))
+
+        for di in range(-reach, reach + 1):
+            for dj in range(-reach, reach + 1):
+                moved = shifted(ramp, di, dj, False)
+                ox, oy = di * self.resolution, dj * self.resolution
+                for a, angle in enumerate(AXES):
+                    c, s = math.cos(angle), math.sin(angle)
+                    if (abs(ox * c + oy * s) <= half_length
+                            and abs(oy * c - ox * s) <= half_width):
+                        self.over_slope[a] |= moved
+
+    def along_slope(self, i, j, dx, dy):
+        """Whether moving along dx, dy is allowed by the ramps in each of
+        cells i, j, as a boolean array: there is no slope round about, the
+        move follows one of them, or the robot's body is clear of them."""
+        axes = self.axes[i, j]
+        level = ~axes.any(axis=(-2, -1))
+        length = np.hypot(dx, dy)
+        dot = np.abs(axes[..., 0] * dx + axes[..., 1] * dy)
+
+        # Facing between two grid axes, it may be over a slope either way.
+        angle = math.atan2(dy, dx) % math.pi / (math.pi / 4)
+        nearest = int(round(angle)) % len(AXES)
+        over = self.over_slope[nearest, i, j]
+        if abs(angle - round(angle)) * math.pi / 4 > LINE_TOLERANCE:
+            over = over | self.over_slope[int(math.floor(angle)) % len(AXES),
+                                        i, j] | self.over_slope[
+                int(math.ceil(angle)) % len(AXES), i, j]
+
+        return level | ~over | (dot >= ALIGN * length).any(axis=-1)
 
     def build_graph(self):
         """The states A* plans over and the moves between them.
@@ -447,15 +531,15 @@ class Terrain:
         count = len(self.state_i)
 
         passable = self.free | self.lined_up
-        ax, ay = self.axis[..., 0], self.axis[..., 1]
-        level = (ax == 0.0) & (ay == 0.0)
+        level = ~self.axes.any(axis=(-2, -1))
+        every_i, every_j = np.indices(self.shape)
         edges = [[] for _ in range(count)]
 
         for d, (di, dj) in enumerate(MOVES):
             a = d % 4
             length = math.hypot(di, dj)
             # The ramp rule for moving along di, dj, in a cell.
-            along = level | (np.abs(ax * di + ay * dj) >= ALIGN * length)
+            along = self.along_slope(every_i, every_j, di, dj)
             there_ok = shifted(passable[a] & along, di, dj, False)
             ci, cj = np.nonzero(passable[a] & along & there_ok)
             ni, nj = ci + di, cj + dj
@@ -631,13 +715,8 @@ class Terrain:
 
     def aligned(self, cell, dx, dy):
         """Whether moving along dx, dy is allowed in cell by the ramps."""
-        ax, ay = self.axis[cell]
-
-        if ax == 0.0 and ay == 0.0:
-            return True
-
-        length = math.hypot(dx, dy)
-        return length < 1e-12 or abs(ax * dx + ay * dy) >= ALIGN * length
+        return math.hypot(dx, dy) < 1e-12 or bool(
+            self.along_slope(*cell, dx, dy))
 
     def line_cells(self, ax, ay, bx, by):
         """The cells under a line from a to b, every half cell along it,
@@ -661,6 +740,11 @@ class Terrain:
         cells = self.line_cells(ax, ay, bx, by)
         return cells is not None and bool(self.free[cells].all())
 
+    def slope_line(self, ax, ay, bx, by):
+        """Whether a line from a to b goes over a ramp."""
+        cells = self.line_cells(ax, ay, bx, by)
+        return cells is not None and bool(self.sloped[cells].any())
+
     def clear_line(self, ax, ay, bx, by):
         """Whether a robot can drive straight from a to b: through cells it
         can turn in, or lined up with the line in those it cannot, and
@@ -680,15 +764,8 @@ class Terrain:
                                  | self.lined_up[a, i, j]).all():
                 return False
 
-        slope = self.axis[i, j]
-        on_ramp = (slope[:, 0] != 0.0) | (slope[:, 1] != 0.0)
-
-        if on_ramp.any() and length > 1e-12:
-            along = np.abs(slope[on_ramp, 0] * dx + slope[on_ramp, 1] * dy)
-            if (along < ALIGN * length).any():
-                return False
-
-        return True
+        return length < 1e-12 or bool(
+            self.along_slope(i, j, dx, dy).all())
 
     def open_line(self, ax, ay, bx, by, margin=0.015):
         """clear_line, keeping margin more than room to turn from steps
@@ -740,9 +817,16 @@ class Terrain:
         i, j = np.unravel_index(np.argmin(distance), distance.shape)
         return int(i0 + i), int(j0 + j)
 
-    def search(self, starts, goal):
+    def search(self, starts, goal, heading=None):
         """Cheapest chain of states from any of starts to a state in the
-        goal cell, as cells, or None."""
+        goal cell, as cells, or None.
+
+        With heading, the way the robot faces, backing out of a start state
+        it cannot turn in, or anywhere along the gap ahead of it, costs
+        REVERSE_COST more, so lined up
+        in a gap it keeps on the way it is going rather than switching
+        between driving on and backing out as each looks a little shorter.
+        """
         # Only goals the starts connect to, so a search for one they do not
         # fails at once rather than after trying everywhere.
         labels = {int(self.label[s]) for s in starts}
@@ -760,6 +844,10 @@ class Terrain:
         frontier = [(hypot(gx - xs[s], gy - ys[s]), s) for s in starts]
         heapq.heapify(frontier)
         closed = set()
+        lined = set()
+        if heading is not None:
+            hx, hy = math.cos(heading), math.sin(heading)
+            lined = {s for s in starts if self.state_kind[s] > 0}
 
         while frontier:
             _, here = pop(frontier)
@@ -779,6 +867,14 @@ class Terrain:
 
             for there, step in edges[here]:
                 total = base + step
+                if here in lined:
+                    # Anywhere along the gap ahead, not just where it is.
+                    ahead = ((xs[there] - xs[here]) * hx
+                             + (ys[there] - ys[here]) * hy)
+                    if ahead < 0:
+                        total += REVERSE_COST
+                    elif ahead > 0 and self.state_kind[there] > 0:
+                        lined.add(there)
                 if total < cost.get(there, math.inf):
                     cost[there] = total
                     previous[there] = here
@@ -834,13 +930,13 @@ class Terrain:
             if self.open_line(hunter_x, hunter_y, goal_x, goal_y):
                 return Path([(hunter_x, hunter_y), (goal_x, goal_y)])
 
-            cells = self.search(starts, goal_cell)
+            cells = self.search(starts, goal_cell, hunter_yaw)
             if cells is not None:
                 return self.path_along(hunter_x, hunter_y, cells,
                                        (goal_x, goal_y))
 
         return self.closest_approach(
-            hunter_x, hunter_y, starts, target_x, target_y)
+            hunter_x, hunter_y, starts, target_x, target_y, hunter_yaw)
 
     def start_for(self, x, y, heading, level, goals=(), reach=0.08):
         """The cell and states to plan from for a robot at x, y: its own,
@@ -885,11 +981,22 @@ class Terrain:
         if not candidates:
             return None
 
+        def facing(state):
+            # Free, or lined up within HEADING_FIT of the way it faces.
+            kind = self.state_kind[state]
+            return heading is None or kind == 0 or abs(math.sin(
+                heading - AXES[kind - 1])) <= math.sin(HEADING_FIT)
+
+        # A robot a few millimetres off a diagonal gap is in a cell only
+        # lined up along the grid: rather the gap's cell beside it, lined
+        # up as it faces, than plan as if it faced along the grid.
         wanted = {int(self.label[s]) for s in goals}
-        for cell, states in candidates:
-            leading = [s for s in states if int(self.label[s]) in wanted]
-            if leading:
-                return cell, leading
+        for fit in (facing, lambda state: True):
+            for cell, states in candidates:
+                leading = [s for s in states
+                           if int(self.label[s]) in wanted and fit(s)]
+                if leading:
+                    return cell, leading
 
         def size(candidate):
             return max(self.label_size[self.label[s]] for s in candidate[1])
@@ -914,7 +1021,8 @@ class Terrain:
 
         return self.reachable_from(self.start_states(start))
 
-    def closest_approach(self, hunter_x, hunter_y, starts, x, y):
+    def closest_approach(self, hunter_x, hunter_y, starts, x, y,
+                         heading=None):
         """Path to the place nearest x, y that the hunter can drive to."""
         if not starts:
             return None
@@ -932,7 +1040,7 @@ class Terrain:
         if self.open_line(hunter_x, hunter_y, *end):
             return Path([(hunter_x, hunter_y), end], partial=True)
 
-        cells = self.search(starts, best)
+        cells = self.search(starts, best, heading)
         if cells is None:
             return None
 

@@ -73,7 +73,16 @@ ros2 launch robogame_sim sim.launch.py robots:=0,1,2,3    # several robots
 ros2 launch robogame_sim sim.launch.py gui:=false         # no window
 ros2 launch robogame_sim sim.launch.py drive_model:=firmware
 ros2 launch robogame_sim sim.launch.py fpv:=false         # no onboard camera
+ros2 launch robogame_sim sim.launch.py gui:=false fpv:=false speed:=0 step:=0.002
 ```
+
+The last runs a headless test as fast as the computer goes. `speed` is the
+real time factor (1 by default, 0 as fast as it can) and `step` the physics
+step (0.001 s by default). The arena's meshes keep Gazebo at about real
+time with 1 ms steps however high `speed` is; with 2 ms steps a two robot
+chase on test4 runs at about twice real time, and goes the same way, since
+every node runs on sim time. Separate runs side by side, each with its own
+`partition` and `ROS_DOMAIN_ID`, go faster still.
 
 Every robot has an FPV camera low on the front of its chassis, under the
 arm, so it does not move when the arm does; `fpv:=false` leaves it out.
@@ -263,16 +272,30 @@ it is from the nearest wall and the nearest drop to a couple of millimetres.
 - On and within 7 cm of sloped ground it may only drive within 15 degrees
   of the slope, so it lines up before a ramp and goes straight up or down
   it, at least `ramp_speed` (0.15 m/s) either way so it does not stall on
-  the steep top.
+  the steep top. Each ramp near it counts on its own: on a one module
+  landing where one ramp comes up from one side and the next goes on up
+  from another, as on the tower in test4, it drives along either, and once
+  its body is clear of a ramp it may drive across the ramp's top edge. The
+  ramps round it used to be averaged into one diagonal, which left such a
+  landing, and so everything above it, out of reach.
 
 Whenever it cannot drive straight at the target, it plans with A* over the
 cells and, in the narrow ones, the way it faces. A plan can step sideways
 into a lane beside it, a cell over in six along. It then pulls the path
 straight, but never closer to a wall than the plan went, so a shortcut does
-not shave a corner. It curves round corners in the open without slowing.
-At a corner where the next leg goes into a gap too narrow to turn in, it
-stops on it, turns to line up, and drives in. Lined up in such a gap it
-backs out when the target goes the other way, heads for a point 12 cm on
+not shave a corner. It curves round corners in the open, no faster than
+it can turn onto the curve, so it does not swing wide into a wall beside
+it. At a corner where the next leg goes into a gap too narrow to turn in,
+or up or down a ramp, it stops, turns to line up, and drives in, as a
+player would. It stops back along the line of that leg, up to 5 cm short
+of the corner, where it has the most room to turn, since the corner is
+often right at the edge of where it can: stopping a centimetre wide of it
+there would leave it unable to turn. Lined up in such a gap it plans as
+lined up the way it faces, from the gap's cell beside it when a few
+millimetres off a diagonal put it in one only lined up along the grid, and
+keeps going the way it is unless backing out is 20 cm shorter, rather than
+switching back and forth. It backs out when the target goes the other way,
+heads for a point 12 cm on
 along the gap so it eases back to the middle, and straightens up only
 gently as it goes. Where it would creep a wheel over an edge doing that,
 it turns where it stands instead, and where only a drop, not a wall,
@@ -282,7 +305,10 @@ against something for a second, or got nowhere for three, it backs off or
 pulls forward for half a second, the other way the next time, but never a
 way that would leave it over an edge. A target it
 cannot get to, on a platform no ramp leads to, it waits for at the nearest
-place it can turn. A step takes about 3 ms, 25 ms at worst on a maze.
+place it can turn. Where the way to the target goes round, it is as far
+away as the way round, so a hunter on a ramp right under a target on the
+platform above keeps climbing rather than stopping there as if with it. A
+step takes about 3 ms, 25 ms at worst on a maze.
 
 Try it without Gazebo:
 
@@ -334,6 +360,48 @@ In every run the arm was up within 2 s and stayed there (shoulder +1.57,
 elbow +1.48 rad). The maze runs also found three ways the hunter could end
 up over the floor's edge in a corner, which the 2D stand-in had not shown,
 and each is now guarded against.
+
+Checked again on 2026-10-18 on test4: a tower in the middle with a ramp
+spiralling up its outside, one module wide with a drop on the outer side,
+four legs turning on one module landings, up to its 8 inch top; round it a
+box of walls with an 8 inch gap in the middle of each side and, at each
+corner, a diagonal slot between the walls' ends that the robot only gets
+through lined up with it. Headless in Gazebo at 2 ms steps, four runs at a
+time, robot 2 put somewhere by the script or driven like a player, robot 1
+hunting it. Lane is the furthest the hunter's centre got from the middle
+of a spiral leg, which leaves 1.6 cm either side of its wheels:
+
+| Robot 2 | Reached | Through the slot | Lane | Freed itself |
+| --- | --- | --- | --- | --- |
+| just outside each corner slot, hunter inside the box, four runs | 3.0 to 4.2 s | 0 to 5 degrees off its line, 0.1 to 0.9 cm off its middle | | 0 |
+| inside past a corner slot, hunter outside it, two runs | 2.5, 3.8 s | 2 and 5 degrees, 0.5 cm | | 0 |
+| driving out through a corner slot, hunter after it | 5.1 s | 5 degrees, 0.7 cm | | once |
+| on the tower top, hunter on the floor, four starts | 18.8 to 25.9 s | | 1.2 cm | 0 |
+| driving up the spiral, hunter after it | to the top | | 1.1 cm | once |
+| on the top, hunter knocked 1.2 cm off line and turned 11 degrees toward the drop, twice on the way up, two runs | 21.9, 24.0 s | | 1.5 cm | at most once |
+
+It never fell, and the heading error after a knock was gone within half
+a second. Run them again with
+
+```
+scripts/gazebo_chase_suite.sh /tmp/chase_runs              # all 14
+scripts/gazebo_chase_suite.sh /tmp/chase_runs tower_nudge  # just one
+```
+
+which takes a few minutes for all of them, four at a time
+(`gazebo_chase_test.py` has the scenarios, `gazebo_chase_score.py` scores
+a run and with `--plot` draws it). Before, the top of the tower was out of reach: the hunter waited
+at the foot of the spiral. Through the slots, it would stop on a corner at
+the very edge of where it could turn, end up a centimetre off it and press
+against the end of a wall, and on its way to the foot of the spiral it
+swung wide into a strip by the wall too narrow to turn in.
+
+In `chase_sim`, 18 runs of 40 s on each layout, against the chase before
+these changes: every run on the default, flat, maze and test1 and test4
+layouts still reaches the target; on test2 and test3, 16 of 18, as a target
+running away can now loop round the arena over the corner platforms, which
+both robots can use now, and in two runs stayed ahead for the whole 40 s.
+On test4 moves refused fell from 54 to 12.
 
 ## Arena layouts
 
