@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Copies arena_perception out of the ROBOGAME-2.0 checkout so the sim can run
 # controller_input and autonomy_node. Only reads the checkout, never writes
-# to it, so nothing here can end up on GitHub. Run it again to pick up
-# changes, then rebuild.
+# to it. The copy is not kept in git. Run it again to pick up changes, then
+# rebuild. Usage: sync_arena_perception.sh [PATH/TO/ROBOGAME-2.0]
 set -euo pipefail
 
 REPO="${1:-$HOME/Documents/PlatformIO/Projects/RoboGames/ROBOGAME-2.0}"

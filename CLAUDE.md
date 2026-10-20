@@ -1,12 +1,13 @@
 # CLAUDE.md
 
-A private Gazebo sim for the ROBOGAME-2.0 robots: ROS 2 Lyrical, Gazebo
-Jetty (gz-sim 10), one ament_python package, `src/robogame_sim`, and
-`src/robogame_gui`, a small C++ Gazebo GUI plugin (the Camera view card). No remote;
-nothing here goes to GitHub. README.md is the full manual: what each launch
-argument does, how the chase and planner behave, the layout file format, and
-what was checked in Gazebo and when. Read the section you need rather than
-the whole file.
+A Gazebo sim for the ROBOGAME-2.0 robots: ROS 2 Lyrical, Gazebo Jetty
+(gz-sim 10), one ament_python package, `src/robogame_sim`, and
+`src/robogame_gui`, a small C++ Gazebo GUI plugin (the Camera view card).
+The remote is github.com/tommynugen/RoboGames-Fall-2026, which is public:
+keep machine paths, keys and personal details out of commits. README.md is
+the full manual: what each launch argument does, how the chase and planner
+behave, the layout file format, and what was checked in Gazebo and when.
+Read the section you need rather than the whole file.
 
 ## Commands
 

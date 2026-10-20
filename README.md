@@ -1,13 +1,16 @@
-# Robogame testing fork: Gazebo sim (private test)
+# Robogame testing fork: Gazebo sim
 
-A private workspace for trying Gazebo with the ROBOGAME-2.0 nodes. It lives
-outside every git checkout and has no remote, so nothing here reaches
-GitHub. The ROBOGAME-2.0 checkout is only ever read.
+A Gazebo sim for trying the ROBOGAME-2.0 robots and nodes: the arena, the
+robots, their firmware, a chase planner, a layout editor and a robot
+console. Below, "the repo" means the ROBOGAME-2.0 repo, which this sim
+only ever reads.
 
 ```
 src/robogame_sim       arena world, robot model, sim_firmware, launch
-src/arena_perception   copy of the repo package, made by the sync script
-scripts/sync_arena_perception.sh
+src/robogame_gui       the Camera view card for the Gazebo side panel (C++)
+src/arena_perception   copy of the repo package, made by the sync script,
+                       not kept in git
+scripts/               Onshape export, Gazebo chase suite, the sync script
 ```
 
 ## What it simulates
@@ -46,24 +49,34 @@ and each arm command moves the shoulder or elbow 5 degrees, clamped to 0 to
 
 ## Setup
 
-ROS 2 Lyrical is installed here, not the Jazzy the repo targets, so this
-runs Gazebo Jetty (gz-sim 10). Gazebo comes with `ros_gz`:
+This runs on ROS 2 Lyrical, not the Jazzy the repo targets, and so on
+Gazebo Jetty (gz-sim 10). Gazebo comes with `ros_gz`:
 
 ```
 sudo apt install ros-lyrical-ros-gz
 ```
 
-Then build:
+Then clone and build:
 
 ```
-cd ~/Documents/PlatformIO/Projects/robogame-testing-fork
+git clone https://github.com/tommynugen/RoboGames-Fall-2026.git
+cd RoboGames-Fall-2026
 source /opt/ros/lyrical/setup.bash
 colcon build --symlink-install
 source install/setup.bash
 ```
 
-To pick up changes from the repo, run `scripts/sync_arena_perception.sh`
-and build again.
+Most of the sim needs nothing else. `controller:=classic` and
+`autonomy:=true` run the repo's `controller_input` and `autonomy_node`,
+which need its `arena_perception` package copied in. With a ROBOGAME-2.0
+checkout on the same machine:
+
+```
+scripts/sync_arena_perception.sh PATH/TO/ROBOGAME-2.0
+colcon build --symlink-install
+```
+
+Run the same two lines again to pick up changes from the repo.
 
 ## Run
 
@@ -650,7 +663,7 @@ against moving targets in `chase_sim` (`test_chase_dynamic.py`), the
 arena layouts and their editor, and the robot console
 (`test_autopilot.py`, and `test_robot_console.py`, which needs ROS
 sourced). Print a robot's SDF with `ros2 run robogame_sim
-robot_sdf 2`, and check it with `gz sdf -k` once Gazebo is installed.
+robot_sdf 2`, and check it with `gz sdf -k`.
 
 ## Checked in Gazebo
 
