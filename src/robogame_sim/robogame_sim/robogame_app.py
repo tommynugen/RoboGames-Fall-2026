@@ -16,6 +16,9 @@ console draws and plans over at once (when no sim publishes its own), and
 the console's Edit link opens the arena in use in the editor. Only this
 computer can reach the page.
 
+The editor's Launch buttons start the Gazebo sim on the layout open in it
+and Stop stops it (sim_runner.py). Quitting the app stops the sim too.
+
 Without ROS (no rclpy), as on a laptop only mapping the table, the editor
 still works and the console tab says ROS is not sourced.
 """
@@ -29,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
 from robogame_sim import arena_editor
+from robogame_sim.sim_runner import SimRunner
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 SHELL = os.path.join(HERE, "robogame_app.html")
@@ -46,9 +50,10 @@ NO_ROS = b"""<!doctype html><meta charset="utf-8">
 the app again. The arena editor works without it.</p>"""
 
 
-def handler(console=None):
+def handler(console=None, sim=None):
     """A request handler for the app. console is the RobotConsole node, or
-    None to serve the editor alone."""
+    None to serve the editor alone. sim is the SimRunner behind the
+    editor's Launch buttons, or None for none."""
     if console is not None:
         from robogame_sim import robot_console
         console_page = robot_console.PAGE
@@ -108,7 +113,8 @@ def handler(console=None):
                                  "text/javascript; charset=utf-8")
             if path == "/api/app":
                 return self.reply(200, {"console": console is not None})
-            self.answer(lambda: self.console_route("get", path),
+            self.answer(lambda: sim and sim.get(path),
+                        lambda: self.console_route("get", path),
                         lambda: arena_editor.get(path))
 
         def read_raw(self, limit):
@@ -124,6 +130,7 @@ def handler(console=None):
         def do_POST(self):
             path = unquote(self.path)
             self.answer(
+                lambda: sim and sim.post(path, self.read_body),
                 lambda: self.console_route("post", path, self.read_body),
                 lambda: arena_editor.post(path, self.read_body))
 
@@ -165,7 +172,8 @@ def main(args=None, tab="editor"):
         return
 
     console = start_console(args)
-    server.RequestHandlerClass = handler(console)
+    sim = SimRunner()
+    server.RequestHandlerClass = handler(console, sim)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"RoboGame Gamemaster on {url}, saving layouts to "
@@ -190,6 +198,7 @@ def main(args=None, tab="editor"):
     finally:
         server.shutdown()
         server.server_close()
+        sim.stop()
         if console is not None:
             import rclpy
             if rclpy.ok():

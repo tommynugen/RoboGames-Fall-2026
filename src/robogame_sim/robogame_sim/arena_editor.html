@@ -301,7 +301,9 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       <h2>Run it</h2>
       <pre id="command"></pre>
       <div class="row"><button id="copy" data-from="command">Copy</button>
-      </div>
+        <button id="launch">Launch in Gazebo</button>
+        <button id="sim-stop" disabled>Stop</button></div>
+      <p class="note" id="sim-status"></p>
       <p class="note" id="folder"></p>
     </div>
 
@@ -309,7 +311,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       <h2>Test it</h2>
       <pre id="test-command"></pre>
       <div class="row"><button id="copy-test" data-from="test-command">Copy
-      </button></div>
+      </button> <button id="launch-test">Launch in Gazebo</button></div>
       <p class="note">Sim only. Robot 1 chases robot 2, which the first
         controller drives, and every controller connected after it gets a
         robot of its own. <kbd>F</kbd> in the Gazebo window toggles FPV,
@@ -1091,6 +1093,67 @@ for (const id of ["copy", "copy-test"]) {
     }
   });
 }
+
+// Launch starts the sim on the saved layout from the app (sim_runner.py),
+// Stop stops it, and the line under them says what runs.
+const simStatusEl = document.getElementById("sim-status");
+const simStopEl = document.getElementById("sim-stop");
+
+function showSim(sim) {
+  simStopEl.disabled = !sim.running;
+  for (const id of ["launch", "launch-test"]) {
+    document.getElementById(id).disabled = sim.running;
+  }
+  if (sim.running) {
+    simStatusEl.textContent = `Gazebo is running ${sim.layout}. ` +
+      `Output in ${sim.log}.`;
+  } else if (sim.exit !== null && sim.exit !== undefined) {
+    const lines = sim.tail.trim().split("\n").slice(-3).join(" ");
+    simStatusEl.textContent = `Gazebo stopped (exit ${sim.exit}). ` +
+      `Output in ${sim.log}. ${sim.exit ? lines : ""}`;
+  } else {
+    simStatusEl.textContent = "";
+  }
+}
+
+async function pollSim() {
+  try {
+    showSim(await api("/api/sim"));
+  } catch {
+    // An older app without the Launch routes: keep the buttons.
+  }
+}
+
+async function launchSim(test) {
+  const name = nameEl.value.trim();
+  if (!name || snapshot() !== savedSnapshot) {
+    updateStatus("Save the layout before launching it", "dirty");
+    return;
+  }
+  try {
+    showSim(await api("/api/sim", {
+      method: "POST", body: JSON.stringify({ layout: name, test }) }));
+    updateStatus(`Launching ${name} in Gazebo`, "saved");
+  } catch (error) {
+    updateStatus(`Cannot launch: ${error.message}`, "dirty");
+  }
+}
+
+document.getElementById("launch").addEventListener(
+  "click", () => launchSim(false));
+document.getElementById("launch-test").addEventListener(
+  "click", () => launchSim(true));
+simStopEl.addEventListener("click", async () => {
+  simStatusEl.textContent = "Stopping Gazebo...";
+  simStopEl.disabled = true;
+  try {
+    showSim(await api("/api/sim/stop", { method: "POST" }));
+  } catch (error) {
+    updateStatus(`Cannot stop: ${error.message}`, "dirty");
+  }
+});
+pollSim();
+setInterval(pollSim, 2000);
 
 async function refreshSaved(selected) {
   const { layouts, folder } = await api("/api/layouts");
