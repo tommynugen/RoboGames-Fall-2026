@@ -845,3 +845,55 @@ def test_editor_3d_poses_are_the_sims(kind, rotation):
                                                    rotation, 0.0254)
     assert (x + 0.3, y - 0.2, z + 0.0254, yaw) == pytest.approx(
         (px, py, pz, pyaw), abs=1e-5)
+
+
+def test_parts_are_renamed_deleted_to_the_archive_and_restored(parts):
+    al.add_part("crate", box_stl(3, 3, 2), units="inch")
+    al.save("yard", {"modules": [{"type": "crate", "col": 5, "row": 5,
+                                  "rotation": 0}]})
+
+    # Renamed, in the layout too.
+    assert al.rename_part("crate", "box") == ["yard"]
+    assert "box" in al.PARTS and "crate" not in al.PARTS
+    assert al.load("yard")["modules"][0]["type"] == "box"
+    with pytest.raises(ValueError):
+        al.rename_part("ramp", "slope")
+    with pytest.raises(ValueError):
+        al.rename_part("box", "wall")
+
+    # Deleted, twice under one name, and kept in the archive.
+    assert al.archive_part("box") == "box"
+    assert "box" not in al.PARTS
+    with pytest.raises(ValueError):
+        al.load("yard")
+    al.add_part("box", box_stl(1, 1, 1), units="inch")
+    assert al.archive_part("box") == "box.2"
+    archive = al.archived_parts()
+    assert sorted(p["name"] for p in archive) == ["box", "box.2"]
+    assert {p["part"] for p in archive} == {"box"}
+    with pytest.raises(ValueError):
+        al.archive_part("wall")
+
+    # Restored under its own name, and the layout opens again.
+    assert al.restore_part("box") == "box"
+    assert al.load("yard")["modules"][0]["type"] == "box"
+    with pytest.raises(ValueError):
+        al.restore_part("box.2")
+    assert al.restore_part("box.2", "small_box") == "small_box"
+    assert al.archived_parts() == []
+    with pytest.raises(ValueError):
+        al.restore_part("../escape")
+
+
+def test_editor_routes_for_parts(parts):
+    from robogame_sim import arena_editor
+    al.add_part("crate", box_stl(3, 3, 2), units="inch")
+    status, body = arena_editor.post("/api/parts/crate/rename",
+                                     lambda: {"name": "box"})
+    assert status == 200 and "box" in body["modules"]["types"]
+    status, body = arena_editor.post("/api/parts/box/delete", lambda: {})
+    assert status == 200 and body["archived"] == "box"
+    assert arena_editor.get("/api/archive")[1]["archive"][0]["part"] == "box"
+    status, body = arena_editor.post("/api/archive/box/restore", lambda: {})
+    assert status == 200 and body["name"] == "box" and body["archive"] == []
+    assert arena_editor.post("/api/parts/ramp/delete", dict)[0] == 400

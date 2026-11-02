@@ -43,6 +43,8 @@ def get(path):
     try:
         if path == "/api/modules":
             return 200, arena_layout.modules_info()
+        if path == "/api/archive":
+            return 200, {"archive": arena_layout.archived_parts()}
         if path == "/api/layouts":
             return 200, {"layouts": arena_layout.list_layouts(),
                          "folder": arena_layout.layout_dirs()[0]}
@@ -101,14 +103,44 @@ def put_part(path, read_raw):
         return 400, {"error": str(error)}
 
 
+def parts_state(**extra):
+    """The modules and the archive, which the page redraws from after a
+    part is renamed, deleted or restored."""
+    return 200, {"modules": arena_layout.modules_info(),
+                 "archive": arena_layout.archived_parts(), **extra}
+
+
 def post(path, read_body):
-    """Checks a layout without saving it."""
-    if path != "/api/check":
-        return None
+    """Checks a layout without saving it, and renames, deletes (to the
+    archive) and restores dropped parts:
+
+        POST /api/parts/NAME/rename   {"name": NEW}
+        POST /api/parts/NAME/delete
+        POST /api/archive/NAME/restore {"name": NEW, optional}
+    """
     try:
-        return 200, {"problems": arena_layout.check(read_body())}
+        if path == "/api/check":
+            return 200, {"problems": arena_layout.check(read_body())}
+        bits = path.strip("/").split("/")
+        if len(bits) == 4 and bits[:2] == ["api", "parts"]:
+            kind, action = bits[2], bits[3]
+            if action == "rename":
+                name = (read_body() or {}).get("name", "")
+                layouts = arena_layout.rename_part(kind, name)
+                return parts_state(name=name, layouts=layouts)
+            if action == "delete":
+                layouts = arena_layout.layouts_using(kind)
+                archived = arena_layout.archive_part(kind)
+                return parts_state(archived=archived, layouts=layouts)
+        if (len(bits) == 4 and bits[:2] == ["api", "archive"]
+                and bits[3] == "restore"):
+            name = (read_body() or {}).get("name") or None
+            return parts_state(name=arena_layout.restore_part(bits[2], name))
     except (ValueError, TypeError, KeyError) as error:
         return 400, {"error": str(error)}
+    except OSError as error:
+        return 500, {"error": str(error)}
+    return None
 
 
 def main(args=None):
