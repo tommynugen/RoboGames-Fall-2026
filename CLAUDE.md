@@ -36,7 +36,7 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `chase_node.py` | ROS node around `Chaser` |
 | `chase_sim.py` | 2D stand-in for Gazebo to try `Chaser` against moving targets |
 | `arena_layout.py` (890 lines) | layout JSON load/save, `PARTS`, `check()` (the editor's red outlines), world SDF building, spawn spots |
-| `arena_editor.py` + `arena_editor.html` | the layout editor at localhost:8766; the html is one big file, grep it. Its module drawing is in `arena_draw.js`, shared with the console |
+| `arena_editor.py` + `arena_editor.html` | the layout editor at localhost:8766; the html is one big file, grep it. Its module drawing is in `arena_draw.js`, shared with the console, and its 3D view (three.js) in `arena_view3d.js` |
 | `sim_firmware.py`, `firmware_model.py` | stand in for the ESP32 firmware and BLE bridge |
 | `racing_teleop.py`, `drive_controls.py`, `motion_sensor.py` | PS4/PS5 racing controls and wheel steering |
 | `controller_robots.py`, `gamepads.py` | a robot for every controller connected (hotplug); takes rebinds from the console |

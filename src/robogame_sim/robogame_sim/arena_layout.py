@@ -327,10 +327,24 @@ def modules_info():
                                      else hi[0] - lo[0]),
                       "depth": float(hi[0] - lo[0] if part.mount == "side"
                                      else hi[1] - lo[1]),
-                      "height": float(hi[2] - lo[2])}
+                      "height": float(hi[2] - lo[2]),
+                      "mesh": part.mesh, "colour": part.colour,
+                      "poses": {rotation: mesh_pose(part, rotation)
+                                for rotation in ROTATIONS}}
 
     return {"module": MODULE, "size": SIZE, "peg_line": PEG_LINE,
-            "types": info}
+            "types": info,
+            "floor": {"mesh": FLOOR.mesh, "colour": FLOOR.colour,
+                      "pose": mesh_pose(FLOOR, 0)}}
+
+
+def mesh_pose(part, rotation):
+    """Where a part's mesh goes for a square centred on 0, 0 on the floor,
+    as [x, y, z, yaw] in metres and radians, for the editor's 3D view. On
+    another square add its centre to x and y, and on platforms their
+    height to z, which is all placement does too."""
+    (x, y, z, yaw), _ = placement(part, 0.0, 0.0, rotation)
+    return [round(float(v), 6) for v in (x, y, z, yaw)]
 
 
 # -- geometry --------------------------------------------------------------

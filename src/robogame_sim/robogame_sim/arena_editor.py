@@ -26,6 +26,8 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 PAGE = os.path.join(HERE, "arena_editor.html")
 # Draws the modules, shared with the robot console.
 DRAW = os.path.join(HERE, "arena_draw.js")
+# The editor's 3D view.
+VIEW3D = os.path.join(HERE, "arena_view3d.js")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -58,10 +60,20 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in ("/", "/index.html"):
                 with open(PAGE, "rb") as page:
                     self.reply(200, page.read(), "text/html; charset=utf-8")
-            elif self.path == "/arena_draw.js":
-                with open(DRAW, "rb") as script:
+            elif self.path in ("/arena_draw.js", "/arena_view3d.js"):
+                path = DRAW if self.path == "/arena_draw.js" else VIEW3D
+                with open(path, "rb") as script:
                     self.reply(200, script.read(),
                                "text/javascript; charset=utf-8")
+            elif self.path.startswith("/api/meshes/"):
+                # Only the arena's own meshes, by file name.
+                name = self.path[len("/api/meshes/"):]
+                meshes = {p.mesh for p in arena_layout.PARTS.values()}
+                if name not in meshes | {arena_layout.FLOOR.mesh}:
+                    return self.reply(404, {"error": "no such mesh"})
+                path = os.path.join(arena_layout.mesh_dir(), name)
+                with open(path, "rb") as mesh:
+                    self.reply(200, mesh.read(), "model/stl")
             elif self.path == "/api/modules":
                 self.reply(200, arena_layout.modules_info())
             elif self.path == "/api/layouts":
