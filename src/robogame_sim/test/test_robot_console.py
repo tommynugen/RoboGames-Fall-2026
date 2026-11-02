@@ -24,10 +24,10 @@ from robogame_sim import active_arena  # noqa: E402
 from robogame_sim.controller_robots import LATCHED  # noqa: E402
 from robogame_sim.robot_console import (  # noqa: E402
     RobotConsole,
-    handler,
     height_map,
     newest_layout,
 )
+from robogame_sim.robogame_app import handler  # noqa: E402
 from robogame_sim.terrain import Terrain  # noqa: E402
 
 CAD = os.path.join(os.path.dirname(__file__), "..", "models",
@@ -164,8 +164,11 @@ def test_console_finds_robots_and_the_sims_arena(console):
 
 def test_page_and_drawing_code_are_served(console):
     url, _, _ = console
-    with urllib.request.urlopen(url + "/") as response:
+    with urllib.request.urlopen(url + "/console") as response:
         assert b"Robot console" in response.read()
+    # The editor's API is on the same server.
+    status, body = call(url + "/api/layouts")
+    assert status == 200 and "folder" in body
     with urllib.request.urlopen(url + "/arena_draw.js") as response:
         assert b"function drawModule" in response.read()
 

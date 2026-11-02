@@ -1,12 +1,15 @@
 """Every robot in the arena on one page: who drives it, and where it goes.
 
-    ros2 run robogame_sim robot_console
-    ros2 run robogame_sim robot_console --port 8768 --no-browser
+    ros2 run robogame_sim robogame_app
 
-Serves a page on http://localhost:8767 with the arena drawn as the arena
+The Robot console tab of the RoboGame app (robogame_app.py), at
+http://localhost:8766/#console. This file has the console's node and its
+page API, which the app serves; robot_console.html is the page.
+`ros2 run robogame_sim robot_console` opens the app on this tab.
+
+The page shows the arena drawn as the arena
 editor draws it and every robot on it, found by its
 /model/robot_N/odometry, as the sim and the arena camera both publish it.
-Only this computer can reach the page.
 
 On the page:
 
@@ -27,7 +30,6 @@ saved in the arena editor, which maps the modules as they are set up on
 the table, or one picked on the page.
 """
 
-import argparse
 import json
 import math
 import os
@@ -35,15 +37,10 @@ import queue
 import re
 import threading
 import time
-import webbrowser
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote
 
 import numpy as np
-import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.time import Time
 from sensor_msgs.msg import JointState
@@ -58,7 +55,6 @@ from robogame_sim.terrain import HALF_LENGTH, HALF_WIDTH, Terrain
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 PAGE = os.path.join(HERE, "robot_console.html")
-DRAW = os.path.join(HERE, "arena_draw.js")
 
 ODOMETRY = re.compile(r"^/model/robot_(\d+)/odometry$")
 CONTROLLER_STATE = "/controller_robots/state"
@@ -595,107 +591,49 @@ class RobotConsole(Node):
                 robot.cmd_publisher.publish(Twist())
 
 
-def handler(console):
+def get(console, path):
+    """The console's GET routes: (status, body), or None for a path that is
+    not the console's."""
+    if path == "/api/state":
+        return 200, console.state()
+    if path == "/api/arena":
+        ok, arena = console.call(console.arena_drawing)
+        if ok and arena:
+            return 200, arena
+        return 503, {"error": "no arena loaded yet"}
+    return None
 
-    class Handler(BaseHTTPRequestHandler):
-        server_version = "robot_console"
 
-        def log_message(self, format, *args):
-            pass
+def post(console, path, read_body):
+    """The console's POST routes. read_body gives the request's JSON."""
+    match = re.match(r"^/api/robots/(\d+)$", path)
+    if match:
+        call = (console.change_robot, int(match.group(1)))
+    elif path == "/api/controllers":
+        call = (console.change_controller,)
+    elif path == "/api/arena":
+        call = (console.pick_arena,)
+    else:
+        return None
 
-        def reply(self, status, body, kind="application/json"):
-            data = body if isinstance(body, bytes) else \
-                json.dumps(body).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", kind)
-            self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(data)
+    try:
+        asked = read_body()
+    except ValueError:
+        return 400, {"error": "bad JSON"}
+    if path == "/api/controllers":
+        call += (asked.get("address"), asked.get("robot"))
+    elif path == "/api/arena":
+        call += (asked.get("layout"),)
+    else:
+        call += (asked,)
 
-        def file(self, path, kind):
-            with open(path, "rb") as file:
-                self.reply(200, file.read(), kind)
-
-        def do_GET(self):
-            if self.path in ("/", "/index.html"):
-                self.file(PAGE, "text/html; charset=utf-8")
-            elif self.path == "/arena_draw.js":
-                self.file(DRAW, "text/javascript; charset=utf-8")
-            elif self.path == "/api/state":
-                self.reply(200, console.state())
-            elif self.path == "/api/arena":
-                ok, arena = console.call(console.arena_drawing)
-                self.reply(200 if ok and arena else 503,
-                           arena if ok and arena
-                           else {"error": "no arena loaded yet"})
-            elif self.path == "/api/modules":
-                self.reply(200, arena_layout.modules_info())
-            elif self.path == "/api/layouts":
-                self.reply(200, {"layouts": arena_layout.list_layouts()})
-            else:
-                self.reply(404, {"error": "not found"})
-
-        def do_POST(self):
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                asked = json.loads(self.rfile.read(length) or b"{}")
-            except ValueError:
-                return self.reply(400, {"error": "bad JSON"})
-
-            path = unquote(self.path)
-            match = re.match(r"^/api/robots/(\d+)$", path)
-            if match:
-                ok, result = console.call(
-                    console.change_robot, int(match.group(1)), asked)
-            elif path == "/api/controllers":
-                ok, result = console.call(
-                    console.change_controller, asked.get("address"),
-                    asked.get("robot"))
-            elif path == "/api/arena":
-                ok, result = console.call(
-                    console.pick_arena, asked.get("layout"))
-            else:
-                return self.reply(404, {"error": "not found"})
-
-            self.reply(200 if ok else 400,
-                       {"ok": True} if ok else {"error": result})
-
-    return Handler
+    ok, result = console.call(*call)
+    return (200, {"ok": True}) if ok else (400, {"error": result})
 
 
 def main(args=None):
-    parser = argparse.ArgumentParser(description="Robot console")
-    parser.add_argument("--port", type=int, default=8767)
-    parser.add_argument("--no-browser", action="store_true",
-                        help="do not open a browser window")
-    # ros2 run passes --ros-args on, which rclpy takes.
-    options, _ = parser.parse_known_args(args)
-
-    rclpy.init(args=args)
-    console = RobotConsole()
-
-    server = ThreadingHTTPServer(("127.0.0.1", options.port),
-                                 handler(console))
-    server.daemon_threads = True
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    url = f"http://localhost:{options.port}/"
-    console.get_logger().info(f"Robot console on {url}. Ctrl-C to stop.")
-
-    if not options.no_browser:
-        threading.Timer(0.5, webbrowser.open, [url]).start()
-
-    try:
-        rclpy.spin(console)
-    except (KeyboardInterrupt, ExternalShutdownException):
-        pass
-    finally:
-        server.shutdown()
-        if rclpy.ok():
-            # The firmware's 750 ms timeout stops them otherwise.
-            console.stop_all()
-        console.destroy_node()
-        rclpy.try_shutdown()
+    from robogame_sim import robogame_app
+    robogame_app.main(args, tab="console")
 
 
 if __name__ == "__main__":

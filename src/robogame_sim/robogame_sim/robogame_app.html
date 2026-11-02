@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboGame</title>
+<style>
+  /* The tabs' colours, as robot_console.html has them. */
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --ink: #1d2433;
+    --muted: #5d6677;
+    --line: #d9dde4;
+    --accent: #2f5fb4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d;
+      --panel: #1c2028;
+      --ink: #e6e9ef;
+      --muted: #9aa3b2;
+      --line: #2e3440;
+      --accent: #6d97e6;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  nav {
+    display: flex; align-items: stretch; gap: 4px;
+    padding: 0 12px; background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  nav strong { align-self: center; margin-right: 12px; }
+  nav a {
+    padding: 8px 12px; color: var(--muted); text-decoration: none;
+    border-bottom: 2px solid transparent;
+  }
+  nav a:hover { color: var(--ink); }
+  nav a[aria-current="page"] {
+    color: var(--ink); border-bottom-color: var(--accent);
+  }
+  iframe { flex: 1; width: 100%; border: 0; }
+  iframe[hidden] { display: none; }
+</style>
+</head>
+<body>
+<nav>
+  <strong>RoboGame</strong>
+  <a href="#editor" data-tab="editor">Arena editor</a>
+  <a href="#console" data-tab="console">Robot console</a>
+</nav>
+<!-- Each tab is its own page, loaded once and kept, so the editor keeps
+     unsaved edits and the console keeps polling while the other shows. -->
+<iframe id="editor" title="Arena editor"></iframe>
+<iframe id="console" title="Robot console"></iframe>
+<script>
+const frames = {
+  editor: document.getElementById("editor"),
+  console: document.getElementById("console"),
+};
+
+// #editor, #editor/NAME (opens that layout) or #console.
+function show() {
+  const [asked, layout] = decodeURIComponent(location.hash.slice(1))
+    .split("/");
+  const tab = asked in frames ? asked : "editor";
+
+  const frame = frames[tab];
+  if (!frame.src) {
+    frame.src = tab === "editor" && layout
+      ? `/editor#${encodeURIComponent(layout)}` : `/${tab}`;
+  } else if (tab === "editor" && layout) {
+    // The editor opens the layout its hash names when it loads.
+    frame.contentWindow.location.replace(
+      `/editor#${encodeURIComponent(layout)}`);
+    frame.contentWindow.location.reload();
+  }
+
+  for (const [name, other] of Object.entries(frames)) {
+    other.hidden = name !== tab;
+  }
+  for (const link of document.querySelectorAll("nav a")) {
+    link.toggleAttribute("aria-current", link.dataset.tab === tab);
+    if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
+  }
+  document.title = `${tab === "editor" ? "Arena editor" : "Robot console"}`
+    + " · RoboGame";
+  frame.focus();
+}
+
+window.addEventListener("hashchange", show);
+show();
+</script>
+</body>
+</html>
