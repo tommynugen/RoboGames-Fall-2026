@@ -179,6 +179,16 @@
           font-size: 13px; }
   .help li { margin: 2px 0; }
 
+  .parts { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+  .parts li { display: flex; align-items: center; gap: 6px;
+              margin-bottom: 6px; }
+  .parts li span { flex: 1; overflow-wrap: anywhere; }
+  .parts li small { color: var(--muted); }
+  .parts button { padding: 2px 8px; font-size: 12px; }
+  #archive-box { margin-top: 8px; font-size: 13px; }
+  #archive-box summary { cursor: pointer; color: var(--muted); }
+  #archive-box ul { margin-top: 8px; }
+
   #problems { list-style: none; margin: 0; padding: 0; }
   #problems li {
     padding: 7px 9px; border-radius: 6px; background: var(--bad-soft);
@@ -289,6 +299,18 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
           module's top. Right-drag turns the view, middle-drag moves it
           and the wheel zooms.</li>
       </ul>
+    </div>
+
+    <div class="panel">
+      <h2>Parts</h2>
+      <ul class="parts" id="parts"></ul>
+      <details id="archive-box">
+        <summary>Archive <span id="archive-count"></span></summary>
+        <ul class="parts" id="archive"></ul>
+        <p class="note">Deleted parts are kept here, in parts/archive next
+          to the layouts. Layouts that use one open again once it is
+          restored.</p>
+      </details>
     </div>
 
     <div class="panel">
@@ -1287,6 +1309,7 @@ async function addPart(file, point) {
         headers: { "Content-Type": "application/octet-stream" } });
     info = result.modules;
     buildTools();
+    buildParts();
     setTool(name);
     // The part may have changed size, so drop any that no longer fit.
     if (!fits(modules)) modules = modules.filter(m => m.type !== name);
@@ -1303,6 +1326,133 @@ async function addPart(file, point) {
   }
 }
 
+// -- renaming, deleting and restoring parts ----------------------------------
+
+let archive = [];
+
+function button(text, title, onClick) {
+  const b = document.createElement("button");
+  b.textContent = text;
+  b.title = title;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+// The dropped parts, each with Rename and Delete, and the archive's
+// parts, each with Restore.
+function buildParts() {
+  const list = document.getElementById("parts");
+  list.replaceChildren();
+  const parts = Object.keys(info.types).filter(isBlock).sort();
+  if (!parts.length) {
+    const li = document.createElement("li");
+    li.className = "note";
+    li.textContent = "No STL parts yet: drag one onto the page.";
+    list.append(li);
+  }
+  for (const type of parts) {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = type;
+    li.append(name,
+      button("Rename", `Rename ${type}, in the saved layouts too`,
+             () => renamePart(type)),
+      button("Delete", `Move ${type} to the archive`,
+             () => deletePart(type)));
+    list.append(li);
+  }
+
+  const shelf = document.getElementById("archive");
+  shelf.replaceChildren();
+  document.getElementById("archive-count").textContent =
+    archive.length ? `(${archive.length})` : "(empty)";
+  for (const part of archive) {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    const when = document.createElement("small");
+    name.textContent = part.name + " ";
+    when.textContent = new Date(part.deleted * 1000).toLocaleString();
+    name.append(when);
+    li.append(name, button("Restore", `Bring ${part.name} back as a part`,
+                           () => restorePart(part.name, part.part)));
+    shelf.append(li);
+  }
+}
+
+// After a part changes on the server: the new modules and archive, and
+// the board's modules of type OLD as NEW, or taken off if NEW is null.
+function partsChanged(result, old, now) {
+  info = result.modules;
+  archive = result.archive;
+  if (old && modules.some(m => m.type === old)) {
+    modules = now ? modules.map(m => m.type === old ? { ...m, type: now } : m)
+                  : settle(modules.filter(m => m.type !== old));
+    // The board's history may have the old name in it.
+    history = [];
+  }
+  if (tool === old) tool = now || "platform";
+  buildTools();
+  buildParts();
+  changed();
+}
+
+async function partAction(path, body) {
+  return api(path, { method: "POST", body: JSON.stringify(body || {}) });
+}
+
+async function renamePart(type) {
+  const name = prompt(`Rename ${type} to (letters, digits, - and _):`, type);
+  if (!name || name === type) return;
+  try {
+    const result = await partAction(
+      `/api/parts/${encodeURIComponent(type)}/rename`, { name });
+    partsChanged(result, type, name);
+    const also = result.layouts.length
+      ? `, and in ${result.layouts.join(", ")}` : "";
+    updateStatus(`Renamed ${type} to ${name}${also}`, "saved");
+  } catch (error) {
+    updateStatus(`Could not rename ${type}: ${error.message}`, "dirty");
+  }
+}
+
+async function deletePart(type) {
+  if (!confirm(`Move ${type} to the archive? It can be restored from ` +
+               "there. Layouts that use it will not open until it is.")) {
+    return;
+  }
+  try {
+    const result = await partAction(
+      `/api/parts/${encodeURIComponent(type)}/delete`);
+    partsChanged(result, type, null);
+    const used = result.layouts.length
+      ? ` ${result.layouts.join(", ")} use it, and open again once it is ` +
+        "restored." : "";
+    updateStatus(`Moved ${type} to the archive as ${result.archived}.` +
+                 used, used ? "dirty" : "saved");
+  } catch (error) {
+    updateStatus(`Could not delete ${type}: ${error.message}`, "dirty");
+  }
+}
+
+async function restorePart(archived, part) {
+  // Restored as its own name, unless that is taken by a part now.
+  let name = part;
+  if (info.types[name]) {
+    name = prompt(`There is a ${name} already. Restore it as:`,
+                  `${name}_2`);
+    if (!name) return;
+  }
+  try {
+    const result = await partAction(
+      `/api/archive/${encodeURIComponent(archived)}/restore`, { name });
+    partsChanged(result);
+    updateStatus(`Restored ${result.name}`, "saved");
+  } catch (error) {
+    updateStatus(`Could not restore ${archived}: ${error.message}`,
+                 "dirty");
+  }
+}
+
 (async function start() {
   try {
     info = await api("/api/modules");
@@ -1311,7 +1461,11 @@ async function addPart(file, point) {
     updateStatus(`No module sizes from the server: ${error.message}`,
                  "dirty");
   }
+  try {
+    archive = (await api("/api/archive")).archive;
+  } catch (error) { /* an older server, or none: no archive shown */ }
   buildTools();
+  buildParts();
   render();
   // three.js comes from unpkg.com, so the 3D view needs the internet once;
   // the top view works without it.

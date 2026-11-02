@@ -298,6 +298,127 @@ def add_part(name, data, units="auto", up="z", folder=None):
             "size": [float(v) for v in size]}
 
 
+# -- renaming, deleting and restoring parts --------------------------------
+
+# A part in the archive: its name, and .2, .3... for a second, third...
+ARCHIVED = re.compile(r"^([A-Za-z0-9_-]{1,40})(?:\.\d+)?$")
+
+
+def archive_dir():
+    """Where deleted parts go, so they can be brought back."""
+    return os.path.join(part_dirs()[0], "archive")
+
+
+def dropped_part(kind):
+    """The path of a dropped part, or ValueError for a CAD module or a
+    name that is not a part."""
+    refresh_parts()
+    if kind in BUILT_IN:
+        raise ValueError(f"{kind} is one of the CAD's modules, which cannot "
+                         f"be renamed or deleted")
+    if kind not in PARTS:
+        raise ValueError(f"no part {kind!r}")
+    return PARTS[kind].mesh
+
+
+def free_name(name):
+    """ValueError unless NAME can be a new part."""
+    if not NAME.match(name or ""):
+        raise ValueError("names are letters, digits, - and _ only")
+    refresh_parts()
+    if name in PARTS:
+        raise ValueError(f"there is a {name} already, pick another name")
+
+
+def layouts_using(kind):
+    """The saved layouts with a module of type KIND, by name."""
+    names = []
+    for name in list_layouts():
+        try:
+            with open(find_layout(name)) as file:
+                data = json.load(file)
+        except (OSError, ValueError):
+            continue
+        if any(m.get("type") == kind for m in data.get("modules", [])
+               if isinstance(m, dict)):
+            names.append(name)
+    return names
+
+
+def rename_part(kind, name):
+    """Rename a dropped part, and its modules in the layouts saved in the
+    first layout folder. Returns those layouts' names."""
+    path = dropped_part(kind)
+    free_name(name)
+    os.rename(path, os.path.join(os.path.dirname(path), f"{name}.stl"))
+    refresh_parts()
+
+    changed = []
+    folder = layout_dirs()[0]
+    for layout in layouts_using(kind):
+        file = os.path.join(folder, f"{layout}.json")
+        if not os.path.isfile(file):
+            continue
+        with open(file) as stream:
+            data = json.load(stream)
+        for m in data.get("modules", []):
+            if m.get("type") == kind:
+                m["type"] = name
+        with open(file, "w") as stream:
+            stream.write(dumps({"size": data.get("size", SIZE),
+                                "modules": data.get("modules", [])}))
+        changed.append(layout)
+    return changed
+
+
+def archive_part(kind):
+    """Move a dropped part to the archive. Layouts that use it are left
+    as they are, and open again once it is restored. Returns its name in
+    the archive, which has .2, .3... added if that name is taken."""
+    path = dropped_part(kind)
+    os.makedirs(archive_dir(), exist_ok=True)
+    name, n = kind, 1
+    while os.path.exists(os.path.join(archive_dir(), f"{name}.stl")):
+        n += 1
+        name = f"{kind}.{n}"
+    target = os.path.join(archive_dir(), f"{name}.stl")
+    os.rename(path, target)
+    # When it was deleted, for the archive's list.
+    os.utime(target)
+    refresh_parts()
+    return name
+
+
+def archived_parts():
+    """The archive, newest first: its name there, the part's own name,
+    when it was deleted (seconds since 1970) and size in bytes."""
+    folder = archive_dir()
+    if not os.path.isdir(folder):
+        return []
+    parts = []
+    for file in os.listdir(folder):
+        match = ARCHIVED.match(file[:-4])
+        if file.lower().endswith(".stl") and match:
+            stat = os.stat(os.path.join(folder, file))
+            parts.append({"name": file[:-4], "part": match[1],
+                          "deleted": stat.st_mtime, "bytes": stat.st_size})
+    return sorted(parts, key=lambda p: -p["deleted"])
+
+
+def restore_part(archived, name=None):
+    """Bring a part back from the archive, as NAME or the name it had."""
+    match = ARCHIVED.match(archived or "")
+    path = os.path.join(archive_dir(), f"{archived}.stl")
+    if not match or not os.path.isfile(path):
+        raise ValueError(f"no {archived} in the archive")
+    name = name or match[1]
+    free_name(name)
+    os.makedirs(part_dirs()[0], exist_ok=True)
+    os.rename(path, os.path.join(part_dirs()[0], f"{name}.stl"))
+    refresh_parts()
+    return name
+
+
 def write_stl(path, faces, title=""):
     """A binary STL of n x 3 x 3 triangles."""
     a, b, c = faces[:, 0], faces[:, 1], faces[:, 2]
