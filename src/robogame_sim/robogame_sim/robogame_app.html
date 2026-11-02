@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RoboGame</title>
+<title>RoboGame Gamemaster</title>
 <style>
   /* The tabs' colours, as robot_console.html has them. */
   :root {
@@ -51,7 +51,7 @@
 </head>
 <body>
 <nav>
-  <strong>RoboGame</strong>
+  <strong>RoboGame Gamemaster</strong>
   <a href="#editor" data-tab="editor">Arena editor</a>
   <a href="#console" data-tab="console">Robot console</a>
 </nav>
@@ -90,7 +90,7 @@ function show() {
     if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
   }
   document.title = `${tab === "editor" ? "Arena editor" : "Robot console"}`
-    + " · RoboGame";
+    + " · RoboGame Gamemaster";
   frame.focus();
 }
 

@@ -453,17 +453,18 @@ A page for every robot in the arena: which controller drives which
 robot, which robots drive themselves, and where those go.
 
 ```
-ros2 run robogame_sim robogame_app
+ros2 run robogame_sim robogame_gamemaster
 ```
 
-The console is the Robot console tab of the RoboGame app, which has the
+The console is the Robot console tab of the RoboGame Gamemaster, which has the
 arena editor (see Arena layouts) in its other tab. It opens
 http://localhost:8766 in the browser (only this computer can reach it;
 `--port`, `--no-browser` and `--tab editor|console` change that);
 `#console` and `#editor` in the address pick the tab, and `#editor/NAME`
-opens a saved layout in the editor. `ros2 run robogame_sim robot_console`
-and `arena_editor` still work: they start the same app on their tab, or,
-if it is already running, open it there. Both tabs stay loaded, so unsaved
+opens a saved layout in the editor. `ros2 run robogame_sim robot_console`,
+`arena_editor` and `robogame_app` (its old name) still work: they
+start the same app on their tab, or, if it is already running, open it
+there. Both tabs stay loaded, so unsaved
 edits are kept while you look at the console. The console's Edit link,
 beside the Arena list, opens the arena in use in the editor, and a layout
 saved there is the one the console uses next, unless a sim publishes its
@@ -599,10 +600,10 @@ high.
 Map how they are set up on the table in the layout editor:
 
 ```
-ros2 run robogame_sim robogame_app
+ros2 run robogame_sim robogame_gamemaster
 ```
 
-It opens the RoboGame app on http://localhost:8766 in the browser, on its
+It opens the RoboGame Gamemaster on http://localhost:8766 in the browser, on its
 Arena editor tab (see Robot console for the app itself). Pick a module (keys 1
 to 5) and click or drag on the grid, which is seen from above with +x to
 the right and +y up, each square drawn with its tile's four peg holes.

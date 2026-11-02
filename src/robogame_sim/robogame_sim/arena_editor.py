@@ -1,8 +1,8 @@
 """Browser editor for arena layouts.
 
-    ros2 run robogame_sim robogame_app
+    ros2 run robogame_sim robogame_gamemaster
 
-The Arena editor tab of the RoboGame app (robogame_app.py), at
+The Arena editor tab of the RoboGame Gamemaster (robogame_app.py), at
 http://localhost:8766/#editor. This file has the editor's page API, which
 the app serves; arena_editor.html is the page. `ros2 run robogame_sim
 arena_editor` opens the app on this tab.

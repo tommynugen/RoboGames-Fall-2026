@@ -1,7 +1,7 @@
-"""The RoboGame app: the arena editor and the robot console on one page.
+"""The RoboGame Gamemaster: the arena editor and the robot console on one page.
 
-    ros2 run robogame_sim robogame_app
-    ros2 run robogame_sim robogame_app --port 8768 --no-browser --tab console
+    ros2 run robogame_sim robogame_gamemaster
+    ros2 run robogame_sim robogame_gamemaster --port 8768 --tab console
 
 Serves http://localhost:8766 with two tabs:
 
@@ -54,7 +54,7 @@ def handler(console=None):
         console_page = robot_console.PAGE
 
     class Handler(BaseHTTPRequestHandler):
-        server_version = "robogame_app"
+        server_version = "robogame_gamemaster"
 
         def log_message(self, format, *args):
             pass
@@ -144,7 +144,7 @@ def start_console(args):
 
 
 def main(args=None, tab="editor"):
-    parser = argparse.ArgumentParser(description="RoboGame app")
+    parser = argparse.ArgumentParser(description="RoboGame Gamemaster")
     parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--no-browser", action="store_true",
                         help="do not open a browser window")
@@ -159,7 +159,7 @@ def main(args=None, tab="editor"):
     except OSError:
         # Already running, as when arena_editor and robot_console are both
         # started: one app serves both, so show it and stop.
-        print(f"The RoboGame app is already on {url}.", flush=True)
+        print(f"The RoboGame Gamemaster is already on {url}.", flush=True)
         if not options.no_browser:
             webbrowser.open(url)
         return
@@ -168,7 +168,7 @@ def main(args=None, tab="editor"):
     server.RequestHandlerClass = handler(console)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"RoboGame app on {url}, saving layouts to "
+    print(f"RoboGame Gamemaster on {url}, saving layouts to "
           f"{arena_editor.arena_layout.layout_dirs()[0]}. Ctrl-C to stop.",
           flush=True)
 

@@ -42,6 +42,7 @@ setup(
             'controller_robots = robogame_sim.controller_robots:main',
             'active_arena = robogame_sim.active_arena:main',
             'robot_console = robogame_sim.robot_console:main',
+            'robogame_gamemaster = robogame_sim.robogame_app:main',
             'robogame_app = robogame_sim.robogame_app:main',
         ],
     },
