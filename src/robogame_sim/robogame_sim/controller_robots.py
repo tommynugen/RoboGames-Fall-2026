@@ -20,7 +20,14 @@ or takes it off every robot, with a JSON message on
 /controller_robots/assign: {"address": "AA:BB:...", "robot": 2}, or
 "robot": null. A controller moved onto a robot another one drives swaps
 robots with it. Every controller and the robot it drives are published,
-latched, on /controller_robots/state.
+latched, on /controller_robots/state, with the robots it knows of.
+
+The console also adds and removes robots, on /controller_robots/robots:
+{"add": true} spawns a new one, numbered on from the highest there has
+been, and {"remove": 2} takes robot 2 out of the world, its controller
+left on no robot. With spawn_for_controllers false, as sim.launch.py runs
+it when no controller is asked for, a controller that connects drives no
+robot until it is given one in the console.
 
 For the sim only. On the real arena robot_control.launch.py binds each
 controller to the robot controllers.yaml gives it, and this would bind them
@@ -102,6 +109,7 @@ class ControllerRobots(Node):
         self.declare_parameter("deadzone", 0.05)
         self.declare_parameter("autorepeat_rate", 20.0)
         self.declare_parameter("scan_period", 1.0)
+        self.declare_parameter("spawn_for_controllers", True)
 
         def param(name):
             return self.get_parameter(name).value
@@ -112,6 +120,7 @@ class ControllerRobots(Node):
         self.fpv = param("fpv")
         self.deadzone = param("deadzone")
         self.repeat = 1.0 / param("autorepeat_rate")
+        self.spawn_for_controllers = param("spawn_for_controllers")
 
         self.ground = self.load_ground(param("layout"))
         self.bindings = {}
@@ -119,11 +128,18 @@ class ControllerRobots(Node):
         self.processes = []
         self.poses = {}
         self.robots = set()
+        # Robot numbers used so far, removed ones too: a robot the launch
+        # started still has its bridge, so its number is not given again.
+        self.used = set()
+        self.robot_processes = {}
+        self.odometry = {}
 
         self.state_publisher = self.create_publisher(
             String, "/controller_robots/state", LATCHED)
         self.create_subscription(
             String, "/controller_robots/assign", self.on_assign, 10)
+        self.create_subscription(
+            String, "/controller_robots/robots", self.on_robots, 10)
 
         for robot_id in param("robots"):
             self.track(robot_id)
@@ -133,7 +149,9 @@ class ControllerRobots(Node):
 
         self.get_logger().info(
             f"The first controller drives robot {self.first_robot}, and "
-            f"each one connected after it gets a robot of its own")
+            f"each one connected after it gets a robot of its own"
+            if self.spawn_for_controllers else
+            "Controllers drive no robot until given one in the console")
         self.publish_state()
         self.scan()
 
@@ -148,12 +166,13 @@ class ControllerRobots(Node):
     def track(self, robot_id):
         """Follows where a robot is, so new ones spawn away from it."""
         self.robots.add(robot_id)
+        self.used.add(robot_id)
 
         def remember(message, robot_id=robot_id):
             p = message.pose.pose.position
             self.poses[robot_id] = (p.x, p.y)
 
-        self.create_subscription(
+        self.odometry[robot_id] = self.create_subscription(
             Odometry, f"/model/robot_{robot_id}/odometry", remember, 10)
 
     # -- controllers -----------------------------------------------------
@@ -225,8 +244,14 @@ class ControllerRobots(Node):
                 f"the virtual pad {stand_in.address}")
             return binding
 
+        if not self.spawn_for_controllers:
+            binding = Binding(None, address, virtual, name)
+            self.bindings[address] = binding
+            self.publish_state()
+            return binding
+
         robot_id = (self.first_robot if not self.bindings
-                    else max(self.robots) + 1)
+                    else self.next_robot())
         binding = Binding(robot_id, address, virtual, name)
         self.bindings[address] = binding
         binding.publisher = self.joy_publisher(robot_id)
@@ -337,6 +362,59 @@ class ControllerRobots(Node):
 
         self.publish_state()
 
+    def on_robots(self, message):
+        try:
+            asked = json.loads(message.data)
+            remove = asked.get("remove")
+            remove = None if remove is None else int(remove)
+        except (ValueError, TypeError, AttributeError) as error:
+            self.get_logger().warning(
+                f"Bad robots message {message.data!r}: {error}")
+            return
+
+        if asked.get("add"):
+            self.spawn(self.next_robot())
+        if remove is not None:
+            self.remove(remove)
+        self.publish_state()
+
+    def next_robot(self):
+        return max(self.used | {self.first_robot - 1}) + 1
+
+    def remove(self, robot_id):
+        if robot_id not in self.robots:
+            self.get_logger().warning(f"No robot {robot_id} to remove")
+            return
+
+        for binding in self.bindings.values():
+            if binding.robot_id == robot_id:
+                self.stop(binding.teleop)
+                binding.teleop = None
+                if binding.publisher is not None:
+                    self.destroy_publisher(binding.publisher)
+                binding.publisher = None
+                binding.robot_id = None
+
+        robot = f"robot_{robot_id}"
+        try:
+            subprocess.run(
+                ["gz", "service", "-s", f"/world/{self.world}/remove",
+                 "--reqtype", "gz.msgs.Entity",
+                 "--reptype", "gz.msgs.Boolean", "--timeout", "2000",
+                 "--req", f'name: "{robot}" type: MODEL'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=5, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            self.get_logger().warning(f"Cannot remove {robot}: {error}")
+        # Its firmware and bridge, if this node started them. A robot the
+        # launch started keeps its, idle, until the launch stops.
+        for process in self.robot_processes.pop(robot_id, []):
+            self.stop(process)
+        self.destroy_subscription(self.odometry.pop(robot_id))
+        self.robots.discard(robot_id)
+        self.poses.pop(robot_id, None)
+        self.get_logger().info(f"Removed {robot}")
+
     def publish_state(self):
         controllers = [
             {"address": b.address, "name": b.name, "robot": b.robot_id,
@@ -361,8 +439,7 @@ class ControllerRobots(Node):
         self.track(robot_id)
         # Until its odometry comes, so the next one is not put on it.
         self.poses[robot_id] = (x, y)
-        self.get_logger().info(
-            f"Spawning {robot} at {x:.2f}, {y:.2f} for the new controller")
+        self.get_logger().info(f"Spawning {robot} at {x:.2f}, {y:.2f}")
 
         self.start(
             "spawn", robot_id, executable("ros_gz_sim", "create"),
@@ -387,6 +464,8 @@ class ControllerRobots(Node):
     def start(self, what, robot_id, *command):
         process = subprocess.Popen(command, preexec_fn=die_with_parent)
         self.processes.append(process)
+        if what in ("sim_firmware", "bridge"):
+            self.robot_processes.setdefault(robot_id, []).append(process)
         self.get_logger().debug(
             f"Started {what} for robot {robot_id}, pid {process.pid}")
         return process

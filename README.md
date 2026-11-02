@@ -493,9 +493,21 @@ Controllers: each one `controller_robots` has is listed with the robot it
 drives, and picking another robot moves it there, its racing controls
 and wheel steering with it. A controller moved onto a robot another one
 drives swaps robots with it; No robot takes it off every robot. This needs
-`controller_robots`, so in the sim launch with `controller:=hotplug`. On
-the real arena `robot_control.launch.py` binds controllers from
-`controllers.yaml`, and the page says no `controller_robots` is running.
+`controller_robots`, which the sim launch starts unless `controller:=joy`
+or `classic` is given. With `controller:=none`, the default, it lists every
+controller connected to the computer the sim runs on and gives none of
+them a robot until one is picked here; with `controller:=hotplug` each new
+controller gets a robot of its own as well. On the real arena
+`robot_control.launch.py` binds controllers from `controllers.yaml`, and
+the page says no `controller_robots` is running.
+
+Robots: with `controller_robots` running, Add robot under the robot list
+spawns a new one on open ground, with its own firmware and bridge,
+numbered on from the highest there has been, and Remove beside a robot's
+name takes it out of the world (it asks first). A removed robot's
+controller is left on no robot, and an autonomous one is made manual
+first. A robot the launch started keeps its firmware and bridge, idle,
+until the sim stops, so its number is not used again.
 
 Pick a robot in the list, or with keys 1 to 9, and make it Autonomous.
 The console then drives it on `/robot_N/cmd_vel` with `Chaser`, the
@@ -552,6 +564,13 @@ were not run against robots), then the app without ROS in headless
 Chromium: `#editor/test4` opened test4 in the editor tab, the Robot
 console tab hid the editor and said ROS is not sourced, and
 `#editor/default` then opened default in the editor.
+
+Checked on 2026-11-02, with robots added and removed from the console:
+the tests (151 pass, 2 skipped; `test_robot_console.py`, which now also
+removes a robot and adds one back through the page's API, was skipped as
+ROS was not installed where this was checked, and neither was Gazebo, so
+spawning and removing in a real sim is not yet checked). The page's
+script was checked to parse.
 
 ## Arena layouts
 

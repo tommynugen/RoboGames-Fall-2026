@@ -179,6 +179,7 @@
 
   .controller { display: flex; flex-direction: column; gap: 4px;
                 padding: 8px 0; border-bottom: 1px solid var(--line); }
+  #add-robot { margin-top: 8px; width: 100%; }
   .controller:last-child { border-bottom: 0; }
   .controller select { width: 100%; }
   .controller .addr { color: var(--muted);
@@ -247,6 +248,8 @@
     <section class="panel">
       <h2>Robots</h2>
       <div id="robots"><p class="empty">Looking for robots…</p></div>
+      <button id="add-robot" hidden
+              title="Spawn a new robot on open ground">Add robot</button>
       <p class="note">Robots are found by their
         <code>/model/robot_N/odometry</code>. Keys <kbd>1</kbd> to
         <kbd>9</kbd> pick one.</p>
@@ -369,6 +372,8 @@ async function send(path, body) {
 }
 
 const changeRobot = (id, body) => send(`/api/robots/${id}`, body);
+document.getElementById("add-robot").addEventListener(
+  "click", () => send("/api/robots/add", {}));
 
 // -- the board ---------------------------------------------------------------
 
@@ -677,6 +682,7 @@ function robotSummary(robot) {
 function renderRobots() {
   const box = document.getElementById("robots");
   const robots = state.robots;
+  document.getElementById("add-robot").hidden = !state.manager;
   const signature = JSON.stringify([selected, robots.map(r => [
     r.id, r.colour, r.fresh, r.autonomous, robotSummary(r)])]);
   if (built.robots === signature) return;
@@ -710,9 +716,10 @@ function renderControllers() {
 
   if (!pads) {
     box.replaceChildren(h("p", { class: "empty" },
-      "No controller_robots running. In the sim, launch with ",
-      h("code", {}, "controller:=hotplug"),
-      " to bind controllers to robots here."));
+      "No controller_robots running, so controllers cannot be bound to " +
+      "robots here. The sim launch starts it unless ",
+      h("code", {}, "controller:=joy"), " or ",
+      h("code", {}, "classic"), " is given."));
     return;
   }
   if (!pads.length) {
@@ -765,7 +772,7 @@ function renderDetail() {
   const others = state.robots.filter(r => r.id !== robot.id).map(r => r.id);
   const signature = JSON.stringify([robot.id, robot.autonomous,
     pilot && pilot.mode, pilot && pilot.chase_target, others,
-    robot.drivers, robot.controller]);
+    robot.drivers, robot.controller, state.manager]);
   if (built.detail !== signature) {
     built.detail = signature;
     built.queue = null;
@@ -790,7 +797,16 @@ function buildDetail(robot) {
   const parts = [
     h("div", { class: "title" },
       h("span", { class: "swatch", style: `background:${robot.colour}` }),
-      h("h3", {}, `Robot ${robot.id}`)),
+      h("h3", {}, `Robot ${robot.id}`),
+      state.manager ? h("button", {
+        class: "danger", style: "margin-left:auto",
+        title: "Take this robot out of the world",
+        onclick: () => {
+          if (confirm(`Remove robot ${robot.id} from the world?`)) {
+            send(`/api/robots/${robot.id}/remove`, {});
+          }
+        },
+      }, "Remove") : null),
     h("div", { class: "pose", id: "pose" }),
     h("div", { class: "switch", role: "group", "aria-label": "Driven by" },
       h("button", { "aria-pressed": String(!robot.autonomous),
