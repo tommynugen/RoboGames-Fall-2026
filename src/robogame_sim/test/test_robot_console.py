@@ -44,6 +44,8 @@ class FakeArena(Node):
         self.twists = []
         self.arm = []
         self.assigned = []
+        self.robot_asks = []
+        self.in_world = [1, 2]
         self.controllers = [{"address": "AA:BB", "name": "DualSense",
                              "robot": 1, "connected": True,
                              "virtual": False}]
@@ -67,16 +69,28 @@ class FakeArena(Node):
                                  lambda m: self.arm.append(m.data), 10)
         self.create_subscription(String, "/controller_robots/assign",
                                  self.on_assign, 10)
+        self.create_subscription(String, "/controller_robots/robots",
+                                 self.on_robots, 10)
         self.create_timer(0.05, self.tick)
 
     def publish_controllers(self):
         self.state.publish(String(data=json.dumps(
-            {"controllers": self.controllers, "robots": [1, 2]})))
+            {"controllers": self.controllers, "robots": self.in_world})))
 
     def on_assign(self, message):
         asked = json.loads(message.data)
         self.assigned.append(asked)
         self.controllers[0]["robot"] = asked["robot"]
+        self.publish_controllers()
+
+    def on_robots(self, message):
+        # As controller_robots does, but robot 2 only goes and comes back.
+        asked = json.loads(message.data)
+        self.robot_asks.append(asked)
+        if asked.get("remove") == 2:
+            self.in_world = [1]
+        if asked.get("add"):
+            self.in_world = [1, 2]
         self.publish_controllers()
 
     def tick(self):
@@ -248,6 +262,22 @@ def test_an_arena_can_be_picked_over_the_sims(console):
     assert call(url + "/api/arena", "POST", {"layout": None})[0] == 200
     wait_for(lambda: call(url + "/api/state")[1]["arena"]["source"]
              == "gazebo", 30.0)
+
+
+def test_robots_can_be_removed_and_added(console):
+    url, _, fake = console
+    assert call(url + "/api/state")[1]["manager"]
+    assert call(url + "/api/robots/9/remove", "POST", {})[0] == 400
+
+    # Its odometry topic stays, as a launch robot's bridge does, but the
+    # console goes by what controller_robots has in the world.
+    assert call(url + "/api/robots/2/remove", "POST", {})[0] == 200
+    wait_for(lambda: robot_state(url, 2) is None)
+    assert fake.robot_asks[-1] == {"remove": 2}
+
+    assert call(url + "/api/robots/add", "POST", {})[0] == 200
+    wait_for(lambda: robot_state(url, 2))
+    assert fake.robot_asks[-1] == {"add": True}
 
 
 def test_newest_layout_is_the_one_saved_last(tmp_path, monkeypatch):

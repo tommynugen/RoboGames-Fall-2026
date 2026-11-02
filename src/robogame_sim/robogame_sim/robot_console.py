@@ -59,6 +59,7 @@ PAGE = os.path.join(HERE, "robot_console.html")
 ODOMETRY = re.compile(r"^/model/robot_(\d+)/odometry$")
 CONTROLLER_STATE = "/controller_robots/state"
 CONTROLLER_ASSIGN = "/controller_robots/assign"
+CONTROLLER_ROBOTS = "/controller_robots/robots"
 
 # A spot clicked must leave the robot's centre this far inside the floor.
 EDGE_MARGIN = 0.04
@@ -179,6 +180,8 @@ class RobotConsole(Node):
         self.robots = {}
         self.controllers = None
         self.published_arena = None
+        # The robots controller_robots has in the world, when it runs.
+        self.managed = None
         self.override = p["layout"] or None
 
         # The arena in use, and the one loading.
@@ -196,6 +199,8 @@ class RobotConsole(Node):
 
         self.assign_publisher = self.create_publisher(
             String, CONTROLLER_ASSIGN, 10)
+        self.robots_publisher = self.create_publisher(
+            String, CONTROLLER_ROBOTS, 10)
         self.create_subscription(
             String, CONTROLLER_STATE, self.on_controllers, LATCHED)
         self.create_subscription(
@@ -210,11 +215,18 @@ class RobotConsole(Node):
     def discover(self):
         for topic, _ in self.get_topic_names_and_types():
             match = ODOMETRY.match(topic)
-            if match and int(match.group(1)) not in self.robots:
+            if (match and int(match.group(1)) not in self.robots
+                    and self.is_managed(int(match.group(1)))):
                 self.add_robot(int(match.group(1)))
 
         now = time.monotonic()
         for robot in list(self.robots.values()):
+            if not self.is_managed(robot.id):
+                # Removed: a robot the launch started keeps its bridge, so
+                # its odometry topic stays.
+                self.set_autonomous(robot, False)
+                self.forget(robot)
+                continue
             gone = self.count_publishers(
                 f"/model/robot_{robot.id}/odometry") == 0
             if (gone and robot.autopilot is None
@@ -230,6 +242,7 @@ class RobotConsole(Node):
 
         if self.count_publishers(CONTROLLER_STATE) == 0:
             self.controllers = None
+            self.managed = None
         if self.count_publishers(ARENA_TOPIC) == 0:
             self.published_arena = None
 
@@ -261,6 +274,9 @@ class RobotConsole(Node):
                 JointState, f"/robot_{robot_id}/joint_states", on_joints, 10),
         ]
         self.get_logger().info(f"Found robot {robot_id}")
+
+    def is_managed(self, robot_id):
+        return self.managed is None or robot_id in self.managed
 
     def forget(self, robot):
         for subscription in robot.subscriptions:
@@ -320,7 +336,10 @@ class RobotConsole(Node):
 
     def on_controllers(self, message):
         try:
-            self.controllers = json.loads(message.data)["controllers"]
+            state = json.loads(message.data)
+            self.controllers = state["controllers"]
+            self.managed = (set(state["robots"]) if "robots" in state
+                            else None)
         except (ValueError, KeyError):
             self.get_logger().warning(f"Bad message on {CONTROLLER_STATE}")
 
@@ -496,6 +515,8 @@ class RobotConsole(Node):
             "body": [2 * HALF_LENGTH, 2 * HALF_WIDTH],
             "robots": robots,
             "controllers": self.controllers,
+            # Robots can be added and removed, through controller_robots.
+            "manager": self.controllers is not None,
             "arena": {
                 "name": self.arena and self.arena["name"],
                 "source": self.arena and self.arena["source"],
@@ -576,6 +597,23 @@ class RobotConsole(Node):
             raise KeyError(f"no controller {address}")
         self.assign(address, robot_id)
 
+    def add_robot_to_world(self):
+        self.need_manager()
+        self.robots_publisher.publish(String(data=json.dumps({"add": True})))
+
+    def remove_robot(self, robot_id):
+        self.need_manager()
+        robot = self.robot(int(robot_id))
+        self.set_autonomous(robot, False)
+        self.robots_publisher.publish(String(data=json.dumps(
+            {"remove": robot.id})))
+
+    def need_manager(self):
+        if self.controllers is None:
+            raise ValueError("adding and removing robots needs "
+                             "controller_robots, which the sim launch "
+                             "starts")
+
     def pick_arena(self, name):
         if name is not None and name != "cad":
             arena_layout.find_layout(name)
@@ -606,6 +644,14 @@ def get(console, path):
 
 def post(console, path, read_body):
     """The console's POST routes. read_body gives the request's JSON."""
+    if path == "/api/robots/add":
+        ok, result = console.call(console.add_robot_to_world)
+        return (200, {"ok": True}) if ok else (400, {"error": result})
+    match = re.match(r"^/api/robots/(\d+)/remove$", path)
+    if match:
+        ok, result = console.call(console.remove_robot, int(match.group(1)))
+        return (200, {"ok": True}) if ok else (400, {"error": result})
+
     match = re.match(r"^/api/robots/(\d+)$", path)
     if match:
         call = (console.change_robot, int(match.group(1)))

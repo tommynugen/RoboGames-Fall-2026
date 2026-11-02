@@ -32,6 +32,9 @@ controller connected after that a new robot of its own (controller_robots).
 That is for the sim only: the real arena binds controllers to robots by
 address. Virtual pads, such as Sunshine's for a Moonlight stream, are left
 out while a real controller drives.
+With controller:=none (the default) controller_robots still runs, but a
+controller drives no robot until the robot console gives it one, and the
+console can add and remove robots.
 
 With the window up, every robot's chassis carries an FPV camera on its
 front, unless fpv:=false. Click the Gazebo window's 3D view, then 1 looks
@@ -449,7 +452,10 @@ def launch_setup(context):
                     "motion_device").perform(context),
             }],
         ))
-    elif controller == "hotplug":
+    elif controller in ("hotplug", "none"):
+        # none still lists the controllers here for the robot console to
+        # give robots, and lets it add and remove robots; hotplug also
+        # gives each new controller a robot of its own.
         actions.append(Node(
             package="robogame_sim",
             executable="controller_robots",
@@ -461,6 +467,7 @@ def launch_setup(context):
                 "world": WORLD_NAME,
                 "drive_model": drive_model,
                 "fpv": fpv,
+                "spawn_for_controllers": controller == "hotplug",
             }],
         ))
     elif controller == "classic":
@@ -480,7 +487,7 @@ def launch_setup(context):
                     "joy_device_id").perform(context),
             }.items(),
         ))
-    elif controller != "none":
+    else:
         raise RuntimeError(
             f"controller must be none, joy, hotplug or classic, not "
             f"{controller}")
@@ -549,7 +556,8 @@ def generate_launch_description():
                         "steering), classic with the repo's "
                         "controller_input. hotplug gives it the first "
                         "controller and spawns a robot for each one "
-                        "connected after, sim only"),
+                        "connected after, sim only. none leaves "
+                        "controllers for the robot console to bind"),
         DeclareLaunchArgument(
             "drive", default_value="",
             description="Robot number the controller drives, the first in "
