@@ -453,11 +453,24 @@ A page for every robot in the arena: which controller drives which
 robot, which robots drive themselves, and where those go.
 
 ```
-ros2 run robogame_sim robot_console
+ros2 run robogame_sim robogame_app
 ```
 
-It opens http://localhost:8767 in the browser (only this computer can
-reach it; `--port` and `--no-browser` change that). Start it beside a sim,
+The console is the Robot console tab of the RoboGame app, which has the
+arena editor (see Arena layouts) in its other tab. It opens
+http://localhost:8766 in the browser (only this computer can reach it;
+`--port`, `--no-browser` and `--tab editor|console` change that);
+`#console` and `#editor` in the address pick the tab, and `#editor/NAME`
+opens a saved layout in the editor. `ros2 run robogame_sim robot_console`
+and `arena_editor` still work: they start the same app on their tab, or,
+if it is already running, open it there. Both tabs stay loaded, so unsaved
+edits are kept while you look at the console. The console's Edit link,
+beside the Arena list, opens the arena in use in the editor, and a layout
+saved there is the one the console uses next, unless a sim publishes its
+own. Without ROS sourced the editor still works, and the console tab says
+ROS is needed.
+
+Start it beside a sim,
 or on the real arena: it finds robots by their `/model/robot_N/odometry`,
 which the sim and the arena camera both publish, and leaves a robot off
 the page 10 s after its odometry goes.
@@ -532,6 +545,14 @@ switched the arena to the layout last saved in the editor. The editor,
 which now loads its drawing code from `arena_draw.js` shared with the
 console, was checked in headless Chromium to draw test4 as before.
 
+Checked on 2026-11-02, with the editor and console made one app: the
+tests (129 pass; `test_robot_console.py` skipped, as ROS was not
+installed where this was checked, so the console tab and its Edit link
+were not run against robots), then the app without ROS in headless
+Chromium: `#editor/test4` opened test4 in the editor tab, the Robot
+console tab hid the editor and said ROS is not sourced, and
+`#editor/default` then opened default in the editor.
+
 ## Arena layouts
 
 The arena is a 12 x 12 grid of 4 inch (10.16 cm) floor tiles, 48 inches
@@ -559,11 +580,11 @@ high.
 Map how they are set up on the table in the layout editor:
 
 ```
-ros2 run robogame_sim arena_editor
+ros2 run robogame_sim robogame_app
 ```
 
-It opens http://localhost:8766 in the browser (only this computer can
-reach it; `--port` and `--no-browser` change that). Pick a module (keys 1
+It opens the RoboGame app on http://localhost:8766 in the browser, on its
+Arena editor tab (see Robot console for the app itself). Pick a module (keys 1
 to 5) and click or drag on the grid, which is seen from above with +x to
 the right and +y up, each square drawn with its tile's four peg holes.
 The module goes where the pointer is, to the nearest half square; turn off
@@ -590,7 +611,7 @@ chase_node's planner is more cautious: the robot only turns where it has
 a wall that a robot driven by hand gets over. Name the layout and Save,
 and it is written to
 `src/robogame_sim/layouts/NAME.json`, one module per line so it diffs
-well. `http://localhost:8766/#NAME` opens a saved one directly.
+well. `http://localhost:8766/#editor/NAME` opens a saved one directly.
 
 Layouts made for the old 9 x 9 grid of 5 inch modules still open, with a
 warning; pick 12 x 12 under Grid to grow one about the middle and Save.
