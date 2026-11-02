@@ -125,6 +125,22 @@
   #board { width: 100%; height: auto; display: block; touch-action: none;
            user-select: none; }
   #board { cursor: pointer; }
+  .views { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+  .views[data-view=both] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .views[data-view="2d"] #view3d, .views[data-view="3d"] #board { display: none; }
+  #view3d { position: relative; aspect-ratio: 1 / 1; border-radius: 6px;
+            overflow: hidden; background: var(--bg); touch-action: none; }
+  #view3d canvas { display: block; width: 100%; height: 100%; }
+  #view3d .note3d { position: absolute; inset: auto 8px 6px; margin: 0;
+                    color: var(--muted); font-size: 12px;
+                    pointer-events: none; }
+  .view-row { display: flex; align-items: center; gap: 6px;
+              margin: 0 0 10px; }
+  .view-row button[aria-pressed=true] {
+    border-color: var(--accent); background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .view-row span { color: var(--muted); font-size: 12.5px; }
   .caption { color: var(--muted); font-size: 12.5px; margin: 8px 4px 0; }
   .caption.warn { color: var(--bad); }
 
@@ -207,7 +223,18 @@ middle"></select>
 
 <main>
   <section class="board-wrap">
-    <svg id="board" role="img" aria-label="Arena grid"></svg>
+    <div class="view-row" id="view-row">
+      <button data-view="2d" title="Seen from above">Top</button>
+      <button data-view="3d" title="The arena in 3D, from the CAD meshes">
+        3D</button>
+      <button data-view="both" title="Top and 3D side by side">Both</button>
+      <span><kbd>V</kbd> switches</span>
+    </div>
+    <div class="views" id="views" data-view="both">
+      <svg id="board" role="img" aria-label="Arena grid"></svg>
+      <div id="view3d" aria-label="Arena in 3D"><p class="note3d"
+        id="note3d">Loading the 3D view…</p></div>
+    </div>
     <p class="caption" id="caption"></p>
   </section>
 
@@ -243,6 +270,9 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
           platforms: a ramp, wall, thwomp or another platform, across two
           if they are as high. The corner shows how high the top is.</li>
         <li>Right-click to take the top module off.</li>
+        <li>The 3D view edits the same way: click or drag on a tile or a
+          module's top. Right-drag turns the view, middle-drag moves it
+          and the wheel zooms.</li>
       </ul>
     </div>
 
@@ -274,6 +304,12 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
   </aside>
 </main>
 
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
 <script src="arena_draw.js"></script>
 <script>
 "use strict";
@@ -524,6 +560,7 @@ function render() {
   t.textContent = "row  →  +y";
 
   drawPanel();
+  if (window.arena3d) window.arena3d.update();
 }
 
 // What a click would do: the module it would place, faded, or the one it
@@ -726,44 +763,56 @@ function strokeKey(point, erase) {
                                    : moduleKey(candidate(point));
 }
 
-board.addEventListener("pointerdown", event => {
-  const point = pointFrom(event);
-  if (!point) return;
-  event.preventDefault();
-  const erase = event.button === 2;
+// A stroke and the pointer, the same from the top view and the 3D view,
+// with the pointer in squares like col and row, or null off the grid.
+let strokeErase = false;
+
+function startStroke(point, erase) {
   remember();
   painting = true;
+  strokeErase = erase;
   paintedThisStroke = new Set([strokeKey(point, erase)]);
-  board.setPointerCapture(event.pointerId);
-  board.dataset.erase = erase ? "1" : "";
   if (apply(point, erase, false)) changed(); else history.pop();
-});
+}
 
-board.addEventListener("pointermove", event => {
-  const point = pointFrom(event);
-  const erase = board.dataset.erase === "1";
-  const before = hover && strokeKey(hover, erase);
+function hoverAt(point) {
+  const before = hover && strokeKey(hover, strokeErase);
   hover = point;
 
   if (painting && point) {
-    const k = strokeKey(point, erase);
+    const k = strokeKey(point, strokeErase);
     if (!paintedThisStroke.has(k)) {
       paintedThisStroke.add(k);
-      if (apply(point, erase, true)) {
+      if (apply(point, strokeErase, true)) {
         changed();
         return;
       }
     }
   }
-  if ((point && strokeKey(point, erase)) !== before) render();
-});
+  if ((point && strokeKey(point, strokeErase)) !== before) render();
+}
 
-const endStroke = () => { painting = false; render(); };
+function endStroke() {
+  painting = false;
+  strokeErase = false;
+  render();
+}
+
+function leaveView() {
+  if (!painting) { hover = null; render(); }
+}
+
+board.addEventListener("pointerdown", event => {
+  const point = pointFrom(event);
+  if (!point) return;
+  event.preventDefault();
+  board.setPointerCapture(event.pointerId);
+  startStroke(point, event.button === 2);
+});
+board.addEventListener("pointermove", event => hoverAt(pointFrom(event)));
 board.addEventListener("pointerup", endStroke);
 board.addEventListener("pointercancel", endStroke);
-board.addEventListener("pointerleave", () => {
-  if (!painting) { hover = null; render(); }
-});
+board.addEventListener("pointerleave", leaveView);
 board.addEventListener("contextmenu", event => event.preventDefault());
 
 function setTool(name) {
@@ -867,7 +916,30 @@ document.addEventListener("keydown", event => {
   } else if (event.key.toLowerCase() === "r") rotate();
   else if (event.key.toLowerCase() === "s") toggleStacking();
   else if (event.key.toLowerCase() === "h") toggleHalves();
+  else if (event.key.toLowerCase() === "v") {
+    const order = ["2d", "3d", "both"];
+    setView(order[(order.indexOf(view) + 1) % order.length]);
+  }
 });
+
+// Which views show: the top view, the 3D one or both, remembered here.
+let view = "both";
+try { view = localStorage.getItem("arena-editor-view") || view; } catch {}
+
+function setView(name) {
+  view = name;
+  try { localStorage.setItem("arena-editor-view", name); } catch {}
+  document.getElementById("views").dataset.view = name;
+  for (const b of document.querySelectorAll("#view-row button")) {
+    b.setAttribute("aria-pressed", b.dataset.view === name);
+  }
+  if (window.arena3d) window.arena3d.resize();
+}
+
+for (const b of document.querySelectorAll("#view-row button")) {
+  b.addEventListener("click", () => setView(b.dataset.view));
+}
+setView(view);
 
 // Shift stacks while it is held.
 for (const name of ["keydown", "keyup"]) {
@@ -1050,6 +1122,15 @@ window.addEventListener("beforeunload", event => {
   }
   buildTools();
   render();
+  // three.js comes from unpkg.com, so the 3D view needs the internet once;
+  // the top view works without it.
+  import("./arena_view3d.js").then(({ create }) => {
+    window.arena3d = create(document.getElementById("view3d"));
+    render();
+  }).catch(error => {
+    document.getElementById("note3d").textContent =
+      `No 3D view: three.js did not load from unpkg.com (${error.message}).`;
+  });
   updateCommand();
   try {
     const layouts = await refreshSaved();

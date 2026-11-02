@@ -23,6 +23,9 @@ from robogame_sim import arena_layout
 HERE = os.path.dirname(os.path.realpath(__file__))
 PAGE = os.path.join(HERE, "arena_editor.html")
 PREFIX = "/api/layouts/"
+# The editor's 3D view.
+VIEW3D = os.path.join(HERE, "arena_view3d.js")
+MESHES = "/api/meshes/"
 
 
 def layout_name(path):
@@ -43,6 +46,15 @@ def get(path):
                          "folder": arena_layout.layout_dirs()[0]}
         if path.startswith(PREFIX):
             return 200, arena_layout.load(layout_name(path))
+        if path.startswith(MESHES):
+            # Only the arena's own meshes, by file name, for the 3D view.
+            name = path[len(MESHES):]
+            meshes = {p.mesh for p in arena_layout.PARTS.values()}
+            if name not in meshes | {arena_layout.FLOOR.mesh}:
+                return 404, {"error": "no such mesh"}
+            with open(os.path.join(arena_layout.mesh_dir(), name),
+                      "rb") as mesh:
+                return 200, mesh.read(), "model/stl"
     except FileNotFoundError as error:
         return 404, {"error": str(error)}
     except ValueError as error:

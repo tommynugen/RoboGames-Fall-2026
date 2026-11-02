@@ -230,6 +230,13 @@ def test_editor_serves_saves_and_checks(editor):
     assert call(url + "/api/state")[0] == 404
     status, script = call(url + "/arena_draw.js")
     assert status == 200 and b"function drawModule" in script
+    status, script = call(url + "/arena_view3d.js")
+    assert status == 200 and b"export function create" in script
+    status, mesh = call(url + "/api/meshes/ramp_module_curved.stl")
+    assert status == 200 and len(mesh) > 84
+    # Only the arena's meshes, nothing else on the disk.
+    assert call(url + "/api/meshes/..%2F..%2Fsetup.py")[0] == 404
+    assert call(url + "/api/meshes/model.sdf")[0] == 404
 
     status, body = call(url + "/api/modules")
     modules = json.loads(body)
@@ -707,3 +714,17 @@ def test_ramps_and_platforms_off_the_tiles_are_checked_the_same():
     assert "runs into a wall" in found[(5.5, 3)][0]
     assert (6.5, 3) not in found
     assert "part of its high end" in found[(3.5, 7.5)][0]
+
+
+@pytest.mark.parametrize("kind", ["ramp", "wall", "thwomp", "platform_2"])
+@pytest.mark.parametrize("rotation", al.ROTATIONS)
+def test_editor_3d_poses_are_the_sims(kind, rotation):
+    # The 3D view adds a square's centre and the platforms' height to the
+    # pose at 0, 0, which must give what the sim's world uses.
+    part = al.PARTS[kind]
+    x, y, z, yaw = al.modules_info()["types"][kind]["poses"][
+        rotation]
+    (px, py, pz, pyaw), _ = al.placement(part, 0.3, -0.2,
+                                                   rotation, 0.0254)
+    assert (x + 0.3, y - 0.2, z + 0.0254, yaw) == pytest.approx(
+        (px, py, pz, pyaw), abs=1e-5)

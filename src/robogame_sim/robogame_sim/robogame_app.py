@@ -103,6 +103,9 @@ def handler(console=None):
                 return self.file(console_page, HTML)
             if path == "/arena_draw.js":
                 return self.file(DRAW, "text/javascript; charset=utf-8")
+            if path == "/arena_view3d.js":
+                return self.file(arena_editor.VIEW3D,
+                                 "text/javascript; charset=utf-8")
             if path == "/api/app":
                 return self.reply(200, {"console": console is not None})
             self.answer(lambda: self.console_route("get", path),

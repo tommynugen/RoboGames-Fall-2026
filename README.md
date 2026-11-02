@@ -613,6 +613,18 @@ and it is written to
 `src/robogame_sim/layouts/NAME.json`, one module per line so it diffs
 well. `http://localhost:8766/#editor/NAME` opens a saved one directly.
 
+The editor also shows the layout in 3D, built from the same CAD meshes
+and posed as the sim poses them, so what it shows is what Gazebo loads.
+Top, 3D and Both above the grid pick the views (V switches, and the page
+remembers the choice). The 3D view edits as the top view does, with the
+same tools, keys and checks: click or drag on a floor tile or a module to
+place the tool's module there (seen see-through first, red where it does
+not fit), on a platform's top to stack on it, and right-click to take the
+top module off. Right-drag turns the view, middle-drag moves it and the
+wheel zooms. Modules the checks find a problem with glow red. The 3D view
+loads three.js 0.160 from unpkg.com, so it needs the internet when the
+page opens; without it the page says so and the top view works as before.
+
 Layouts made for the old 9 x 9 grid of 5 inch modules still open, with a
 warning; pick 12 x 12 under Grid to grow one about the middle and Save.
 
@@ -669,6 +681,12 @@ the platform (z 0.045 m), and robot 1 went round to the ramps and up them
 (z 0.045 m) and held 0.24 m from robot 2. The editor was checked in
 headless Chromium, in light and dark, with a layout of every module and
 with an old 9 x 9 layout.
+
+The 3D view was checked on 2026-11-02 in headless Chromium, light and
+dark, on `default` and `mazetest`: the modules stand where the top view
+has them, a click on a tile in 3D placed a 1" platform and a right-click
+took it off again, and a right-drag turned the view without editing. A
+test checks the poses the editor is given add up to the sim's.
 
 ## Tests
 
