@@ -22,6 +22,10 @@ The modules are the parts of the CAD's MODULES part studio:
     wall        1 x 4 inch wall, 2 inches high
     thwomp      the thwomp, 1 x 4 inches and 6 high, as a fixed block
 
+and any STL dropped onto the editor, which saves it as parts/NAME.stl
+next to the layouts and names its type NAME. Such a part is a block: it
+covers the 2 inch cells under it, rounded up, and robots go round it.
+
 Every module pegs into the same 2 inch grid of holes, which runs on
 across the joins between floor tiles, so a module goes anywhere on that
 grid: col and row are in steps of a half, and a module at col 5.5 stands
@@ -57,7 +61,7 @@ import xml.etree.ElementTree as ElementTree
 
 import numpy as np
 
-from robogame_sim.terrain import Terrain, read_stl, sdf_triangles
+from robogame_sim.terrain import Terrain, parse_stl, read_stl, sdf_triangles
 
 MODULE = 0.1016
 SIZE = 12
@@ -65,12 +69,15 @@ ROTATIONS = (0, 90, 180, 270)
 CAD_MODEL = "robogame_arena_cad"
 # The peg holes are on a 2 inch grid, 1 inch either side of a tile's middle.
 PEG_LINE = 0.0254
+# One of the 2 inch cells the holes split the floor into.
+CELL = MODULE / 2
 
 
 class Part:
     """How one CAD part stands on a square. mount is "floor" for the tile,
     "square" for a module centred on its square, and "side" for one on the
-    peg line on the side its rotation points to. Heights, and where a side
+    peg line on the side its rotation points to, and "block" for an STL
+    dropped onto the editor, centred on the cells it covers. Heights, and where a side
     part is in the part studio, come from its mesh, so a changed part is
     placed right after a new export without changes here."""
 
@@ -98,6 +105,9 @@ PARTS = {
                    (0.769, 0.886, 0.953), turns=True),
 }
 TYPES = tuple(PARTS)
+BUILT_IN = dict(PARTS)
+# Dropped STL parts, so they stand out from the CAD's modules.
+BLOCK_COLOUR = (0.910, 0.627, 0.478)
 # What other modules can stand on.
 PLATFORMS = ("platform", "platform_2")
 
@@ -176,11 +186,151 @@ BOUNDS = {}
 
 def mesh_bounds(mesh):
     """Lowest and highest corner of a mesh, in the part studio's frame."""
-    if mesh not in BOUNDS:
-        points = read_stl(os.path.join(mesh_dir(), mesh)).reshape(-1, 3)
-        BOUNDS[mesh] = (points.min(axis=0), points.max(axis=0))
+    # A dropped part's mesh is a whole path, and can be replaced.
+    path = mesh if os.path.isabs(mesh) else os.path.join(mesh_dir(), mesh)
+    key = path, os.path.getmtime(path)
 
-    return BOUNDS[mesh]
+    if key not in BOUNDS:
+        points = read_stl(path).reshape(-1, 3)
+        BOUNDS[key] = (points.min(axis=0), points.max(axis=0))
+
+    return BOUNDS[key]
+
+
+# -- parts dropped onto the editor -----------------------------------------
+
+UNITS = {"m": 1.0, "cm": 0.01, "mm": 0.001, "inch": 0.0254}
+# Biggest STL the editor takes, in bytes.
+MAX_STL = 64 * 1024 * 1024
+
+
+def part_dirs():
+    """Folders dropped STL parts are kept in, the one saved to first."""
+    return [os.path.join(folder, "parts") for folder in layout_dirs()]
+
+
+def refresh_parts():
+    """Bring PARTS up to date with the STL files in part_dirs(), so a part
+    dropped in the editor, or a file copied there, is a module type."""
+    found = {}
+
+    # The first folder wins, as for layouts.
+    for folder in reversed(part_dirs()):
+        if not os.path.isdir(folder):
+            continue
+        for file in os.listdir(folder):
+            kind = file[:-4]
+            if (file.lower().endswith(".stl") and NAME.match(kind)
+                    and kind not in BUILT_IN):
+                found[kind] = os.path.join(folder, file)
+
+    for kind in [k for k in PARTS if k not in BUILT_IN and k not in found]:
+        del PARTS[kind]
+
+    for kind, path in found.items():
+        if kind not in PARTS or PARTS[kind].mesh != path:
+            PARTS[kind] = Part(kind, path, "block", BLOCK_COLOUR, turns=True,
+                               mesh_collision=True)
+
+
+def guess_units(extent):
+    """Units of an STL from its largest size: arena parts are an inch to a
+    foot or so, which in millimetres is over 25 and in metres under 1.3."""
+    if extent > 30:
+        return "mm"
+    if extent > 1.3:
+        return "inch"
+    return "m"
+
+
+def add_part(name, data, units="auto", up="z", folder=None):
+    """Save STL bytes as the part NAME: turned so z is up, scaled to
+    metres, centred on x, y = 0 and standing on z = 0. Returns the path and
+    what was done, as a dict for the editor."""
+    if not NAME.match(name):
+        raise ValueError("names are letters, digits, - and _ only")
+    if name in BUILT_IN:
+        raise ValueError(f"{name} is one of the CAD's modules, pick "
+                         f"another name")
+    if len(data) > MAX_STL:
+        raise ValueError(f"that STL is over {MAX_STL // 2 ** 20} MB")
+    if up not in ("z", "y"):
+        raise ValueError("up must be z or y")
+
+    try:
+        faces = parse_stl(data)
+    except ValueError:
+        faces = np.zeros((0, 3, 3))
+    if not len(faces) or not np.isfinite(faces).all():
+        raise ValueError("that is not an STL with any triangles in it")
+
+    if up == "y":
+        # (x, y, z) with y up is (x, -z, y) with z up.
+        faces = faces[..., [0, 2, 1]] * np.array([1.0, -1.0, 1.0])
+
+    if units == "auto":
+        units = guess_units(float(np.ptp(faces.reshape(-1, 3), axis=0).max()))
+    if units not in UNITS:
+        raise ValueError(f"units must be auto or one of {', '.join(UNITS)}")
+    faces = faces * UNITS[units]
+
+    points = faces.reshape(-1, 3)
+    lo, hi = points.min(axis=0), points.max(axis=0)
+    faces = faces - np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2,
+                              lo[2]])
+    size = hi - lo
+    arena = SIZE * MODULE
+
+    if max(size[0], size[1]) > arena or size[2] > arena:
+        raise ValueError(f"in {units} it is {size.max():.2f} m across, "
+                         f"bigger than the arena: pick other units")
+    if size.max() < 0.005:
+        raise ValueError(f"in {units} it is under 5 mm across: pick other "
+                         f"units")
+
+    folder = folder or part_dirs()[0]
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"{name}.stl")
+    write_stl(path, faces, f"robogame_sim part {name}")
+    refresh_parts()
+
+    return {"path": path, "type": name, "units": units,
+            "size": [float(v) for v in size]}
+
+
+def write_stl(path, faces, title=""):
+    """A binary STL of n x 3 x 3 triangles."""
+    a, b, c = faces[:, 0], faces[:, 1], faces[:, 2]
+    normals = np.cross(b - a, c - a)
+    lengths = np.linalg.norm(normals, axis=1, keepdims=True)
+    normals = np.divide(normals, lengths, out=np.zeros_like(normals),
+                        where=lengths > 0)
+    rows = np.zeros(len(faces), dtype=np.dtype([("normal", "<f4", 3),
+                                                ("vertices", "<f4", (3, 3)),
+                                                ("attribute", "<u2")]))
+    rows["normal"], rows["vertices"] = normals, faces
+
+    with open(path, "wb") as stl:
+        stl.write(title.encode()[:80].ljust(80, b"\0"))
+        stl.write(len(faces).to_bytes(4, "little"))
+        stl.write(rows.tobytes())
+
+
+def block_cells(kind, rotation):
+    """How many 2 inch cells a dropped part covers along x and y at a
+    rotation, rounded up."""
+    lo, hi = mesh_bounds(PARTS[kind].mesh)
+    w, d = (max(1, math.ceil(float(v) / CELL - 1e-3)) for v in
+            (hi[0] - lo[0], hi[1] - lo[1]))
+    return (d, w) if rotation % 180 else (w, d)
+
+
+def block_offset(kind, rotation):
+    """How far a dropped part's middle is from the middle of the square
+    at its col and row: half a cell along a side it covers an odd number
+    of cells of."""
+    w, d = block_cells(kind, rotation)
+    return CELL / 2 * (w % 2), CELL / 2 * (d % 2)
 
 
 def list_layouts():
@@ -218,10 +368,13 @@ def normalise(layout):
 
     modules = []
 
+    refresh_parts()
+
     for module in layout.get("modules", []):
         kind = module.get("type")
-        if kind not in TYPES:
-            raise ValueError(f"unknown module type {kind!r}")
+        if kind not in PARTS:
+            raise ValueError(f"unknown module type {kind!r}, and no "
+                             f"parts/{kind}.stl")
 
         entry = {"type": kind, "col": half(module.get("col"), "col"),
                  "row": half(module.get("row"), "row")}
@@ -318,6 +471,7 @@ def dumps(layout):
 def modules_info():
     """The modules for the editor: label, footprint and height, in metres."""
     info = {}
+    refresh_parts()
 
     for kind, part in PARTS.items():
         lo, hi = mesh_bounds(part.mesh)
@@ -328,6 +482,9 @@ def modules_info():
                       "depth": float(hi[0] - lo[0] if part.mount == "side"
                                      else hi[1] - lo[1]),
                       "height": float(hi[2] - lo[2])}
+        if part.mount == "block":
+            # Cells it covers along x and y at rotation 0.
+            info[kind]["cells"] = list(block_cells(kind, 0))
 
     return {"module": MODULE, "size": SIZE, "peg_line": PEG_LINE,
             "types": info}
@@ -357,8 +514,16 @@ def cells(m):
     but two to a square: square (col, row) is cells 2 col and 2 col + 1
     along x, and the same along y."""
     x, y = round(2 * m["col"]), round(2 * m["row"])
+    mount = PARTS[m["type"]].mount
 
-    if PARTS[m["type"]].mount != "side":
+    if mount == "block":
+        # Centred on the square's middle, half a cell off it along a side
+        # of an odd number of cells.
+        w, d = block_cells(m["type"], m.get("rotation", 0))
+        x, y = x + 1 - w // 2, y + 1 - d // 2
+        return [(x + i, y + j) for j in range(d) for i in range(w)]
+
+    if mount != "side":
         return [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)]
 
     # The half of the square on the side the module faces.
@@ -450,7 +615,8 @@ def model_sdf(layout, name="arena"):
     def add(label, part, x, y, rotation, base=0.0):
         (px, py, pz, yaw), (bx, by, bz) = placement(part, x, y, rotation,
                                                     base)
-        uri = f"model://{CAD_MODEL}/meshes/{part.mesh}"
+        uri = (f"file://{part.mesh}" if os.path.isabs(part.mesh)
+               else f"model://{CAD_MODEL}/meshes/{part.mesh}")
         pose = f"{px:.5f} {py:.5f} {pz:.5f} 0 0 {yaw:.5f}"
         r, g, b = part.colour
         material = (f"<material><ambient>{r} {g} {b} 1</ambient>"
@@ -488,8 +654,12 @@ def model_sdf(layout, name="arena"):
         if name in names:
             name += f"_r{m['rotation']}"
         names.add(name)
-        add(name, PARTS[m["type"]], *centre(layout, m["col"], m["row"]),
-            m.get("rotation", 0), stand(at, m))
+        x, y = centre(layout, m["col"], m["row"])
+        if PARTS[m["type"]].mount == "block":
+            dx, dy = block_offset(m["type"], m["rotation"])
+            x, y = x + dx, y + dy
+        add(name, PARTS[m["type"]], x, y, m.get("rotation", 0),
+            stand(at, m))
 
     return (f'<model name="{name}">\n    <static>true</static>\n'
             f'    <link name="link">\n' + "\n".join(parts)
@@ -501,6 +671,8 @@ def triangles(layout):
     meshes = mesh_dir()
 
     def resolve(uri):
+        if uri.startswith("file://"):
+            return uri[len("file://"):]
         return os.path.join(meshes, uri.rsplit("/", 1)[-1])
 
     return sdf_triangles(ElementTree.fromstring(model_sdf(layout)), resolve)
@@ -592,6 +764,10 @@ def edge(at, cell, side):
             return base + part_height("ramp") * (row + 1) / 2, None
         if side == (-dx, -dy):
             return base + part_height("ramp") * row / 2, None
+        return None, top
+
+    # A dropped part is a block, which closes its cells on every side.
+    if PARTS[top["type"]].mount == "block":
         return None, top
 
     # A wall or thwomp stands across the middle of its cells, so it closes

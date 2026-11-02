@@ -17,6 +17,8 @@ setup(
         ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
         ('share/' + package_name + '/worlds', glob('worlds/*.sdf')),
         ('share/' + package_name + '/layouts', glob('layouts/*.json')),
+        ('share/' + package_name + '/layouts/parts',
+            glob('layouts/parts/*.stl')),
         ('share/' + package_name + '/models/robogame_arena_cad',
             glob('models/robogame_arena_cad/model.*')),
         ('share/' + package_name + '/models/robogame_arena_cad/meshes',

@@ -8,8 +8,9 @@ inch platforms, ramps, walls and the thwomp, are placed on the floor grid
 as they are set up on the table, and turned to face the way they do. Layouts are saved as JSON into the
 workspace's src/robogame_sim/layouts, where sim.launch.py layout:=NAME and
 chase_node find them, and checked as they are edited for ramps that cannot
-be driven and platforms no robot can reach. Only this computer can reach
-the page.
+be driven and platforms no robot can reach. An STL file dragged onto the
+page is saved as a new module type, in layouts/parts. Only this computer
+can reach the page.
 """
 
 import argparse
@@ -18,7 +19,7 @@ import os
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from robogame_sim import arena_layout
 
@@ -78,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         try:
+            if self.path.startswith("/api/parts/"):
+                return self.put_part()
             if not self.path.startswith("/api/layouts/"):
                 return self.reply(404, {"error": "not found"})
 
@@ -87,6 +90,24 @@ class Handler(BaseHTTPRequestHandler):
                              "problems": arena_layout.check(layout)})
         except (ValueError, TypeError, KeyError) as error:
             self.reply(400, {"error": str(error)})
+
+    def put_part(self):
+        """An STL dropped onto the page, as the body, saved as a module
+        type named by the path. ?units= is auto, m, cm, mm or inch and
+        ?up= is z or y, the axis that points up in the file."""
+        url = urlsplit(self.path)
+        query = {k: v[-1] for k, v in parse_qs(url.query).items()}
+        length = int(self.headers.get("Content-Length", 0))
+        if length > arena_layout.MAX_STL:
+            raise ValueError(f"that STL is over "
+                             f"{arena_layout.MAX_STL // 2 ** 20} MB")
+
+        part = arena_layout.add_part(
+            unquote(url.path[len("/api/parts/"):]), self.rfile.read(length),
+            query.get("units", "auto"), query.get("up", "z"))
+        part.pop("path")
+        self.reply(200, {"part": part,
+                         "modules": arena_layout.modules_info()})
 
     def do_POST(self):
         try:

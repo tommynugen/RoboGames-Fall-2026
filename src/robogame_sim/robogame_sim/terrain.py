@@ -141,8 +141,11 @@ def box_top(size):
 def read_stl(path):
     """Triangles of a binary or ASCII STL, as an n x 3 x 3 array."""
     with open(path, "rb") as stl:
-        data = stl.read()
+        return parse_stl(stl.read())
 
+
+def parse_stl(data):
+    """Triangles of a binary or ASCII STL file's bytes, as read_stl."""
     if len(data) >= 84:
         count = struct.unpack("<I", data[80:84])[0]
 

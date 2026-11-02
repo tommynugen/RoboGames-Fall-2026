@@ -180,6 +180,18 @@
   .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0;
           overflow-wrap: anywhere; }
+  #drop-hint {
+    display: none; position: fixed; inset: 12px; z-index: 10;
+    align-items: center; justify-content: center; font-size: 20px;
+    border: 3px dashed var(--ramp-arrow); border-radius: 12px;
+    background: color-mix(in srgb, var(--ramp-low) 70%, transparent);
+    color: var(--ramp-arrow); pointer-events: none;
+  }
+  body.dragging #drop-hint { display: flex; }
+  #stl-dialog { border-radius: 8px; min-width: 280px; }
+  #stl-dialog label { display: block; margin: 8px 0; }
+  #stl-dialog input, #stl-dialog select { width: 100%; }
+  .dialog-buttons { display: flex; gap: 8px; justify-content: flex-end; }
 </style>
 </head>
 <body>
@@ -243,6 +255,9 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
           platforms: a ramp, wall, thwomp or another platform, across two
           if they are as high. The corner shows how high the top is.</li>
         <li>Right-click to take the top module off.</li>
+        <li>Drag an STL file onto the page to add it as a module of its
+          own. It is a block over the 2 inch cells under it, which robots
+          go round, and is saved next to the layouts in parts.</li>
       </ul>
     </div>
 
@@ -274,6 +289,31 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
   </aside>
 </main>
 
+<div id="drop-hint">Drop an STL to add it as a module</div>
+<dialog id="stl-dialog">
+  <form method="dialog">
+    <h2>Add an STL part</h2>
+    <label>Name <input id="stl-name" required pattern="[A-Za-z0-9_\-]{1,40}"
+      title="Letters, digits, - and _ only"></label>
+    <label>Units <select id="stl-units">
+      <option value="auto">Guess from its size</option>
+      <option value="mm">Millimetres</option>
+      <option value="cm">Centimetres</option>
+      <option value="inch">Inches</option>
+      <option value="m">Metres</option>
+    </select></label>
+    <label>Up <select id="stl-up">
+      <option value="z">Z is up</option>
+      <option value="y">Y is up</option>
+    </select></label>
+    <p class="help" id="stl-note"></p>
+    <div class="dialog-buttons">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="add" class="primary">Add</button>
+    </div>
+  </form>
+</dialog>
+
 <script src="arena_draw.js"></script>
 <script>
 "use strict";
@@ -297,11 +337,13 @@ let info = {
               height: 0.1524 },
   },
 };
-const TOOLS = [
+const CAD_TOOLS = [
   ["platform", '1" platform'], ["platform_2", '2" platform'],
   ["ramp", "Ramp"], ["wall", "Wall"], ["thwomp", "Thwomp"],
   ["erase", "Floor"],
 ];
+// The CAD's modules, then the STL parts dropped onto the page.
+let TOOLS = CAD_TOOLS;
 
 let size = info.size;
 // Every module on the board, as {type, col, row, level, rotation}. col and
@@ -552,7 +594,7 @@ function drawPanel() {
     el("rect", { x: 2, y: 2, width: 26, height: 26, rx: 2,
                  fill: "var(--floor)" }, svg);
     drawModule(svg, type, 2, 2, 26, turns(type) ? newRotation : 0,
-               `tool-${type}`);
+               `tool-${type}`, 1, true);
   }
 
   const preview = document.getElementById("preview");
@@ -561,7 +603,7 @@ function drawPanel() {
   el("rect", { x: 2, y: 2, width: 30, height: 30, rx: 2,
                fill: "var(--floor)" }, preview);
   drawModule(preview, turns(tool) ? tool : "ramp", 2, 2, 30, newRotation,
-             "preview", turns(tool) ? 1 : 0.4);
+             "preview", turns(tool) ? 1 : 0.4, true);
 
   const facing = document.getElementById("facing");
   const way = FACING[newRotation];
@@ -593,6 +635,8 @@ function drawPanel() {
 }
 
 function buildTools() {
+  TOOLS = [...CAD_TOOLS, ...Object.keys(info.types).filter(isBlock).sort()
+    .map(type => [type, type])];
   const tools = document.getElementById("tools");
   tools.replaceChildren();
   TOOLS.forEach(([type, name], i) => {
@@ -611,7 +655,8 @@ function buildTools() {
     }
     const kbd = document.createElement("kbd");
     kbd.textContent = i + 1;
-    b.append(svg, name, kbd);
+    b.append(svg, name);
+    if (i < 9) b.append(kbd);
     b.addEventListener("click", () => setTool(type));
     tools.appendChild(b);
   });
@@ -1039,6 +1084,89 @@ document.getElementById("save").addEventListener("click", save);
 window.addEventListener("beforeunload", event => {
   if (snapshot() !== savedSnapshot) event.preventDefault();
 });
+
+// -- STL parts -------------------------------------------------------------
+
+// A file dragged over the page, which drops onto the board or anywhere.
+const dragsFiles = event => [...(event.dataTransfer?.types || [])]
+  .includes("Files");
+let dragDepth = 0;
+
+document.addEventListener("dragenter", event => {
+  if (!dragsFiles(event)) return;
+  dragDepth++;
+  document.body.classList.add("dragging");
+});
+document.addEventListener("dragleave", event => {
+  if (!dragsFiles(event)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) document.body.classList.remove("dragging");
+});
+document.addEventListener("dragover", event => {
+  if (!dragsFiles(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+});
+document.addEventListener("drop", event => {
+  if (!dragsFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove("dragging");
+  const file = [...event.dataTransfer.files]
+    .find(f => f.name.toLowerCase().endsWith(".stl"));
+  if (!file) {
+    updateStatus("Only STL files can be dropped here", "dirty");
+    return;
+  }
+  addPart(file, pointFrom(event));
+});
+
+// Asks for the part's name, units and up axis, sends it to the server,
+// and places it where it was dropped, if that was on the board.
+async function addPart(file, point) {
+  const dialog = document.getElementById("stl-dialog");
+  const nameInput = document.getElementById("stl-name");
+  const stem = file.name.replace(/\.stl$/i, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 40) || "part";
+  nameInput.value = stem;
+  document.getElementById("stl-note").textContent =
+    `${file.name}, ${(file.size / 1024).toFixed(0)} KB.` +
+    (info.types[stem] ? ` There is a ${stem} already, which it replaces.`
+                      : "");
+  const answer = await new Promise(resolve => {
+    dialog.addEventListener("close", () => resolve(dialog.returnValue),
+                            { once: true });
+    dialog.returnValue = "cancel";
+    dialog.showModal();
+  });
+  if (answer !== "add") return;
+
+  const name = nameInput.value;
+  const units = document.getElementById("stl-units").value;
+  const up = document.getElementById("stl-up").value;
+  updateStatus(`Adding ${name}…`);
+  try {
+    const result = await api(
+      `/api/parts/${encodeURIComponent(name)}?units=${units}&up=${up}`,
+      { method: "PUT", body: await file.arrayBuffer(),
+        headers: { "Content-Type": "application/octet-stream" } });
+    info = result.modules;
+    buildTools();
+    setTool(name);
+    // The part may have changed size, so drop any that no longer fit.
+    if (!fits(modules)) modules = modules.filter(m => m.type !== name);
+    if (point) {
+      remember();
+      if (!apply(point, false, false)) history.pop();
+    }
+    changed();
+    const [w, d, h] = result.part.size.map(v => (v / 0.0254).toFixed(1));
+    updateStatus(`Added ${name}, ${w} × ${d} × ${h} inches read as ` +
+                 `${result.part.units}`, "saved");
+  } catch (error) {
+    updateStatus(`Could not add ${name}: ${error.message}`, "dirty");
+  }
+}
 
 (async function start() {
   try {
