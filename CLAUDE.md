@@ -16,7 +16,7 @@ source /opt/ros/lyrical/setup.bash && colcon build --symlink-install && source i
 cd src/robogame_sim && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest test   # tests, no Gazebo
 python3 -m robogame_sim.chase_sim mazetest default --seeds 4                     # chase in 2D, from src/robogame_sim
 ros2 launch robogame_sim sim.launch.py gui:=false fpv:=false speed:=0 step:=0.002 layout:=NAME robots:=1,2 chase:=1,2
-ros2 run robogame_sim robogame_app                                               # editor + robot console app, beside a sim
+ros2 run robogame_sim robogame_gamemaster                                        # RoboGame Gamemaster: editor + robot console, beside a sim
 scripts/gazebo_chase_suite.sh /tmp/chase_runs [SCENARIO]                         # 14 test4 runs, a few minutes
 ```
 
@@ -36,7 +36,7 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `chase_node.py` | ROS node around `Chaser` |
 | `chase_sim.py` | 2D stand-in for Gazebo to try `Chaser` against moving targets |
 | `arena_layout.py` (890 lines) | layout JSON load/save, `PARTS`, `check()` (the editor's red outlines), world SDF building, spawn spots |
-| `robogame_app.py` + `robogame_app.html` | the one web app at localhost:8766: serves the editor and console pages and APIs, tabs `#editor`, `#console` |
+| `robogame_app.py` + `robogame_app.html` | RoboGame Gamemaster, the one web app at localhost:8766 (`robogame_gamemaster`, alias `robogame_app`): serves the editor and console pages and APIs, tabs `#editor`, `#console` |
 | `arena_editor.py` + `arena_editor.html` | the layout editor, the app's Arena editor tab (page at `/editor`), its API routes in `get`/`put`/`post`; the html is one big file, grep it. Its module drawing is in `arena_draw.js`, shared with the console, and its 3D view (three.js) in `arena_view3d.js` |
 | `sim_firmware.py`, `firmware_model.py` | stand in for the ESP32 firmware and BLE bridge |
 | `racing_teleop.py`, `drive_controls.py`, `motion_sensor.py` | PS4/PS5 racing controls and wheel steering |

@@ -1,8 +1,8 @@
 """Every robot in the arena on one page: who drives it, and where it goes.
 
-    ros2 run robogame_sim robogame_app
+    ros2 run robogame_sim robogame_gamemaster
 
-The Robot console tab of the RoboGame app (robogame_app.py), at
+The Robot console tab of the RoboGame Gamemaster (robogame_app.py), at
 http://localhost:8766/#console. This file has the console's node and its
 page API, which the app serves; robot_console.html is the page.
 `ros2 run robogame_sim robot_console` opens the app on this tab.
