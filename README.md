@@ -225,6 +225,23 @@ The launch refuses a hunter that the controller is also driving, and any
 misspelt argument (`controler:=joy` would otherwise quietly start no
 controller).
 
+## Launching Gazebo from the app
+
+The editor's Run it and Test it panels each have a Launch in Gazebo
+button, which starts that panel's command on the layout open in the
+editor. Save the layout first: the sim reads the saved file. One sim runs
+at a time. The line under Run it says which layout runs and where its
+output goes (`robogame_sim.log` in the temp folder, `/tmp` on Linux), and
+gives the last lines when it ends. Stop sends Ctrl-C to the launch, as the
+terminal would, and kills it if it is still up 10 s later. Quitting the
+app stops the sim too. ROS and the workspace must be sourced in the
+terminal that starts the app, or Launch says there is no `ros2`.
+`sim_runner.py` does this.
+
+Checked 2026-11-02: tests (`test_sim_runner.py`, with a stand-in for
+`ros2`) and the app's routes by hand without ROS. Not yet run against
+Gazebo itself.
+
 ## A robot for every controller
 
 The editor's Test it command, for the sim only:
