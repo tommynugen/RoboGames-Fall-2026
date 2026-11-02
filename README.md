@@ -674,6 +674,36 @@ module that changes size or height needs no code change; a new kind of
 module needs an entry in `PARTS` in `arena_layout.py` and a tool in
 `arena_editor.html`.
 
+### STL parts
+
+Drag an STL file from your desktop onto the editor to add it as a module
+of its own. It asks for a name (letters, digits, - and _), the file's
+units (millimetres, centimetres, inches, metres, or a guess from its size:
+over 30 is millimetres, over 1.3 inches, else metres) and which axis
+points up (Z, or Y as some CAD exports have it). The part is turned so z
+is up, scaled to metres, centred, stood on the floor and saved as
+`src/robogame_sim/layouts/parts/NAME.stl`. It gets a tool of its own
+(7 on, in the order of their names), goes where it was dropped if that was
+on the grid, and the status line says how big it came out, so a wrong
+guess at the units shows; drop it again with the right ones to replace it.
+A file copied into `layouts/parts` by hand is picked up too.
+
+In a layout a part is `{"type": "NAME", "col": 5, "row": 5,
+"rotation": 0}`. It is a block over the 2 inch cells under it, its size
+rounded up to whole cells and centred on the square (half a cell off it
+along a side of an odd number of cells), it turns a quarter at a time,
+and can stand on platforms but carries nothing. The checks treat it as an
+obstacle on every side. The world uses the mesh itself for its look and
+collisions, by its full path (`file://...`), and the planner's terrain
+from the same mesh. A layout with a part only opens where that part's
+file is. To take a part away, delete its file.
+
+Checked on 2026-11-02 with the tests (scaling, Y up, refusing a bad file
+or a name of the CAD's, cells and offsets at each rotation, a ramp running
+into a part, the world's mesh uri and the terrain's height on the part,
+and the editor's upload), and in headless Chromium by dropping a 3 x 3 x 2
+inch box in millimetres onto the grid. Not yet loaded in Gazebo.
+
 Checked headless on 2026-10-16 with the 4 inch modules, on a layout of a
 3 x 3 1" platform with three ramps on its -x side, two 2" platforms, two
 walls and a thwomp: the world loaded every mesh, robot 2 spawned on top of

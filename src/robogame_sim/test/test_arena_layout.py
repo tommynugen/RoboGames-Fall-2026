@@ -12,6 +12,7 @@ import pytest
 from robogame_sim import arena_layout as al
 from robogame_sim.robogame_app import handler
 from robogame_sim.terrain import Terrain, read_stl
+from robogame_sim.terrain import parse_stl as read_stl_bytes
 
 HERE = os.path.dirname(__file__)
 PACKAGE = os.path.join(HERE, "..")
@@ -714,6 +715,122 @@ def test_ramps_and_platforms_off_the_tiles_are_checked_the_same():
     assert "runs into a wall" in found[(5.5, 3)][0]
     assert (6.5, 3) not in found
     assert "part of its high end" in found[(3.5, 7.5)][0]
+
+
+def box_stl(sx, sy, sz):
+    """An ASCII STL of a box sx x sy x sz, from 10, 20, 30 up."""
+    lo = np.array([10.0, 20.0, 30.0])
+    corners = [lo + np.array([i * sx, j * sy, k * sz])
+               for i in (0, 1) for j in (0, 1) for k in (0, 1)]
+    faces = []
+    for axis in range(3):
+        for side_ in (0, 1):
+            quad = [c for n, c in enumerate(corners)
+                    if (n >> (2 - axis)) & 1 == side_]
+            faces += [(quad[0], quad[1], quad[3]), (quad[0], quad[3],
+                                                    quad[2])]
+    text = "solid box\n" + "".join(
+        "facet normal 0 0 0\nouter loop\n" + "".join(
+            f"vertex {x} {y} {z}\n" for x, y, z in face)
+        + "endloop\nendfacet\n" for face in faces) + "endsolid box\n"
+    return text.encode()
+
+
+@pytest.fixture
+def parts(tmp_path, monkeypatch):
+    monkeypatch.setenv("ROBOGAME_LAYOUTS", str(tmp_path))
+    yield tmp_path
+    monkeypatch.delenv("ROBOGAME_LAYOUTS")
+    al.refresh_parts()
+
+
+def test_dropped_stl_is_scaled_and_centred(parts):
+    # 3 x 1.5 x 2 inches, in millimetres, guessed from its size.
+    part = al.add_part("bumper", box_stl(76.2, 38.1, 50.8))
+    assert part["units"] == "mm"
+    assert np.allclose(part["size"], [0.0762, 0.0381, 0.0508])
+
+    points = read_stl(part["path"]).reshape(-1, 3)
+    assert np.allclose(points.min(axis=0), [-0.0381, -0.01905, 0])
+    assert np.allclose(points.max(axis=0), [0.0381, 0.01905, 0.0508])
+    assert os.path.dirname(part["path"]) == str(parts / "parts")
+    # Rounded up to 2 inch cells, and turned with the part.
+    assert al.block_cells("bumper", 0) == (2, 1)
+    assert al.block_cells("bumper", 90) == (1, 2)
+    assert al.modules_info()["types"]["bumper"]["cells"] == [2, 1]
+
+
+def test_dropped_stl_with_y_up_stands_on_z(parts):
+    part = al.add_part("tall", box_stl(1, 4, 2), units="inch", up="y")
+    # 4 inches along y is its height now.
+    assert np.allclose(part["size"], [0.0254, 0.0508, 0.1016])
+
+
+def test_bad_stls_are_refused(parts):
+    with pytest.raises(ValueError):
+        al.add_part("ramp", box_stl(1, 1, 1), units="inch")
+    with pytest.raises(ValueError):
+        al.add_part("junk", b"not an stl at all")
+    with pytest.raises(ValueError):
+        # 2 m across in inches.
+        al.add_part("huge", box_stl(80, 80, 1), units="inch")
+    with pytest.raises(ValueError):
+        al.add_part("../escape", box_stl(1, 1, 1))
+
+
+def test_dropped_part_is_a_block_in_layouts_and_the_world(parts):
+    al.add_part("crate", box_stl(3, 3, 2), units="inch")
+    layout = al.normalise({"modules": [
+        {"type": "crate", "col": 5, "row": 5, "rotation": 0},
+        ramp(5, 4, 0)]})
+    crate = layout["modules"][1]
+    # 2 x 2 cells around the square, and half a cell on: 3 inches is
+    # 1.5 cells, so 2, centred on the square.
+    assert sorted(al.cells(crate)) == [(10, 10), (10, 11), (11, 10),
+                                       (11, 11)]
+    with pytest.raises(ValueError):
+        al.normalise({"modules": [
+            {"type": "crate", "col": 5, "row": 5},
+            platform(5, 5)]})
+
+    # The ramp runs into it.
+    problems = al.check(layout)
+    assert any(p["type"] == "ramp" and "crate" in p["message"]
+               for p in problems)
+
+    sdf = al.model_sdf(layout)
+    assert f"file://{parts}/parts/crate.stl" in sdf
+    ground = al.terrain(layout)
+    x, y = al.centre(layout, 5, 5)
+    assert ground.height_at(x, y) == pytest.approx(0.0508, abs=0.005)
+
+
+def test_odd_blocks_sit_half_a_cell_off_the_square(parts):
+    al.add_part("stick", box_stl(1, 4, 1), units="inch")
+    m = {"type": "stick", "col": 2, "row": 2, "rotation": 0}
+    assert sorted(al.cells(m)) == [(5, 4), (5, 5)]
+    assert al.block_offset("stick", 0) == (pytest.approx(0.0254), 0)
+    m["rotation"] = 90
+    assert sorted(al.cells(m)) == [(4, 5), (5, 5)]
+
+
+def test_editor_takes_a_dropped_stl(editor):
+    url, folder = editor
+    request = urllib.request.Request(url + "/api/parts/block_1?units=inch",
+                                     data=box_stl(2, 2, 2), method="PUT")
+    with urllib.request.urlopen(request) as response:
+        body = json.loads(response.read())
+    assert body["part"]["type"] == "block_1"
+    assert body["modules"]["types"]["block_1"]["mount"] == "block"
+    assert (folder / "parts" / "block_1.stl").is_file()
+    # The 3D view fetches its mesh.
+    mesh = body["modules"]["types"]["block_1"]["mesh"]
+    status, data = call(url + "/api/meshes/" + mesh)
+    assert status == 200 and len(read_stl_bytes(data)) == 12
+
+    status, _ = call(url + "/api/parts/platform", "PUT", {})
+    assert status == 400
+    al.refresh_parts()
 
 
 @pytest.mark.parametrize("kind", ["ramp", "wall", "thwomp", "platform_2"])

@@ -111,8 +111,15 @@ def handler(console=None):
             self.answer(lambda: self.console_route("get", path),
                         lambda: arena_editor.get(path))
 
+        def read_raw(self, limit):
+            length = int(self.headers.get("Content-Length", 0))
+            if length > limit:
+                raise ValueError(f"that is over {limit // 2 ** 20} MB")
+            return self.rfile.read(length)
+
         def do_PUT(self):
-            self.answer(lambda: arena_editor.put(self.path, self.read_body))
+            self.answer(lambda: arena_editor.put(self.path, self.read_body,
+                                                 self.read_raw))
 
         def do_POST(self):
             path = unquote(self.path)

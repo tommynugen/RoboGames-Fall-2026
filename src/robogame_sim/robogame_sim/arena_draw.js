@@ -8,6 +8,8 @@ const cellKey = ([x, y]) => `${x},${y}`;
 
 const isPlatform = type => type === "platform" || type === "platform_2";
 const isSide = type => (info.types[type] || {}).mount === "side";
+// An STL dropped onto the editor, a block over the cells under it.
+const isBlock = type => (info.types[type] || {}).mount === "block";
 const heightOf = type => (info.types[type] || {}).height || 0;
 const inches = height => Math.round(height / 0.0254);
 
@@ -17,9 +19,25 @@ const uphill = rotation => ({ 0: [0, 1], 90: [-1, 0], 180: [0, -1],
 
 // The 2 inch cells a module covers, one peg hole in the middle of each and
 // two to a square each way, as arena_layout.cells: a platform or ramp
-// 2 x 2 of them, and a wall or thwomp the 1 x 2 on the side it faces.
+// 2 x 2 of them, a wall or thwomp the 1 x 2 on the side it faces, and a
+// dropped part those under it, about the square's middle.
+function blockCells(type, rotation) {
+  const [w, d] = info.types[type].cells;
+  return rotation % 180 ? [d, w] : [w, d];
+}
+
 function cellsOf(m) {
   let x = Math.round(2 * m.col), y = Math.round(2 * m.row);
+  if (isBlock(m.type)) {
+    const [w, d] = blockCells(m.type, m.rotation || 0);
+    x += 1 - Math.floor(w / 2);
+    y += 1 - Math.floor(d / 2);
+    const found = [];
+    for (let j = 0; j < d; j++) {
+      for (let i = 0; i < w; i++) found.push([x + i, y + j]);
+    }
+    return found;
+  }
   if (!isSide(m.type)) return [[x, y], [x + 1, y], [x, y + 1], [x + 1, y + 1]];
   const [ux, uy] = uphill(m.rotation);
   if (ux === 0) {
@@ -167,8 +185,32 @@ function drawBadge(parent, x, y, s, inches) {
   t.textContent = `${inches}"`;
 }
 
-function drawModule(parent, type, x, y, s, rotation, prefix, opacity = 1) {
-  if (type === "platform") drawPlatform(parent, x, y, s, opacity);
+// A dropped part, over the cells it covers about the middle of the square
+// at x, y, s across, or shrunk to fit in it, for a tool button. The notch
+// is its +y side at rotation 0, so it shows which way it is turned.
+function drawBlock(parent, x, y, s, type, rotation, opacity = 1, fit = false) {
+  let [w, d] = blockCells(type, rotation).map(n => n * s / 2);
+  const cx = x + s / 2 + (w / (s / 2) % 2) * s / 4;
+  const cy = y + s / 2 - (d / (s / 2) % 2) * s / 4;
+  const g = el("g", { opacity, "pointer-events": "none" }, parent);
+  if (fit) {
+    const k = Math.min(1, s / Math.max(w, d));
+    [w, d] = [w * k, d * k];
+  }
+  const [mx, my] = fit ? [x + s / 2, y + s / 2] : [cx, cy];
+  el("rect", { x: mx - w / 2 + 1.5, y: my - d / 2 + 1.5, width: w - 3,
+               height: d - 3, rx: 3, fill: "#e8a07a", stroke: "#8a4b2a",
+               "stroke-width": 1.5 }, g);
+  const [ux, uy] = uphill(rotation);
+  const r = Math.min(w, d) / 6;
+  const nx = mx + ux * (w / 2 - r - 3), ny = my - uy * (d / 2 - r - 3);
+  el("circle", { cx: nx, cy: ny, r, fill: "#8a4b2a" }, g);
+}
+
+function drawModule(parent, type, x, y, s, rotation, prefix, opacity = 1,
+                    fit = false) {
+  if (isBlock(type)) drawBlock(parent, x, y, s, type, rotation, opacity, fit);
+  else if (type === "platform") drawPlatform(parent, x, y, s, opacity);
   else if (type === "platform_2") drawPlatform2(parent, x, y, s, opacity);
   else if (type === "ramp") drawRamp(parent, x, y, s, rotation, prefix,
                                      opacity);

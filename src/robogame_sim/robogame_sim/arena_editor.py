@@ -12,11 +12,12 @@ inch platforms, ramps, walls and the thwomp, are placed on the floor grid
 as they are set up on the table, and turned to face the way they do. Layouts are saved as JSON into the
 workspace's src/robogame_sim/layouts, where sim.launch.py layout:=NAME and
 chase_node find them, and checked as they are edited for ramps that cannot
-be driven and platforms no robot can reach.
+be driven and platforms no robot can reach. An STL file dragged onto the
+page is saved as a new module type, in layouts/parts.
 """
 
 import os
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from robogame_sim import arena_layout
 
@@ -26,6 +27,7 @@ PREFIX = "/api/layouts/"
 # The editor's 3D view.
 VIEW3D = os.path.join(HERE, "arena_view3d.js")
 MESHES = "/api/meshes/"
+PARTS = "/api/parts/"
 
 
 def layout_name(path):
@@ -47,8 +49,14 @@ def get(path):
         if path.startswith(PREFIX):
             return 200, arena_layout.load(layout_name(path))
         if path.startswith(MESHES):
-            # Only the arena's own meshes, by file name, for the 3D view.
+            # Only the arena's own meshes, by file name, for the 3D view,
+            # and the STL parts as parts/NAME.stl.
             name = path[len(MESHES):]
+            part = arena_layout.PARTS.get(name[len("parts/"):-len(".stl")])
+            if (name.startswith("parts/") and part is not None
+                    and part.mount == "block"):
+                with open(part.mesh, "rb") as mesh:
+                    return 200, mesh.read(), "model/stl"
             meshes = {p.mesh for p in arena_layout.PARTS.values()}
             if name not in meshes | {arena_layout.FLOOR.mesh}:
                 return 404, {"error": "no such mesh"}
@@ -62,8 +70,11 @@ def get(path):
     return None
 
 
-def put(path, read_body):
-    """Saves a layout. read_body gives the request's JSON."""
+def put(path, read_body, read_raw=None):
+    """Saves a layout, or an STL part. read_body gives the request's JSON,
+    and read_raw(limit) its bytes, refusing more than limit."""
+    if path.startswith(PARTS) and read_raw is not None:
+        return put_part(path, read_raw)
     if not path.startswith(PREFIX):
         return None
     try:
@@ -71,6 +82,22 @@ def put(path, read_body):
         saved = arena_layout.save(layout_name(path), layout)
         return 200, {"path": saved, "problems": arena_layout.check(layout)}
     except (ValueError, TypeError, KeyError) as error:
+        return 400, {"error": str(error)}
+
+
+def put_part(path, read_raw):
+    """An STL dropped onto the page, as the body, saved as a module type
+    named by the path. ?units= is auto, m, cm, mm or inch and ?up= is z or
+    y, the axis that points up in the file."""
+    try:
+        url = urlsplit(path)
+        query = {k: v[-1] for k, v in parse_qs(url.query).items()}
+        part = arena_layout.add_part(
+            unquote(url.path[len(PARTS):]), read_raw(arena_layout.MAX_STL),
+            query.get("units", "auto"), query.get("up", "z"))
+        part.pop("path")
+        return 200, {"part": part, "modules": arena_layout.modules_info()}
+    except (ValueError, TypeError) as error:
         return 400, {"error": str(error)}
 
 
