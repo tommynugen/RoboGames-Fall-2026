@@ -481,13 +481,35 @@ def modules_info():
                                      else hi[0] - lo[0]),
                       "depth": float(hi[0] - lo[0] if part.mount == "side"
                                      else hi[1] - lo[1]),
-                      "height": float(hi[2] - lo[2])}
+                      "height": float(hi[2] - lo[2]),
+                      "mesh": part.mesh, "colour": part.colour,
+                      "poses": {rotation: mesh_pose(part, rotation)
+                                for rotation in ROTATIONS}}
         if part.mount == "block":
-            # Cells it covers along x and y at rotation 0.
+            # Cells it covers along x and y at rotation 0. The 3D view
+            # gets its mesh as parts/NAME.stl, with when it was saved so a
+            # part dropped again is fetched again, and it is posed off the
+            # square's middle as cells() puts it.
             info[kind]["cells"] = list(block_cells(kind, 0))
+            info[kind]["mesh"] = (f"parts/{kind}.stl?v="
+                                  f"{int(os.path.getmtime(part.mesh))}")
+            for rotation, pose in info[kind]["poses"].items():
+                dx, dy = block_offset(kind, rotation)
+                pose[0], pose[1] = pose[0] + dx, pose[1] + dy
 
     return {"module": MODULE, "size": SIZE, "peg_line": PEG_LINE,
-            "types": info}
+            "types": info,
+            "floor": {"mesh": FLOOR.mesh, "colour": FLOOR.colour,
+                      "pose": mesh_pose(FLOOR, 0)}}
+
+
+def mesh_pose(part, rotation):
+    """Where a part's mesh goes for a square centred on 0, 0 on the floor,
+    as [x, y, z, yaw] in metres and radians, for the editor's 3D view. On
+    another square add its centre to x and y, and on platforms their
+    height to z, which is all placement does too."""
+    (x, y, z, yaw), _ = placement(part, 0.0, 0.0, rotation)
+    return [round(float(v), 6) for v in (x, y, z, yaw)]
 
 
 # -- geometry --------------------------------------------------------------

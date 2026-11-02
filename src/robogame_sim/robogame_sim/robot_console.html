@@ -223,6 +223,7 @@
     border-bottom-width: 2px; border-radius: 4px; padding: 0 4px;
   }
   [hidden] { display: none !important; }
+  #arena-edit { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -235,6 +236,8 @@
   <div class="field">
     <label for="arena-pick">Arena</label>
     <select id="arena-pick" title="The arena to plan over and draw"></select>
+    <a id="arena-edit" target="_top" href="/#editor" hidden
+       title="Open this arena in the arena editor tab">Edit</a>
   </div>
   <span id="status">Connecting…</span>
 </header>
@@ -937,6 +940,10 @@ function renderArenaLabel() {
     "real arena, the layout last saved in the editor", picked: "picked here",
     real: "real arena" }[arena.source] || arena.source || "";
   document.getElementById("arena-source").textContent = source;
+  // A layout opens in the editor tab; cad is no layout.
+  const edit = document.getElementById("arena-edit");
+  edit.hidden = !arena.name || arena.name === "cad";
+  edit.href = `/#editor/${encodeURIComponent(arena.name || "")}`;
 }
 
 function render() {

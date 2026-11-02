@@ -10,8 +10,9 @@ import numpy as np
 import pytest
 
 from robogame_sim import arena_layout as al
-from robogame_sim.arena_editor import Handler
+from robogame_sim.robogame_app import handler
 from robogame_sim.terrain import Terrain, read_stl
+from robogame_sim.terrain import parse_stl as read_stl_bytes
 
 HERE = os.path.dirname(__file__)
 PACKAGE = os.path.join(HERE, "..")
@@ -201,7 +202,7 @@ def test_layouts_save_and_load(tmp_path):
 @pytest.fixture
 def editor(tmp_path, monkeypatch):
     monkeypatch.setenv("ROBOGAME_LAYOUTS", str(tmp_path))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler())
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_address[1]}", tmp_path
     server.shutdown()
@@ -221,9 +222,22 @@ def call(url, method="GET", body=None):
 def test_editor_serves_saves_and_checks(editor):
     url, folder = editor
     status, page = call(url + "/")
+    assert status == 200 and b"Arena editor" in page and b"Robot console" in page
+    status, page = call(url + "/editor")
     assert status == 200 and b"Arena layout" in page
+    # Without a console node the console tab says why.
+    status, page = call(url + "/console")
+    assert status == 200 and b"ROS is not sourced" in page
+    assert call(url + "/api/state")[0] == 404
     status, script = call(url + "/arena_draw.js")
     assert status == 200 and b"function drawModule" in script
+    status, script = call(url + "/arena_view3d.js")
+    assert status == 200 and b"export function create" in script
+    status, mesh = call(url + "/api/meshes/ramp_module_curved.stl")
+    assert status == 200 and len(mesh) > 84
+    # Only the arena's meshes, nothing else on the disk.
+    assert call(url + "/api/meshes/..%2F..%2Fsetup.py")[0] == 404
+    assert call(url + "/api/meshes/model.sdf")[0] == 404
 
     status, body = call(url + "/api/modules")
     modules = json.loads(body)
@@ -809,7 +823,25 @@ def test_editor_takes_a_dropped_stl(editor):
     assert body["part"]["type"] == "block_1"
     assert body["modules"]["types"]["block_1"]["mount"] == "block"
     assert (folder / "parts" / "block_1.stl").is_file()
+    # The 3D view fetches its mesh.
+    mesh = body["modules"]["types"]["block_1"]["mesh"]
+    status, data = call(url + "/api/meshes/" + mesh)
+    assert status == 200 and len(read_stl_bytes(data)) == 12
 
     status, _ = call(url + "/api/parts/platform", "PUT", {})
     assert status == 400
     al.refresh_parts()
+
+
+@pytest.mark.parametrize("kind", ["ramp", "wall", "thwomp", "platform_2"])
+@pytest.mark.parametrize("rotation", al.ROTATIONS)
+def test_editor_3d_poses_are_the_sims(kind, rotation):
+    # The 3D view adds a square's centre and the platforms' height to the
+    # pose at 0, 0, which must give what the sim's world uses.
+    part = al.PARTS[kind]
+    x, y, z, yaw = al.modules_info()["types"][kind]["poses"][
+        rotation]
+    (px, py, pz, pyaw), _ = al.placement(part, 0.3, -0.2,
+                                                   rotation, 0.0254)
+    assert (x + 0.3, y - 0.2, z + 0.0254, yaw) == pytest.approx(
+        (px, py, pz, pyaw), abs=1e-5)
