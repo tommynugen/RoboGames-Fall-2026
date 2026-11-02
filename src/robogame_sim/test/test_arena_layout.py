@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from robogame_sim import arena_layout as al
-from robogame_sim.arena_editor import Handler
+from robogame_sim.robogame_app import handler
 from robogame_sim.terrain import Terrain, read_stl
 
 HERE = os.path.dirname(__file__)
@@ -201,7 +201,7 @@ def test_layouts_save_and_load(tmp_path):
 @pytest.fixture
 def editor(tmp_path, monkeypatch):
     monkeypatch.setenv("ROBOGAME_LAYOUTS", str(tmp_path))
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler())
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_address[1]}", tmp_path
     server.shutdown()
@@ -221,7 +221,13 @@ def call(url, method="GET", body=None):
 def test_editor_serves_saves_and_checks(editor):
     url, folder = editor
     status, page = call(url + "/")
+    assert status == 200 and b"Arena editor" in page and b"Robot console" in page
+    status, page = call(url + "/editor")
     assert status == 200 and b"Arena layout" in page
+    # Without a console node the console tab says why.
+    status, page = call(url + "/console")
+    assert status == 200 and b"ROS is not sourced" in page
+    assert call(url + "/api/state")[0] == 404
     status, script = call(url + "/arena_draw.js")
     assert status == 200 and b"function drawModule" in script
     status, script = call(url + "/arena_view3d.js")
