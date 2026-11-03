@@ -10,7 +10,7 @@ setup(
     packages=find_packages(exclude=['test']),
     package_data={package_name: ['arena_editor.html', 'arena_draw.js',
                                  'arena_view3d.js', 'robot_console.html',
-                                 'gamemaster.html']},
+                                 'gamemaster.html', 'app_log.html']},
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),

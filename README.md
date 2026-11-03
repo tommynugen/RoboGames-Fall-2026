@@ -242,6 +242,29 @@ Checked 2026-11-02: tests (`test_sim_runner.py`, with a stand-in for
 `ros2`) and the app's routes by hand without ROS. Not yet run against
 Gazebo itself.
 
+## The app's Console tab
+
+The Console tab, right of Arena editor and Robot console, shows the
+app's log lines as they come, once a second. Its own tabs split them by
+where they came from, and All shows them together, each tagged:
+
+- Arena editor: each save, rename or delete, and any error it gave.
+- Robot console: the console node's ROS log (robots found and gone,
+  autonomous on and off), and each change asked of it.
+- Teleop: the ROS log of `controller_robots` and `racing_teleop`, from
+  `/rosout`, so wherever they run. Needs ROS sourced, as the console does.
+- Gazebo sim: the output of a sim started with Launch in Gazebo, read from
+  `robogame_sim.log` as it grows. A new launch starts it again.
+- App: the app's own lines (started, no ROS).
+
+Warnings show in amber and errors in red, and a tab with errors has its
+count in red. Clear hides the lines so far; Follow keeps the newest line
+in view. The app keeps the last 5000 lines. `app_log.py` does this, and
+GET `/api/logs?after=N` gives the lines after line N.
+
+Checked 2026-11-03: tests (`test_app_log.py`, with the app's routes over
+HTTP) and the tab in Chromium without ROS. Not yet run with ROS or a sim.
+
 ## A robot for every controller
 
 The editor's Test it command, for the sim only:

@@ -54,18 +54,24 @@
   <strong>RoboGame Gamemaster</strong>
   <a href="#editor" data-tab="editor">Arena editor</a>
   <a href="#console" data-tab="console">Robot console</a>
+  <a href="#logs" data-tab="logs">Console</a>
 </nav>
 <!-- Each tab is its own page, loaded once and kept, so the editor keeps
      unsaved edits and the console keeps polling while the other shows. -->
 <iframe id="editor" title="Arena editor"></iframe>
 <iframe id="console" title="Robot console"></iframe>
+<iframe id="logs" title="Console"></iframe>
 <script>
 const frames = {
   editor: document.getElementById("editor"),
   console: document.getElementById("console"),
+  logs: document.getElementById("logs"),
+};
+const TITLES = {
+  editor: "Arena editor", console: "Robot console", logs: "Console",
 };
 
-// #editor, #editor/NAME (opens that layout) or #console.
+// #editor, #editor/NAME (opens that layout), #console or #logs.
 function show() {
   const [asked, layout] = decodeURIComponent(location.hash.slice(1))
     .split("/");
@@ -89,8 +95,7 @@ function show() {
     link.toggleAttribute("aria-current", link.dataset.tab === tab);
     if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
   }
-  document.title = `${tab === "editor" ? "Arena editor" : "Robot console"}`
-    + " · RoboGame Gamemaster";
+  document.title = `${TITLES[tab]} · RoboGame Gamemaster`;
   frame.focus();
 }
 

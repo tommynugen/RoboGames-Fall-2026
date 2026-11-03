@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Console</title>
+<style>
+  /* As gamemaster.html. */
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --ink: #1d2433;
+    --muted: #5d6677;
+    --line: #d9dde4;
+    --accent: #2f5fb4;
+    --warn: #9a6400;
+    --error: #b42f2f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d;
+      --panel: #1c2028;
+      --ink: #e6e9ef;
+      --muted: #9aa3b2;
+      --line: #2e3440;
+      --accent: #6d97e6;
+      --warn: #e0b04f;
+      --error: #f07878;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; flex-wrap: wrap; align-items: stretch; gap: 4px;
+    padding: 0 12px; background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  header button.tab {
+    padding: 6px 10px; border: 0; background: none; cursor: pointer;
+    color: var(--muted); font: inherit;
+    border-bottom: 2px solid transparent;
+  }
+  header button.tab:hover { color: var(--ink); }
+  header button.tab[aria-selected="true"] {
+    color: var(--ink); border-bottom-color: var(--accent);
+  }
+  .count { font-size: 12px; color: var(--muted); }
+  .count.error { color: var(--error); }
+  .tools {
+    margin-left: auto; display: flex; align-items: center; gap: 10px;
+    color: var(--muted);
+  }
+  .tools button {
+    font: inherit; padding: 2px 10px; border-radius: 4px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+    cursor: pointer;
+  }
+  #log {
+    flex: 1; overflow: auto; margin: 0; padding: 8px 12px;
+    font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  #log .time, #log .source { color: var(--muted); }
+  #log .warn { color: var(--warn); }
+  #log .error { color: var(--error); }
+  #empty { color: var(--muted); font-family: system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<header role="tablist" aria-label="Logs"></header>
+<pre id="log" aria-live="polite"></pre>
+<script>
+// The tabs: All, then one for each source app_log.py tags lines with.
+const TABS = [
+  ["all", "All"], ["editor", "Arena editor"], ["console", "Robot console"],
+  ["teleop", "Teleop"], ["sim", "Gazebo sim"], ["app", "App"],
+];
+const NAMES = Object.fromEntries(TABS);
+const KEEP = 5000;  // lines kept in the page
+const EMPTY = {
+  all: "Nothing logged yet.",
+  editor: "Saves, renames and errors in the arena editor show here.",
+  console: "The robot console's ROS log shows here. It needs ROS sourced.",
+  teleop: "The controller nodes' ROS log (controller_robots, racing_teleop)"
+    + " shows here, wherever they run.",
+  sim: "The output of a sim launched from the editor shows here.",
+  app: "The app's own messages show here.",
+};
+
+let tab = "all";
+try { tab = localStorage.getItem("logsTab") || "all"; } catch (e) {}
+if (!(tab in NAMES)) tab = "all";
+let lines = [];
+let last = 0;
+let clearedAt = 0;  // line number Clear was pressed at
+const header = document.querySelector("header");
+const log = document.getElementById("log");
+
+const buttons = {};
+for (const [key, name] of TABS) {
+  const button = document.createElement("button");
+  button.className = "tab";
+  button.setAttribute("role", "tab");
+  button.innerHTML = `${name} <span class="count"></span>`;
+  button.addEventListener("click", () => pick(key));
+  header.append(button);
+  buttons[key] = button;
+}
+const tools = document.createElement("div");
+tools.className = "tools";
+tools.innerHTML = `<label><input type="checkbox" id="follow" checked>
+  Follow</label><button id="clear" title="Hide the lines so far">Clear</button>`;
+header.append(tools);
+const follow = document.getElementById("follow");
+document.getElementById("clear").addEventListener("click", () => {
+  clearedAt = last;
+  render();
+});
+
+function pick(key) {
+  tab = key;
+  try { localStorage.setItem("logsTab", key); } catch (e) {}
+  render();
+}
+
+function shown(line) {
+  return line.n > clearedAt && (tab === "all" || line.source === tab);
+}
+
+function stamp(seconds) {
+  const date = new Date(seconds * 1000);
+  return date.toTimeString().slice(0, 8) + "."
+    + String(date.getMilliseconds()).padStart(3, "0");
+}
+
+function row(line) {
+  const div = document.createElement("div");
+  div.className = line.level;
+  const time = document.createElement("span");
+  time.className = "time";
+  time.textContent = stamp(line.time) + " ";
+  div.append(time);
+  if (tab === "all") {
+    const source = document.createElement("span");
+    source.className = "source";
+    source.textContent = `[${NAMES[line.source] || line.source}] `;
+    div.append(source);
+  }
+  div.append(line.text);
+  return div;
+}
+
+function counts() {
+  const all = {}, errors = {};
+  for (const line of lines) {
+    if (line.n <= clearedAt) continue;
+    for (const key of ["all", line.source]) {
+      all[key] = (all[key] || 0) + 1;
+      if (line.level === "error") errors[key] = (errors[key] || 0) + 1;
+    }
+  }
+  for (const [key, button] of Object.entries(buttons)) {
+    button.setAttribute("aria-selected", String(key === tab));
+    const count = button.querySelector(".count");
+    count.textContent = all[key] ? String(all[key]) : "";
+    count.classList.toggle("error", Boolean(errors[key]));
+    count.title = errors[key] ? `${errors[key]} errors` : "";
+  }
+}
+
+function render() {
+  counts();
+  log.replaceChildren(...lines.filter(shown).map(row));
+  if (!log.children.length) {
+    const empty = document.createElement("div");
+    empty.id = "empty";
+    empty.textContent = EMPTY[tab];
+    log.append(empty);
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+function append(added) {
+  counts();
+  const rows = added.filter(shown).map(row);
+  if (!rows.length) return;
+  document.getElementById("empty")?.remove();
+  const atEnd = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  log.append(...rows);
+  while (log.children.length > KEEP) log.firstChild.remove();
+  if (follow.checked && atEnd) log.scrollTop = log.scrollHeight;
+}
+
+async function poll() {
+  try {
+    const reply = await fetch(`/api/logs?after=${last}`);
+    const data = await reply.json();
+    if (data.last < last) {  // the app started again
+      lines = [];
+      clearedAt = 0;
+      last = 0;
+      render();
+      return poll();
+    }
+    last = data.last;
+    if (data.lines.length) {
+      lines = lines.concat(data.lines).slice(-KEEP);
+      append(data.lines);
+    }
+  } catch (e) {
+    // The app is not up: try again on the next tick.
+  }
+}
+
+render();
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
