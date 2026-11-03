@@ -41,6 +41,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 SHELL = os.path.join(HERE, "gamemaster.html")
 # Draws the modules, for both tabs.
 DRAW = os.path.join(HERE, "arena_draw.js")
+DIALOGS = os.path.join(HERE, "dialogs.js")
 LOGS_PAGE = os.path.join(HERE, "app_log.html")
 TABS = ("editor", "console", "logs")
 # Changes the editor makes as it is used, not worth a log line each.
@@ -130,6 +131,8 @@ def handler(console=None, sim=None, book=None):
                 return self.file(console_page, HTML)
             if path == "/arena_draw.js":
                 return self.file(DRAW, "text/javascript; charset=utf-8")
+            if path == "/dialogs.js":
+                return self.file(DIALOGS, "text/javascript; charset=utf-8")
             if path == "/arena_view3d.js":
                 return self.file(arena_editor.VIEW3D,
                                  "text/javascript; charset=utf-8")

@@ -30,10 +30,7 @@ PARTS = "/api/parts/"
 
 
 def layout_name(path):
-    name = unquote(path[len(PREFIX):])
-    if not arena_layout.NAME.match(name):
-        raise ValueError("names are letters, digits, - and _ only")
-    return name
+    return arena_layout.layout_name(unquote(path[len(PREFIX):]))
 
 
 def get(path):
@@ -80,8 +77,9 @@ def put(path, read_body, read_raw=None):
         return None
     try:
         layout = arena_layout.normalise(read_body())
-        saved = arena_layout.save(layout_name(path), layout)
-        return 200, {"path": saved, "problems": arena_layout.check(layout)}
+        name = layout_name(path)
+        saved = arena_layout.save(name, layout)
+        return 200, {"path": saved, "name": name, "problems": arena_layout.check(layout)}
     except (ValueError, TypeError, KeyError) as error:
         return 400, {"error": str(error)}
 
