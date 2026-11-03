@@ -161,7 +161,9 @@
   .tool[aria-pressed=true] {
     border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
   }
-  .tool svg { width: 30px; height: 30px; }
+  .tool svg, .tool img { width: 30px; height: 30px; }
+  .tool img, .parts img { border-radius: 2px; background: var(--floor); }
+  .parts img { width: 24px; height: 24px; }
   #stack[aria-pressed=true], #halves[aria-pressed=true] {
     border-color: var(--accent); background: var(--accent);
     color: var(--accent-ink);
@@ -668,11 +670,31 @@ function drawHover() {
           result ? "var(--accent)" : "var(--bad)");
 }
 
+// A module's picture from its mesh, from above for the top view and
+// isometric for the 3D one, or null until three.js and the mesh load.
+function iconOf(type, rotation) {
+  return window.arenaIcon ? window.arenaIcon(type,
+    view === "3d" ? "iso" : "top", rotation, render) : null;
+}
+
+// Show a module's picture in an img, or its drawing if there is none yet.
+function showIcon(img, svg, url) {
+  if (url && img.getAttribute("src") !== url) img.src = url;
+  img.hidden = !url;
+  if (svg) svg.style.display = url ? "none" : "";
+}
+
 // The tool buttons, the rotation preview, the size picker and the caption.
 function drawPanel() {
+  for (const img of document.querySelectorAll("#parts img[data-type]")) {
+    showIcon(img, null, iconOf(img.dataset.type, 0));
+  }
   for (const [type] of TOOLS) {
     const svg = document.getElementById(`tool-${type}`);
     if (!svg) continue;
+    const url = iconOf(type, turns(type) ? newRotation : 0);
+    showIcon(document.getElementById(`icon-${type}`), svg, url);
+    if (url) continue;
     svg.replaceChildren();
     defs(svg, `tool-${type}`);
     el("rect", { x: 2, y: 2, width: 26, height: 26, rx: 2,
@@ -730,9 +752,13 @@ function buildTools() {
     b.setAttribute("aria-pressed", type === tool && !deleting);
     b.title = `Place a ${label(type)}`;
     const svg = el("svg", { viewBox: "0 0 30 30", id: `tool-${type}` }, b);
+    const img = document.createElement("img");
+    img.id = `icon-${type}`;
+    img.alt = "";
+    img.hidden = true;
     const kbd = document.createElement("kbd");
     kbd.textContent = i + 1;
-    b.append(svg, name);
+    b.append(svg, img, name);
     if (i < 9) b.append(kbd);
     b.addEventListener("click", () => setTool(type));
     tools.appendChild(b);
@@ -1035,6 +1061,8 @@ function setView(name) {
     b.setAttribute("aria-pressed", b.dataset.view === name);
   }
   if (window.arena3d) window.arena3d.resize();
+  // The icons change too: from above, or isometric for the 3D view.
+  if (window.arenaIcon) render();
 }
 
 for (const b of document.querySelectorAll("#view-row button")) {
@@ -1424,7 +1452,11 @@ function buildParts() {
     const li = document.createElement("li");
     const name = document.createElement("span");
     name.textContent = label(type);
-    li.append(name,
+    const img = document.createElement("img");
+    img.dataset.type = type;
+    img.alt = "";
+    img.hidden = true;
+    li.append(img, name,
       button("Rename", `Rename ${label(type)}, in the saved layouts too`,
              () => renamePart(type)),
       button("Delete", `Move ${label(type)} to the archive`,
@@ -1546,7 +1578,8 @@ async function restorePart(archived, part) {
   render();
   // three.js comes from unpkg.com, so the 3D view needs the internet once;
   // the top view works without it.
-  import("./arena_view3d.js").then(({ create }) => {
+  import("./arena_view3d.js").then(({ create, icon }) => {
+    window.arenaIcon = icon;
     window.arena3d = create(document.getElementById("view3d"));
     render();
   }).catch(error => {
