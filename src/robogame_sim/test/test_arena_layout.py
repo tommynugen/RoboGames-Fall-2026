@@ -853,7 +853,7 @@ def test_parts_are_renamed_deleted_to_the_archive_and_restored(parts):
                                   "rotation": 0}]})
 
     # Renamed, in the layout too.
-    assert al.rename_part("crate", "box") == ["yard"]
+    assert al.rename_part("crate", "box") == ("box", ["yard"])
     assert "box" in al.PARTS and "crate" not in al.PARTS
     assert al.load("yard")["modules"][0]["type"] == "box"
     with pytest.raises(ValueError):
@@ -885,11 +885,50 @@ def test_parts_are_renamed_deleted_to_the_archive_and_restored(parts):
         al.restore_part("../escape")
 
 
+def test_part_names_have_spaces_and_files_dashes(parts):
+    part = al.add_part("big  crate ", box_stl(3, 3, 2), units="inch")
+    assert part["type"] == "big-crate" and part["label"] == "big crate"
+    assert os.path.basename(part["path"]) == "big-crate.stl"
+    assert al.modules_info()["types"]["big-crate"]["label"] == "big crate"
+    with pytest.raises(ValueError):
+        al.add_part("big/crate", box_stl(1, 1, 1), units="inch")
+
+    assert al.rename_part("big-crate", "small box") == ("small-box", [])
+    assert al.PARTS["small-box"].label == "small box"
+    # Only the name's case or spacing changed: the same file.
+    assert al.rename_part("small-box", "small  box")[0] == "small-box"
+    al.archive_part("small-box")
+    assert al.archived_parts()[0]["label"] == "small box"
+    assert al.restore_part("small-box") == "small-box"
+    assert al.PARTS["small-box"].label == "small box"
+
+
+def test_rename_leaves_no_installed_copy_behind(parts, tmp_path,
+                                               monkeypatch):
+    # colcon installs a copy of each part, or a link to it, in share.
+    share = tmp_path / "share"
+    (share / "layouts" / "parts").mkdir(parents=True)
+    monkeypatch.setattr(al, "share_dir", lambda: str(share))
+    path = al.add_part("crate", box_stl(3, 3, 2), units="inch")["path"]
+    copy = share / "layouts" / "parts" / "crate.stl"
+    copy.write_bytes(open(path, "rb").read())
+
+    al.rename_part("crate", "box")
+    assert "crate" not in al.PARTS and "box" in al.PARTS
+    assert not copy.exists()
+
+    # A link left behind is not a part.
+    os.symlink(str(parts / "parts" / "gone.stl"), str(copy))
+    al.refresh_parts()
+    assert "crate" not in al.PARTS
+
+
 def test_editor_routes_for_parts(parts):
     from robogame_sim import arena_editor
     al.add_part("crate", box_stl(3, 3, 2), units="inch")
     status, body = arena_editor.post("/api/parts/crate/rename",
                                      lambda: {"name": "box"})
+    assert body["name"] == "box"
     assert status == 200 and "box" in body["modules"]["types"]
     status, body = arena_editor.post("/api/parts/box/delete", lambda: {})
     assert status == 200 and body["archived"] == "box"

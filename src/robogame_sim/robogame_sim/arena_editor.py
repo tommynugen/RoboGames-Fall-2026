@@ -120,12 +120,12 @@ def post(path, read_body):
     try:
         if path == "/api/check":
             return 200, {"problems": arena_layout.check(read_body())}
-        bits = path.strip("/").split("/")
+        bits = [unquote(bit) for bit in path.strip("/").split("/")]
         if len(bits) == 4 and bits[:2] == ["api", "parts"]:
             kind, action = bits[2], bits[3]
             if action == "rename":
                 name = (read_body() or {}).get("name", "")
-                layouts = arena_layout.rename_part(kind, name)
+                name, layouts = arena_layout.rename_part(kind, name)
                 return parts_state(name=name, layouts=layouts)
             if action == "delete":
                 layouts = arena_layout.layouts_using(kind)

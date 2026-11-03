@@ -220,17 +220,54 @@ def refresh_parts():
             continue
         for file in os.listdir(folder):
             kind = file[:-4]
+            path = os.path.join(folder, file)
+            # isfile, so a link left behind by a renamed part is skipped.
             if (file.lower().endswith(".stl") and NAME.match(kind)
-                    and kind not in BUILT_IN):
-                found[kind] = os.path.join(folder, file)
+                    and kind not in BUILT_IN and os.path.isfile(path)):
+                found[kind] = path
 
     for kind in [k for k in PARTS if k not in BUILT_IN and k not in found]:
         del PARTS[kind]
 
     for kind, path in found.items():
-        if kind not in PARTS or PARTS[kind].mesh != path:
-            PARTS[kind] = Part(kind, path, "block", BLOCK_COLOUR, turns=True,
-                               mesh_collision=True)
+        label = stl_label(path, kind)
+        if (kind not in PARTS or PARTS[kind].mesh != path
+                or PARTS[kind].label != label):
+            PARTS[kind] = Part(label, path, "block", BLOCK_COLOUR,
+                               turns=True, mesh_collision=True)
+
+
+# What write_stl puts before a part's name in the file's 80 byte header.
+TITLE = "robogame_sim part "
+# A part's name as typed: letters, digits, spaces, - and _. Its type, and
+# file name, has - for each space.
+LABEL = re.compile(r"^[A-Za-z0-9_ -]{1,40}$")
+
+
+def part_name(label):
+    """(type, label) for a part's name as typed, spaces and all."""
+    label = " ".join(str(label or "").split())
+    if not LABEL.match(label):
+        raise ValueError("names are letters, digits, spaces, - and _ only")
+    return label.replace(" ", "-"), label
+
+
+def stl_label(path, kind):
+    """A part's name with its spaces, from its file's header, or its type
+    for a file not saved by the editor."""
+    try:
+        with open(path, "rb") as stl:
+            head = stl.read(80).rstrip(b"\0").decode("ascii")
+    except (OSError, UnicodeDecodeError):
+        return kind
+    label = head[len(TITLE):] if head.startswith(TITLE) else ""
+    return label if part_name(label or kind)[0] == kind else kind
+
+
+def set_stl_label(path, label):
+    """Write a part's name into its file's header."""
+    with open(path, "r+b") as stl:
+        stl.write(f"{TITLE}{label}".encode()[:80].ljust(80, b"\0"))
 
 
 def guess_units(extent):
@@ -246,9 +283,9 @@ def guess_units(extent):
 def add_part(name, data, units="auto", up="z", folder=None):
     """Save STL bytes as the part NAME: turned so z is up, scaled to
     metres, centred on x, y = 0 and standing on z = 0. Returns the path and
-    what was done, as a dict for the editor."""
-    if not NAME.match(name):
-        raise ValueError("names are letters, digits, - and _ only")
+    what was done, as a dict for the editor. NAME may have spaces, which
+    are - in its type and file name."""
+    name, label = part_name(name)
     if name in BUILT_IN:
         raise ValueError(f"{name} is one of the CAD's modules, pick "
                          f"another name")
@@ -291,10 +328,10 @@ def add_part(name, data, units="auto", up="z", folder=None):
     folder = folder or part_dirs()[0]
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, f"{name}.stl")
-    write_stl(path, faces, f"robogame_sim part {name}")
+    write_stl(path, faces, f"{TITLE}{label}")
     refresh_parts()
 
-    return {"path": path, "type": name, "units": units,
+    return {"path": path, "type": name, "label": label, "units": units,
             "size": [float(v) for v in size]}
 
 
@@ -321,13 +358,32 @@ def dropped_part(kind):
     return PARTS[kind].mesh
 
 
-def free_name(name):
-    """ValueError unless NAME can be a new part."""
-    if not NAME.match(name or ""):
-        raise ValueError("names are letters, digits, - and _ only")
+def free_name(name, keep=None):
+    """(type, label) for NAME as a new part's name, or ValueError if a part
+    other than KEEP has that type."""
+    kind, label = part_name(name)
     refresh_parts()
-    if name in PARTS:
-        raise ValueError(f"there is a {name} already, pick another name")
+    if kind in PARTS and kind != keep:
+        raise ValueError(f"there is a {PARTS[kind].label} already, pick "
+                         f"another name")
+    return kind, label
+
+
+def take_part(kind, target):
+    """Move a part's file to TARGET, and take away its other copies, such
+    as the one colcon installs, so it is not still a part from there."""
+    path = dropped_part(kind)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    os.replace(path, target)
+    for folder in part_dirs():
+        copy = os.path.join(folder, f"{kind}.stl")
+        if os.path.lexists(copy) and copy != target:
+            try:
+                os.unlink(copy)
+            except OSError as error:
+                raise ValueError(f"{copy} could not be taken away: "
+                                 f"{error.strerror}") from error
+    refresh_parts()
 
 
 def layouts_using(kind):
@@ -347,11 +403,16 @@ def layouts_using(kind):
 
 def rename_part(kind, name):
     """Rename a dropped part, and its modules in the layouts saved in the
-    first layout folder. Returns those layouts' names."""
-    path = dropped_part(kind)
-    free_name(name)
-    os.rename(path, os.path.join(os.path.dirname(path), f"{name}.stl"))
+    first layout folder. NAME may have spaces. Returns the new type and
+    those layouts' names."""
+    dropped_part(kind)
+    name, label = free_name(name, keep=kind)
+    target = os.path.join(part_dirs()[0], f"{name}.stl")
+    take_part(kind, target)
+    set_stl_label(target, label)
     refresh_parts()
+    if name == kind:
+        return name, []
 
     changed = []
     folder = layout_dirs()[0]
@@ -368,21 +429,21 @@ def rename_part(kind, name):
             stream.write(dumps({"size": data.get("size", SIZE),
                                 "modules": data.get("modules", [])}))
         changed.append(layout)
-    return changed
+    return name, changed
 
 
 def archive_part(kind):
     """Move a dropped part to the archive. Layouts that use it are left
     as they are, and open again once it is restored. Returns its name in
     the archive, which has .2, .3... added if that name is taken."""
-    path = dropped_part(kind)
+    dropped_part(kind)
     os.makedirs(archive_dir(), exist_ok=True)
     name, n = kind, 1
     while os.path.exists(os.path.join(archive_dir(), f"{name}.stl")):
         n += 1
         name = f"{kind}.{n}"
     target = os.path.join(archive_dir(), f"{name}.stl")
-    os.rename(path, target)
+    take_part(kind, target)
     # When it was deleted, for the archive's list.
     os.utime(target)
     refresh_parts()
@@ -399,22 +460,26 @@ def archived_parts():
     for file in os.listdir(folder):
         match = ARCHIVED.match(file[:-4])
         if file.lower().endswith(".stl") and match:
-            stat = os.stat(os.path.join(folder, file))
+            path = os.path.join(folder, file)
+            stat = os.stat(path)
             parts.append({"name": file[:-4], "part": match[1],
+                          "label": stl_label(path, match[1]),
                           "deleted": stat.st_mtime, "bytes": stat.st_size})
     return sorted(parts, key=lambda p: -p["deleted"])
 
 
 def restore_part(archived, name=None):
-    """Bring a part back from the archive, as NAME or the name it had."""
+    """Bring a part back from the archive, as NAME or the name it had.
+    Returns its type."""
     match = ARCHIVED.match(archived or "")
     path = os.path.join(archive_dir(), f"{archived}.stl")
     if not match or not os.path.isfile(path):
         raise ValueError(f"no {archived} in the archive")
-    name = name or match[1]
-    free_name(name)
+    name, label = free_name(name or stl_label(path, match[1]))
+    target = os.path.join(part_dirs()[0], f"{name}.stl")
     os.makedirs(part_dirs()[0], exist_ok=True)
-    os.rename(path, os.path.join(part_dirs()[0], f"{name}.stl"))
+    os.rename(path, target)
+    set_stl_label(target, label)
     refresh_parts()
     return name
 

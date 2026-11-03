@@ -735,10 +735,17 @@ collisions, by its full path (`file://...`), and the planner's terrain
 from the same mesh. A layout with a part only opens where that part's
 file is.
 
+A part's name may have spaces: its file, and its type in layouts, has a
+- for each space (`big crate` is `parts/big-crate.stl`), and the name as
+typed is kept in the STL's header for the editor to show.
+
 The editor's Parts panel lists the dropped parts, each with Rename and
 Delete. Rename renames the file and the part's modules in the layouts
 saved in `layouts`, and refuses a name that is taken or one of the CAD's
-modules, which cannot be renamed or deleted. Delete moves the file to
+modules, which cannot be renamed or deleted. Rename and Delete also take
+away the copy of the part that colcon installs in
+`install/robogame_sim/share/robogame_sim/layouts/parts`, which before
+2026-11-03 stayed on as a second module under the old name. Delete moves the file to
 `layouts/parts/archive`, as `NAME.stl`, or `NAME.2.stl` and on if that is
 taken, and takes the part's modules off the board; layouts that use it
 are left as they are, and do not open until it is back. The Archive, under
@@ -748,6 +755,8 @@ back under its own name, or asks for another if a part has it now.
 Checked on 2026-11-02 with the tests (rename in a saved layout, delete
 twice under one name, restore, and refusing the CAD's modules) and in
 headless Chromium: a dropped crate renamed to box, deleted, and restored.
+Names with spaces, and renaming a part that has an installed copy, were
+checked with the tests on 2026-11-03.
 
 Checked on 2026-11-02 with the tests (scaling, Y up, refusing a bad file
 or a name of the CAD's, cells and offsets at each rotation, a ramp running

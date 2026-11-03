@@ -347,8 +347,8 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
 <dialog id="stl-dialog">
   <form method="dialog">
     <h2>Add an STL part</h2>
-    <label>Name <input id="stl-name" required pattern="[A-Za-z0-9_\-]{1,40}"
-      title="Letters, digits, - and _ only"></label>
+    <label>Name <input id="stl-name" required pattern="[A-Za-z0-9_ \-]{1,40}"
+      title="Letters, digits, spaces, - and _; the file has - for spaces"></label>
     <label>Units <select id="stl-units">
       <option value="auto">Guess from its size</option>
       <option value="mm">Millimetres</option>
@@ -697,7 +697,7 @@ function drawPanel() {
 
 function buildTools() {
   TOOLS = [...CAD_TOOLS, ...Object.keys(info.types).filter(isBlock).sort()
-    .map(type => [type, type])];
+    .map(type => [type, label(type)])];
   const tools = document.getElementById("tools");
   tools.replaceChildren();
   TOOLS.forEach(([type, name], i) => {
@@ -1284,12 +1284,12 @@ async function addPart(file, point) {
   const dialog = document.getElementById("stl-dialog");
   const nameInput = document.getElementById("stl-name");
   const stem = file.name.replace(/\.stl$/i, "")
-    .replace(/[^A-Za-z0-9_-]+/g, "_").slice(0, 40) || "part";
+    .replace(/[^A-Za-z0-9_ -]+/g, "_").trim().slice(0, 40) || "part";
   nameInput.value = stem;
   document.getElementById("stl-note").textContent =
     `${file.name}, ${(file.size / 1024).toFixed(0)} KB.` +
-    (info.types[stem] ? ` There is a ${stem} already, which it replaces.`
-                      : "");
+    (info.types[partType(stem)]
+      ? ` There is a ${stem} already, which it replaces.` : "");
   const answer = await new Promise(resolve => {
     dialog.addEventListener("close", () => resolve(dialog.returnValue),
                             { once: true });
@@ -1308,11 +1308,12 @@ async function addPart(file, point) {
       { method: "PUT", body: await file.arrayBuffer(),
         headers: { "Content-Type": "application/octet-stream" } });
     info = result.modules;
+    const type = result.part.type;
     buildTools();
     buildParts();
-    setTool(name);
+    setTool(type);
     // The part may have changed size, so drop any that no longer fit.
-    if (!fits(modules)) modules = modules.filter(m => m.type !== name);
+    if (!fits(modules)) modules = modules.filter(m => m.type !== type);
     if (point) {
       remember();
       if (!apply(point, false, false)) history.pop();
@@ -1353,11 +1354,11 @@ function buildParts() {
   for (const type of parts) {
     const li = document.createElement("li");
     const name = document.createElement("span");
-    name.textContent = type;
+    name.textContent = label(type);
     li.append(name,
-      button("Rename", `Rename ${type}, in the saved layouts too`,
+      button("Rename", `Rename ${label(type)}, in the saved layouts too`,
              () => renamePart(type)),
-      button("Delete", `Move ${type} to the archive`,
+      button("Delete", `Move ${label(type)} to the archive`,
              () => deletePart(type)));
     list.append(li);
   }
@@ -1370,11 +1371,11 @@ function buildParts() {
     const li = document.createElement("li");
     const name = document.createElement("span");
     const when = document.createElement("small");
-    name.textContent = part.name + " ";
+    name.textContent = (part.label || part.name) + " ";
     when.textContent = new Date(part.deleted * 1000).toLocaleString();
     name.append(when);
-    li.append(name, button("Restore", `Bring ${part.name} back as a part`,
-                           () => restorePart(part.name, part.part)));
+    li.append(name, button("Restore", `Bring ${part.label} back as a part`,
+                           () => restorePart(part.name, part.label)));
     shelf.append(li);
   }
 }
@@ -1400,23 +1401,29 @@ async function partAction(path, body) {
   return api(path, { method: "POST", body: JSON.stringify(body || {}) });
 }
 
+// A part's type, and file name, from its name: - for each space.
+const partType = name => name.trim().split(/\s+/).join("-");
+
 async function renamePart(type) {
-  const name = prompt(`Rename ${type} to (letters, digits, - and _):`, type);
-  if (!name || name === type) return;
+  const old = label(type);
+  const name = prompt(`Rename ${old} to (letters, digits, spaces, - and _):`,
+                      old);
+  if (!name || name.trim() === old) return;
   try {
     const result = await partAction(
       `/api/parts/${encodeURIComponent(type)}/rename`, { name });
-    partsChanged(result, type, name);
+    partsChanged(result, type, result.name);
     const also = result.layouts.length
       ? `, and in ${result.layouts.join(", ")}` : "";
-    updateStatus(`Renamed ${type} to ${name}${also}`, "saved");
+    updateStatus(`Renamed ${old} to ${label(result.name)}${also}`, "saved");
   } catch (error) {
     updateStatus(`Could not rename ${type}: ${error.message}`, "dirty");
   }
 }
 
 async function deletePart(type) {
-  if (!confirm(`Move ${type} to the archive? It can be restored from ` +
+  const old = label(type);
+  if (!confirm(`Move ${old} to the archive? It can be restored from ` +
                "there. Layouts that use it will not open until it is.")) {
     return;
   }
@@ -1427,17 +1434,17 @@ async function deletePart(type) {
     const used = result.layouts.length
       ? ` ${result.layouts.join(", ")} use it, and open again once it is ` +
         "restored." : "";
-    updateStatus(`Moved ${type} to the archive as ${result.archived}.` +
+    updateStatus(`Moved ${old} to the archive.` +
                  used, used ? "dirty" : "saved");
   } catch (error) {
-    updateStatus(`Could not delete ${type}: ${error.message}`, "dirty");
+    updateStatus(`Could not delete ${old}: ${error.message}`, "dirty");
   }
 }
 
 async function restorePart(archived, part) {
   // Restored as its own name, unless that is taken by a part now.
   let name = part;
-  if (info.types[name]) {
+  if (info.types[partType(name)]) {
     name = prompt(`There is a ${name} already. Restore it as:`,
                   `${name}_2`);
     if (!name) return;
@@ -1446,7 +1453,7 @@ async function restorePart(archived, part) {
     const result = await partAction(
       `/api/archive/${encodeURIComponent(archived)}/restore`, { name });
     partsChanged(result);
-    updateStatus(`Restored ${result.name}`, "saved");
+    updateStatus(`Restored ${label(result.name)}`, "saved");
   } catch (error) {
     updateStatus(`Could not restore ${archived}: ${error.message}`,
                  "dirty");
