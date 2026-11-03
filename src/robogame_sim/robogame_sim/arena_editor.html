@@ -15,6 +15,8 @@
     --accent-ink: #ffffff;
     --floor: #c9cbcf;
     --floor-line: #b3b6bc;
+    --plate: #8e949c;
+    --plate-line: #767c85;
     --peg: #a9adb4;
     --platform: #3b61b4;
     --platform-edge: #2a4a8f;
@@ -44,6 +46,8 @@
       --accent-ink: #0d1117;
       --floor: #4a4e57;
       --floor-line: #3c4048;
+      --plate: #262a31;
+      --plate-line: #1b1e23;
       --peg: #3a3e46;
       --platform: #4f78cf;
       --platform-edge: #33589f;
@@ -66,7 +70,8 @@
   :root[data-theme="dark"] {
     --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
     --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
-    --floor: #4a4e57; --floor-line: #3c4048; --peg: #3a3e46;
+    --floor: #4a4e57; --floor-line: #3c4048;
+    --plate: #262a31; --plate-line: #1b1e23; --peg: #3a3e46;
     --platform: #4f78cf; --platform-edge: #33589f; --platform2: #2c4a8c;
     --platform2-edge: #1a2f5c; --platform2-ink: #d5e0f7;
     --ramp-low: #a9c9e3; --ramp-high: #5d93c4; --ramp-arrow: #0f2650;
@@ -307,6 +312,10 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
         <li>Walls and thwomps take one row of two holes, on the line of
           holes under the pointer, so two fit on a tile side by side, or
           one each way.</li>
+        <li>Floor tiles go on whole squares, under whatever is there, as
+          long as it then stands level: a module must be all on tiles or
+          all on the bare plate. Deleting a tile takes what stands on it
+          too.</li>
         <li>Click a ramp, wall or thwomp with its own tool to turn it a
           quarter turn; <kbd>R</kbd> turns the one under the pointer.</li>
         <li>Shift-click, or turn on Stack, to put a module on top of
@@ -424,6 +433,7 @@ let info = {
 const CAD_TOOLS = [
   ["platform", '1" platform'], ["platform_2", '2" platform'],
   ["ramp", "Ramp"], ["wall", "Wall"], ["thwomp", "Thwomp"],
+  ["floor", "Floor tile"],
 ];
 // The CAD's modules, then the STL parts dropped onto the page.
 let TOOLS = CAD_TOOLS;
@@ -458,17 +468,21 @@ const snapshot = () => JSON.stringify(layout());
 const turns = type => !!(info.types[type] && info.types[type].turns);
 const label = type => (info.types[type] || { label: type }).label;
 // A module as the checks name it, to find the module a problem is with.
-const moduleKey = m => [m.type, m.col, m.row, m.level || 0,
+const moduleKey = m => [m.type, m.col, m.row, Math.max(m.level || 0, 0),
                         turns(m.type) ? m.rotation : 0].join("|");
 
 const onGrid = ([x, y], n = size) => x >= 0 && y >= 0 && x < 2 * n &&
                                       y < 2 * n;
 
-// Whether a module above the floor is on platforms under every cell, all
-// as high, as arena_layout.normalise wants.
+// Whether a module above the floor is on platforms under every cell, and
+// any module all on floor tiles or all on the bare plate, all as high, as
+// arena_layout.normalise wants.
 function supported(m, list, cols) {
-  if (!m.level) return true;
+  if (isFloor(m.type)) return true;
   const cells = cellsOf(m);
+  const level = cell => standing(m, cols, cell);
+  if (!m.level) return cells.every(c => Math.abs(level(c) - level(cells[0]))
+                                        < 1e-4);
   const on = cell => list.some(p => p.level === m.level - 1 &&
                                     isPlatform(p.type) &&
                                     cellsOf(p).some(c => c[0] === cell[0] &&
@@ -505,20 +519,21 @@ function settle(list) {
 function layout() {
   const list = modules.map(m => {
     const entry = { type: m.type, col: m.col, row: m.row };
-    if (m.level) entry.level = m.level;
+    if (m.level > 0) entry.level = m.level;
     if (turns(m.type)) entry.rotation = m.rotation;
     return entry;
   });
   list.sort((a, b) => a.row - b.row || a.col - b.col ||
-                      (a.level || 0) - (b.level || 0) ||
+                      (a.type === "floor" ? -1 : a.level || 0) -
+                      (b.type === "floor" ? -1 : b.level || 0) ||
                       a.type.localeCompare(b.type) ||
                       (a.rotation || 0) - (b.rotation || 0));
-  return { size, modules: list };
+  return { size, base: "quadrants", modules: list };
 }
 
 function setLayout(data) {
   size = data.size || info.size;
-  modules = (data.modules || []).map(m => ({ rotation: 0, level: 0, ...m }));
+  modules = loadModules(data.modules);
 }
 
 function remember() {
@@ -570,7 +585,7 @@ function outline(parent, box, colour, width = 3, dash = "") {
 // inside its square, like a tier.
 function drawPlaced(parent, m, prefix, opacity = 1) {
   const [x, y] = cellXY(m.col, m.row);
-  const i = m.level && isPlatform(m.type) ?
+  const i = m.level > 0 && isPlatform(m.type) ?
     Math.min(m.level * 0.08, 0.24) * CELL : 0;
   drawModule(parent, m.type, x + i, y + i, CELL - 2 * i, m.rotation, prefix,
              opacity);
@@ -582,16 +597,7 @@ function render() {
   board.replaceChildren();
   defs(board, "board");
 
-  for (let row = 0; row < size; row++) {
-    for (let col = 0; col < size; col++) {
-      const [x, y] = cellXY(col, row);
-      const g = el("g", {}, board);
-      el("rect", { x, y, width: CELL, height: CELL, fill: "var(--floor)",
-                   stroke: "var(--floor-line)", "stroke-width": 1 }, g);
-      drawPegs(g, x, y, CELL);
-      el("title", {}, g).textContent = `Floor at ${col}, ${row}`;
-    }
-  }
+  drawPlates(board, size, CELL, PAD);
 
   const bad = new Map();
   for (const p of problems) {
@@ -605,8 +611,11 @@ function render() {
     const g = el("g", {}, board);
     drawPlaced(g, m, "board");
     const tip = [`${label(m.type)} at ${m.col}, ${m.row}`];
-    if (m.level) {
-      tip.push(`On platforms ${inches(standing(m, cols))} inches up`);
+    if (m.level > 0) {
+      tip.push(`On platforms ${inches(aboveFloor(m, cols))} inches up`);
+    } else if (!isFloor(m.type) && aboveFloor(m, cols) ===
+               standing(m, cols)) {
+      tip.push("On the bare plate, half an inch lower than on a tile");
     }
     el("title", {}, g).textContent =
       [...tip, ...(bad.get(moduleKey(m)) || [])].join("\n");
@@ -614,12 +623,12 @@ function render() {
 
   // How high the top of each stack is, in its corner.
   for (const m of drawn) {
-    if (!m.level || !cellsOf(m).every(cell => topAt(cols, cell) === m)) {
+    if (m.level <= 0 || !cellsOf(m).every(cell => topAt(cols, cell) === m)) {
       continue;
     }
     const [x, y] = cellXY(m.col, m.row);
     drawBadge(board, x, y, CELL, inches(
-      standing(m, cols) + (isPlatform(m.type) ? heightOf(m.type) : 0)));
+      aboveFloor(m, cols) + (isPlatform(m.type) ? heightOf(m.type) : 0)));
   }
 
   for (const m of drawn) {
@@ -727,11 +736,12 @@ function drawPanel() {
   const inches = (info.module / 0.0254).toFixed(0);
   if (size === info.size) {
     caption.className = "caption";
-    caption.textContent = `Seen from above. Each square is one ` +
-      `${(info.module * 100).toFixed(2)} cm (${inches} inch) module with ` +
-      `a floor tile under it, and its four peg holes; modules peg into ` +
-      `any of them, across tiles too. Arrows point uphill. On a stack, ` +
-      `the corner says how many inches up its top is.`;
+    caption.textContent = `Seen from above, on the four bare quadrant ` +
+      `plates. Each square is one ${(info.module * 100).toFixed(2)} cm ` +
+      `(${inches} inch) module. Floor tiles (6) lie on the plates, each ` +
+      `with four peg holes; modules peg in anywhere, across tiles too, ` +
+      `and stand half an inch lower on the bare plate. Arrows point ` +
+      `uphill. On a stack, the corner says how many inches up its top is.`;
   } else {
     caption.className = "caption warn";
     caption.textContent = `This layout is ${size} × ${size}, but the ` +
@@ -795,8 +805,9 @@ const hoverCell = point => [Math.floor(2 * point.x + 1),
 // half square, or whole square with Half squares off. A wall or thwomp
 // goes on the line of holes the pointer is over, along the way it faces.
 function candidate(point) {
+  const whole = !halves || isFloor(tool);
   const snap = v => Math.min(Math.max(
-    halves ? Math.round(2 * v) / 2 : Math.round(v), 0), size - 1);
+    whole ? Math.round(v) : Math.round(2 * v) / 2, 0), size - 1);
   const m = { type: tool, col: snap(point.x), row: snap(point.y),
               rotation: newRotation, level: 0 };
   if (!isSide(tool) || !halves) return m;
@@ -822,12 +833,24 @@ function under(point) {
 function plan(point, erase, stroke) {
   if (erase || deleting) {
     const m = under(point);
-    return m && { modules: settle(modules.filter(p => p !== m)) };
+    if (!m) return null;
+    // A floor tile takes what stands on it with it.
+    const gone = new Set(isFloor(m.type) ? cellsOf(m).map(cellKey) : []);
+    return { modules: settle(modules.filter(p => p !== m &&
+      !cellsOf(p).some(c => gone.has(cellKey(c))))) };
   }
 
   const placed = candidate(point);
   const cells = cellsOf(placed);
   if (!cells.every(cell => onGrid(cell))) return null;
+  if (isFloor(placed.type)) {
+    // Under whatever is there, if that leaves everything standing level.
+    placed.level = -1;
+    if (modules.some(m => isFloor(m.type) && m.col === placed.col &&
+                          m.row === placed.row)) return null;
+    const next = [...modules, placed];
+    return fits(next) ? { modules: next, placed } : null;
+  }
   const cols = columns();
   const tops = cells.map(cell => topAt(cols, cell));
 

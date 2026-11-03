@@ -7,6 +7,8 @@ const NS = "http://www.w3.org/2000/svg";
 const cellKey = ([x, y]) => `${x},${y}`;
 
 const isPlatform = type => type === "platform" || type === "platform_2";
+// A floor tile, which lies on the quadrant plates under everything else.
+const isFloor = type => type === "floor";
 const isSide = type => (info.types[type] || {}).mount === "side";
 // An STL dropped onto the editor, a block over the cells under it.
 const isBlock = type => (info.types[type] || {}).mount === "block";
@@ -48,6 +50,11 @@ function cellsOf(m) {
   return [[x, y], [x, y + 1]];
 }
 
+// A layout's modules as the pages hold them: level 0 left out of the file,
+// and floor tiles at level -1, under the modules at level 0.
+const loadModules = list => (list || []).map(m => ({
+  rotation: 0, ...m, level: isFloor(m.type) ? -1 : m.level || 0 }));
+
 // The modules over each cell, bottom first.
 function columns(list = modules) {
   const found = new Map();
@@ -74,6 +81,37 @@ function standing(m, cols, cell = cellsOf(m)[0]) {
   return (cols.get(cellKey(cell)) || [])
     .filter(p => p.level < m.level)
     .reduce((sum, p) => sum + heightOf(p.type), 0);
+}
+
+// How high a module stands above the floor under it, the tile or the bare
+// plate, which is what a stack's corner says.
+function aboveFloor(m, cols, cell = cellsOf(m)[0]) {
+  const under = cols.get(cellKey(cell)) || [];
+  const tile = under.length && isFloor(under[0].type) && !isFloor(m.type);
+  return standing(m, cols, cell) - (tile ? heightOf("floor") : 0);
+}
+
+// The quadrant plates, as the board's squares [col from, col to, row from,
+// row to], the second of each not included, as arena_layout.plates.
+function plates(n) {
+  const k = Math.floor(n / 2);
+  const found = [];
+  for (const [y0, y1] of [[0, k], [k, n]]) {
+    for (const [x0, x1] of [[0, k], [k, n]]) {
+      if (x1 > x0 && y1 > y0) found.push([x0, x1, y0, y1]);
+    }
+  }
+  return found;
+}
+
+// The bare plates under a board of n squares s across, its corner at pad.
+function drawPlates(parent, n, s, pad) {
+  for (const [x0, x1, y0, y1] of plates(n)) {
+    el("rect", { x: pad + x0 * s + 1, y: pad + (n - y1) * s + 1,
+                 width: (x1 - x0) * s - 2, height: (y1 - y0) * s - 2,
+                 rx: 3, fill: "var(--plate)", stroke: "var(--plate-line)",
+                 "stroke-width": 1.5 }, parent);
+  }
 }
 
 function el(name, attrs = {}, parent) {
@@ -207,9 +245,19 @@ function drawBlock(parent, x, y, s, type, rotation, opacity = 1, fit = false) {
   el("circle", { cx: nx, cy: ny, r, fill: "#8a4b2a" }, g);
 }
 
+// A floor tile with its four peg holes.
+function drawFloor(parent, x, y, s, opacity = 1) {
+  const g = el("g", { opacity }, parent);
+  el("rect", { x: x + 0.5, y: y + 0.5, width: s - 1, height: s - 1,
+               fill: "var(--floor)", stroke: "var(--floor-line)",
+               "stroke-width": 1 }, g);
+  drawPegs(g, x, y, s);
+}
+
 function drawModule(parent, type, x, y, s, rotation, prefix, opacity = 1,
                     fit = false) {
-  if (isBlock(type)) drawBlock(parent, x, y, s, type, rotation, opacity, fit);
+  if (isFloor(type)) drawFloor(parent, x, y, s, opacity);
+  else if (isBlock(type)) drawBlock(parent, x, y, s, type, rotation, opacity, fit);
   else if (type === "platform") drawPlatform(parent, x, y, s, opacity);
   else if (type === "platform_2") drawPlatform2(parent, x, y, s, opacity);
   else if (type === "ramp") drawRamp(parent, x, y, s, rotation, prefix,

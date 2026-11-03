@@ -12,6 +12,12 @@ import pytest
 from robogame_sim import arena_layout as al
 from robogame_sim.gamemaster import handler
 from robogame_sim.terrain import Terrain, read_stl
+
+
+def placed(layout):
+    """A layout's modules but the floor tiles, which a layout without a
+    base gets on every square."""
+    return [m for m in layout["modules"] if m["type"] != "floor"]
 from robogame_sim.terrain import parse_stl as read_stl_bytes
 
 HERE = os.path.dirname(__file__)
@@ -127,7 +133,7 @@ def test_rotation_is_kept_only_for_modules_that_turn():
         {"type": "platform_2", "col": 1, "row": 1, "rotation": 90},
         side("thwomp", 2, 1, 450)]})
     assert layout["size"] == al.SIZE
-    assert layout["modules"] == [platform(1, 1, "platform_2"),
+    assert placed(layout) == [platform(1, 1, "platform_2"),
                                  side("thwomp", 2, 1, 90)]
 
 
@@ -193,7 +199,7 @@ def test_layouts_save_and_load(tmp_path):
                                       side("wall", 4, 4, 270)]}
     path = al.save("trial", layout, folder=str(tmp_path))
     assert al.load(path) == al.normalise(layout)
-    saved = json.loads(open(path).read())["modules"]
+    saved = placed(json.loads(open(path).read()))
     assert [m.get("rotation") for m in saved] == [None, 180, 270]
     with pytest.raises(ValueError):
         al.save("../escape", layout, folder=str(tmp_path))
@@ -401,7 +407,7 @@ def test_stacked_modules_need_a_platform_under_them():
         on(side("thwomp", 1, 1, 90), 2), platform(1, 1, "platform_2"),
         on(platform(1, 1), 1), platform(2, 1)]})
     # Bottom first, and level left out on the floor.
-    assert layout["modules"] == [
+    assert placed(layout) == [
         platform(1, 1, "platform_2"), on(platform(1, 1), 1),
         on(side("thwomp", 1, 1, 90), 2), platform(2, 1)]
 
@@ -629,7 +635,7 @@ def test_walls_and_thwomps_share_a_tile_where_they_fit():
         [ramp(5, 5, 0), side("wall", 6, 5, 90), side("wall", 4, 5, 270)],
     ]
     for modules in fits:
-        assert len(al.normalise({"modules": modules})["modules"]) == \
+        assert len(placed(al.normalise({"modules": modules}))) == \
             len(modules)
 
     for clash in (
@@ -656,7 +662,7 @@ def test_walls_and_thwomps_share_a_tile_where_they_fit():
 
 def test_modules_go_in_steps_of_half_a_square():
     layout = al.normalise({"modules": [platform(5.5, 2.5), platform(1.0, 1)]})
-    assert layout["modules"] == [platform(1, 1), platform(5.5, 2.5)]
+    assert placed(layout) == [platform(1, 1), platform(5.5, 2.5)]
     assert isinstance(layout["modules"][0]["col"], int)
     assert '"col": 5.5, "row": 2.5' in al.dumps(layout)
 
@@ -788,7 +794,7 @@ def test_dropped_part_is_a_block_in_layouts_and_the_world(parts):
     layout = al.normalise({"modules": [
         {"type": "crate", "col": 5, "row": 5, "rotation": 0},
         ramp(5, 4, 0)]})
-    crate = layout["modules"][1]
+    crate = placed(layout)[1]
     # 2 x 2 cells around the square, and half a cell on: 3 inches is
     # 1.5 cells, so 2, centred on the square.
     assert sorted(al.cells(crate)) == [(10, 10), (10, 11), (11, 10),
@@ -860,7 +866,7 @@ def test_parts_are_renamed_deleted_to_the_archive_and_restored(parts):
     # Renamed, in the layout too.
     assert al.rename_part("crate", "box") == ("box", ["yard"])
     assert "box" in al.PARTS and "crate" not in al.PARTS
-    assert al.load("yard")["modules"][0]["type"] == "box"
+    assert placed(al.load("yard"))[0]["type"] == "box"
     with pytest.raises(ValueError):
         al.rename_part("ramp", "slope")
     with pytest.raises(ValueError):
@@ -881,7 +887,7 @@ def test_parts_are_renamed_deleted_to_the_archive_and_restored(parts):
 
     # Restored under its own name, and the layout opens again.
     assert al.restore_part("box") == "box"
-    assert al.load("yard")["modules"][0]["type"] == "box"
+    assert placed(al.load("yard"))[0]["type"] == "box"
     with pytest.raises(ValueError):
         al.restore_part("box.2")
     assert al.restore_part("box.2", "small_box") == "small_box"
@@ -941,3 +947,58 @@ def test_editor_routes_for_parts(parts):
     status, body = arena_editor.post("/api/archive/box/restore", lambda: {})
     assert status == 200 and body["name"] == "box" and body["archive"] == []
     assert arena_editor.post("/api/parts/ramp/delete", dict)[0] == 400
+
+
+def bare(*modules):
+    return {"size": 12, "base": "quadrants", "modules": list(modules)}
+
+
+def tile(col, row):
+    return {"type": "floor", "col": col, "row": row}
+
+
+def test_a_new_layout_is_bare_quadrant_plates():
+    layout = al.normalise(bare())
+    assert layout["modules"] == [] and layout["base"] == "quadrants"
+    sdf = al.model_sdf(layout)
+    assert sdf.count("<collision") == 4 and "floor_" not in sdf
+    ground = al.terrain(layout)
+    # The plates' top is a tile's thickness under z = 0.
+    assert ground.height_at(0.1, 0.1) == pytest.approx(-0.0127, abs=1e-4)
+
+
+def test_old_layouts_get_a_tile_on_every_square():
+    layout = al.normalise({"modules": [platform(5, 5)]})
+    assert len(layout["modules"]) == 145
+    assert al.dumps(layout).count('"floor"') == 144
+    # Saved and loaded again, it is the same.
+    assert al.normalise(json.loads(al.dumps(layout))) == layout
+
+
+def test_modules_on_the_bare_plate_stand_a_tile_lower():
+    ground = al.terrain(bare(tile(2, 2), platform(2, 2), platform(8, 8)))
+    on_tile = ground.height_at(*al.centre({"size": 12}, 2, 2))
+    on_plate = ground.height_at(*al.centre({"size": 12}, 8, 8))
+    assert on_tile == pytest.approx(0.0254, abs=1e-4)
+    assert on_plate == pytest.approx(0.0254 - 0.0127, abs=1e-4)
+
+
+def test_floor_tiles_go_on_whole_squares_under_everything():
+    for wrong in ([tile(2.5, 2)], [dict(tile(2, 2), level=1)],
+                  # Half on a tile and half on the plate.
+                  [tile(2, 2), platform(2.5, 2)]):
+        with pytest.raises(ValueError):
+            al.normalise(bare(*wrong))
+
+
+def test_checks_go_by_the_floor_under_a_platform():
+    # A ramp on the plate up to a 1" platform on the plate is fine, and
+    # one from the plate to a platform on a tile is half an inch short.
+    assert al.check(bare(platform(5, 5), ramp(5, 4, 0))) == []
+    problems = al.check(bare(tile(5, 5), platform(5, 5), ramp(5, 4, 0)))
+    assert [p["message"] for p in problems if p["type"] == "ramp"] == [
+        'its high end meets a 1" platform, half an inch above the top of '
+        'the ramp']
+    # A tile's edge is driven over, so tiles here and there are no island.
+    assert al.check(bare(tile(5, 5), tile(5, 4), tile(5, 3), platform(5, 5),
+                         ramp(5, 4, 0))) == []

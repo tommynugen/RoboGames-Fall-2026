@@ -109,7 +109,9 @@ export function create(container) {
     const [dx, dy, z, yaw] = part.poses[part.turns ? m.rotation : 0];
     const [x, y] = centre(m.col, m.row);
     const mesh = new THREE.Mesh(g, mat);
-    mesh.position.set(x + dx, y + dy, z + base);
+    // The poses have the tiles' top at z = 0, and base is from the plates.
+    const lift = base - (isFloor(m.type) ? 0 : heightOf("floor"));
+    mesh.position.set(x + dx, y + dy, z + lift);
     mesh.rotation.z = yaw;
     return mesh;
   }
@@ -120,23 +122,20 @@ export function create(container) {
     update();
   }
 
+  // The quadrant plates, boxes as the sim has them, under the tiles.
   function buildFloor() {
     const key = `${size}`;
-    if (key === builtFloor || !info.floor) return;
-    const g = geometry(info.floor.mesh, rebuild);
-    if (!g) return;
+    if (key === builtFloor || !info.plate) return;
     clear(floor);
-    const [dx, dy, z] = info.floor.pose;
-    const mat = material(info.floor.colour);
-    for (let row = 0; row < size; row++) {
-      for (let col = 0; col < size; col++) {
-        const [x, y] = centre(col, row);
-        const tile = new THREE.Mesh(g, mat.clone());
-        tile.position.set(x + dx, y + dy, z);
-        floor.add(tile);
-      }
+    const { colour, thickness, top } = info.plate;
+    for (const [x0, x1, y0, y1] of plates(size)) {
+      const w = (x1 - x0) * info.module, d = (y1 - y0) * info.module;
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(w - 0.002,
+        d - 0.002, thickness), material(colour));
+      const [cx, cy] = centre((x0 + x1 - 1) / 2, (y0 + y1 - 1) / 2);
+      plate.position.set(cx, cy, top - thickness / 2);
+      floor.add(plate);
     }
-    mat.dispose();
     builtFloor = key;
     const reach = size * info.module;
     controls.target.set(0, 0, 0);
