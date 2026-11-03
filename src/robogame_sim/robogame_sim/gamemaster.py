@@ -3,13 +3,16 @@
     ros2 run robogame_sim robogame_gamemaster
     ros2 run robogame_sim robogame_gamemaster --port 8768 --tab console
 
-Serves http://localhost:8766 with two tabs:
+Serves http://localhost:8766 with three tabs:
 
 - Arena editor (#editor, or #editor/NAME to open a saved layout): maps the
   modules as they are set up on the table. arena_editor.py and
   arena_editor.html.
 - Robot console (#console): every robot in the arena, who drives it and
   where it goes. robot_console.py and robot_console.html.
+- Console (#logs): the log lines of the editor, the robot console, the
+  controller nodes, the sim and the app, each on its own tab and all
+  together on All. app_log.py and app_log.html.
 
 Both tabs are live at once, so a layout saved in the editor is the one the
 console draws and plans over at once (when no sim publishes its own), and
@@ -31,14 +34,17 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
-from robogame_sim import arena_editor
+from robogame_sim import app_log, arena_editor
 from robogame_sim.sim_runner import SimRunner
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 SHELL = os.path.join(HERE, "gamemaster.html")
 # Draws the modules, for both tabs.
 DRAW = os.path.join(HERE, "arena_draw.js")
-TABS = ("editor", "console")
+LOGS_PAGE = os.path.join(HERE, "app_log.html")
+TABS = ("editor", "console", "logs")
+# Changes the editor makes as it is used, not worth a log line each.
+QUIET = ("/api/check",)
 PORT = 8766
 
 HTML = "text/html; charset=utf-8"
@@ -50,10 +56,12 @@ NO_ROS = b"""<!doctype html><meta charset="utf-8">
 the app again. The arena editor works without it.</p>"""
 
 
-def handler(console=None, sim=None):
+def handler(console=None, sim=None, book=None):
     """A request handler for the app. console is the RobotConsole node, or
     None to serve the editor alone. sim is the SimRunner behind the
-    editor's Launch buttons, or None for none."""
+    editor's Launch buttons, or None for none. book is the LogBook the
+    Console tab shows, which gets a line for each change asked."""
+    book = book or app_log.LogBook()
     if console is not None:
         from robogame_sim import robot_console
         console_page = robot_console.PAGE
@@ -73,6 +81,7 @@ def handler(console=None, sim=None):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(data)
+            self.status, self.body = status, body
 
         def file(self, path, kind):
             with open(path, "rb") as file:
@@ -83,12 +92,25 @@ def handler(console=None, sim=None):
             return json.loads(self.rfile.read(length) or b"{}")
 
         def answer(self, *routes):
-            """Replies with the first route that takes the path."""
-            for route in routes:
+            """Replies with the first route that takes the path. routes
+            are (source, route): source names the Console tab the
+            request's log line goes to."""
+            for source, route in routes:
                 result = route()
                 if result is not None:
-                    return self.reply(*result)
+                    self.reply(*result)
+                    return source
             self.reply(404, {"error": "not found"})
+            return "app"
+
+        def note(self, source, path):
+            """A log line for a change asked of the app."""
+            if path in QUIET and self.status < 400:
+                return
+            error = isinstance(self.body, dict) and self.body.get("error")
+            book.add(source, f"{self.command} {path}: {self.status}"
+                     + (f" {error}" if error else ""),
+                     "error" if self.status >= 400 else "info")
 
         def console_route(self, name, *args):
             if console is None:
@@ -111,11 +133,17 @@ def handler(console=None, sim=None):
             if path == "/arena_view3d.js":
                 return self.file(arena_editor.VIEW3D,
                                  "text/javascript; charset=utf-8")
+            if path == "/logs":
+                return self.file(LOGS_PAGE, HTML)
             if path == "/api/app":
                 return self.reply(200, {"console": console is not None})
-            self.answer(lambda: sim and sim.get(path),
-                        lambda: self.console_route("get", path),
-                        lambda: arena_editor.get(path))
+            source = self.answer(
+                ("app", lambda: book.get(self.path)),
+                ("sim", lambda: sim and sim.get(path)),
+                ("console", lambda: self.console_route("get", path)),
+                ("editor", lambda: arena_editor.get(path)))
+            if self.status >= 400:
+                self.note(source, path)
 
         def read_raw(self, limit):
             length = int(self.headers.get("Content-Length", 0))
@@ -124,30 +152,49 @@ def handler(console=None, sim=None):
             return self.rfile.read(length)
 
         def do_PUT(self):
-            self.answer(lambda: arena_editor.put(self.path, self.read_body,
-                                                 self.read_raw))
+            self.note(self.answer(
+                ("editor", lambda: arena_editor.put(
+                    self.path, self.read_body, self.read_raw))),
+                unquote(self.path.split("?")[0]))
 
         def do_POST(self):
             path = unquote(self.path)
-            self.answer(
-                lambda: sim and sim.post(path, self.read_body),
-                lambda: self.console_route("post", path, self.read_body),
-                lambda: arena_editor.post(path, self.read_body))
+            self.note(self.answer(
+                ("sim", lambda: sim and sim.post(path, self.read_body)),
+                ("console", lambda: self.console_route(
+                    "post", path, self.read_body)),
+                ("editor", lambda: arena_editor.post(path, self.read_body))),
+                path)
+            if path == "/api/sim" and self.status == 200 and sim:
+                # A new run: its log file starts again.
+                book.follow("sim", sim.log, 0)
 
     return Handler
 
 
-def start_console(args):
+def say(book, text, level="info"):
+    """Prints text and puts it on the Console tab's app log."""
+    print(text, flush=True)
+    book.add("app", text, level)
+
+
+def start_console(args, book):
     """The robot console's node, or None without ROS."""
     try:
         import rclpy
         from robogame_sim.robot_console import RobotConsole
     except ImportError as error:
-        print(f"No ROS ({error}): the robot console tab is off.", flush=True)
+        say(book, f"No ROS ({error}): the robot console tab is off.",
+            "warn")
         return None
 
     rclpy.init(args=args)
-    return RobotConsole()
+    node = RobotConsole()
+    try:
+        app_log.watch_rosout(node, book)
+    except ImportError as error:
+        say(book, f"No ROS log ({error}).", "warn")
+    return node
 
 
 def main(args=None):
@@ -170,14 +217,15 @@ def main(args=None):
             webbrowser.open(url)
         return
 
-    console = start_console(args)
+    book = app_log.LogBook()
+    console = start_console(args, book)
     sim = SimRunner()
-    server.RequestHandlerClass = handler(console, sim)
+    book.follow("sim", sim.log)
+    server.RequestHandlerClass = handler(console, sim, book)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"RoboGame Gamemaster on {url}, saving layouts to "
-          f"{arena_editor.arena_layout.layout_dirs()[0]}. Ctrl-C to stop.",
-          flush=True)
+    say(book, f"RoboGame Gamemaster on {url}, saving layouts to "
+        f"{arena_editor.arena_layout.layout_dirs()[0]}. Ctrl-C to stop.")
 
     if not options.no_browser:
         threading.Timer(0.5, webbrowser.open, [url]).start()

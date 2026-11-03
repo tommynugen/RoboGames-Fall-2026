@@ -36,13 +36,14 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `chase_node.py` | ROS node around `Chaser` |
 | `chase_sim.py` | 2D stand-in for Gazebo to try `Chaser` against moving targets |
 | `arena_layout.py` (890 lines) | layout JSON load/save, `PARTS`, `check()` (the editor's red outlines), world SDF building, spawn spots |
-| `gamemaster.py` + `gamemaster.html` | RoboGame Gamemaster, the one web app at localhost:8766 (`robogame_gamemaster`): serves the editor and console pages and APIs, tabs `#editor`, `#console` |
+| `gamemaster.py` + `gamemaster.html` | RoboGame Gamemaster, the one web app at localhost:8766 (`robogame_gamemaster`): serves the editor and console pages and APIs, tabs `#editor`, `#console`, `#logs` |
 | `arena_editor.py` + `arena_editor.html` | the layout editor, the app's Arena editor tab (page at `/editor`), its API routes in `get`/`put`/`post`; the html is one big file, grep it. Its module drawing is in `arena_draw.js`, shared with the console, and its 3D view (three.js) in `arena_view3d.js` |
 | `sim_firmware.py`, `firmware_model.py` | stand in for the ESP32 firmware and BLE bridge |
 | `racing_teleop.py`, `drive_controls.py`, `motion_sensor.py` | PS4/PS5 racing controls and wheel steering |
 | `controller_robots.py`, `gamepads.py` | a robot for every controller connected (hotplug); takes rebinds from the console |
 | `robot_console.py` + `robot_console.html` | the robot console, the app's Robot console tab (page at `/console`), its node and `get`/`post` API routes: bind controllers, make robots autonomous, send them places |
 | `autopilot.py` | the console's driving: command queue and chase mode, on `Chaser` |
+| `app_log.py` + `app_log.html` | the app's Console tab (`#logs`, page at `/logs`): log lines by source (editor, console, teleop, sim, app) and `/api/logs` |
 | `active_arena.py` | publishes the arena in use on `/arena/layout`, latched; the sim launch starts one |
 | `robot_sdf.py`, `spawning.py`, `fpv_toggle.py` | robot model, spawn placement, FPV camera and the 1 to 4 views |
 | `src/robogame_gui/src/RobogameView.*` | the Camera view card in the Gazebo side panel, talks to `fpv_toggle` |
