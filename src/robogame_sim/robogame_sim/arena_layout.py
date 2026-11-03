@@ -1,12 +1,14 @@
 """Arena layouts: which modules stand where on the arena floor.
 
 The arena is a square grid of 4 inch (0.1016 m) modules, 12 x 12, centred
-on the origin. Every square has a floor tile. A layout lists what stands on
-them:
+on the origin, on four bare quadrant plates. A layout lists the floor tiles
+on the plates and what stands on them:
 
     {
       "size": 12,
+      "base": "quadrants",
       "modules": [
+        {"type": "floor", "col": 5, "row": 5},
         {"type": "platform", "col": 5, "row": 5},
         {"type": "ramp", "col": 5, "row": 4, "rotation": 0},
         {"type": "wall", "col": 0.5, "row": 0, "rotation": 180}
@@ -16,6 +18,7 @@ them:
 col counts along +x and row along +y, both from 0 at the -x, -y corner.
 The modules are the parts of the CAD's MODULES part studio:
 
+    floor       a 4 inch floor tile, half an inch thick, on a whole square
     platform    1 inch platform, which a ramp climbs onto
     platform_2  2 inch platform, too high for a ramp, so an obstacle
     ramp        1 inch curved ramp
@@ -40,6 +43,13 @@ platforms at level 1, and so on, all of them the same height. Ramps,
 walls, thwomps and platforms all stack on either platform, so a ramp on a
 1 inch platform climbs to a 2 inch one. level is left out for modules on
 the floor.
+
+A floor tile lies on the plates under everything else, and a module on
+one stands half an inch higher than one on the bare plate; a module must
+stand all on tiles or all on the plate. Heights here are from the top of
+the plates, and the world has the tiles' top at z = 0, as the CAD export
+does, so the plates' top is at z = -floor_height(). A layout without "base"
+is from before floor tiles were modules, and gets a tile on every square.
 
 rotation is in degrees anticlockwise seen from above. At 0 a ramp rises
 toward +y, at 90 toward -x, at 180 toward -y and at 270 toward +x. A wall
@@ -91,7 +101,8 @@ class Part:
         self.mesh_collision = mesh_collision
 
 
-FLOOR = Part("floor", "floor_module.stl", "floor", (0.647, 0.647, 0.647))
+FLOOR = Part("floor tile", "floor_module.stl", "floor",
+             (0.647, 0.647, 0.647))
 PARTS = {
     "platform": Part('1" platform', "platform_module_1.stl", "square",
                      (0.231, 0.380, 0.706)),
@@ -103,6 +114,7 @@ PARTS = {
                  (0.918, 0.918, 0.918), turns=True),
     "thwomp": Part("thwomp", "thwomp_module.stl", "side",
                    (0.769, 0.886, 0.953), turns=True),
+    "floor": FLOOR,
 }
 TYPES = tuple(PARTS)
 BUILT_IN = dict(PARTS)
@@ -110,6 +122,16 @@ BUILT_IN = dict(PARTS)
 BLOCK_COLOUR = (0.910, 0.627, 0.478)
 # What other modules can stand on.
 PLATFORMS = ("platform", "platform_2")
+# The quadrant plates the floor tiles lie on, as plain boxes: the CAD
+# export leaves them out.
+PLATE_THICKNESS = 0.00635
+PLATE_COLOUR = (0.42, 0.44, 0.47)
+BASE = "quadrants"
+
+
+def level(m):
+    """A module's level, with floor tiles at -1, under everything."""
+    return -1 if m["type"] == "floor" else m.get("level", 0)
 
 NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
@@ -182,7 +204,7 @@ def mesh_dir():
         if root:
             meshes = os.path.join(root, "models", CAD_MODEL, "meshes")
             if all(os.path.isfile(os.path.join(meshes, part.mesh))
-                   for part in (FLOOR, *PARTS.values())):
+                   for part in PARTS.values()):
                 return meshes
 
     raise FileNotFoundError(
@@ -565,7 +587,16 @@ def normalise(layout):
 
     refresh_parts()
 
-    for module in layout.get("modules", []):
+    given = list(layout.get("modules", []))
+    if layout.get("base") != BASE:
+        # From before floor tiles were modules: a tile on every square.
+        tiled = {(m.get("col"), m.get("row")) for m in given
+                 if m.get("type") == "floor"}
+        given += [{"type": "floor", "col": col, "row": row}
+                  for row in range(size) for col in range(size)
+                  if (col, row) not in tiled]
+
+    for module in given:
         kind = module.get("type")
         if kind not in PARTS:
             raise ValueError(f"unknown module type {kind!r}, and no "
@@ -573,11 +604,15 @@ def normalise(layout):
 
         entry = {"type": kind, "col": half(module.get("col"), "col"),
                  "row": half(module.get("row"), "row")}
-        level = int(module.get("level", 0))
-        if level < 0:
+        height = int(module.get("level", 0))
+        if height < 0:
             raise ValueError(f"{where(entry)} is below the floor")
-        if level:
-            entry["level"] = level
+        if kind == "floor" and (height or entry["col"] % 1
+                                or entry["row"] % 1):
+            raise ValueError(f"{where(entry)} must lie on the plates, on "
+                             f"a whole square")
+        if height:
+            entry["level"] = height
         if PARTS[kind].turns:
             rotation = int(module.get("rotation", 0)) % 360
             if rotation not in ROTATIONS:
@@ -588,33 +623,31 @@ def normalise(layout):
 
     taken = {}
     for m in modules:
-        level = m.get("level", 0)
         for cell in cells(m):
             if not on_grid(cell, size):
                 raise ValueError(f"{where(m)} is off the grid")
-            other = taken.setdefault((cell, level), m)
+            other = taken.setdefault((cell, level(m)), m)
             if other is not m:
                 raise ValueError(f"{where(m)} overlaps the {where(other)}")
 
     # Only platforms carry anything, and all at one height, so it stands
     # level.
     for m in modules:
-        level = m.get("level", 0)
-        if not level:
+        if level(m) <= 0:
             continue
-        if any(taken.get((cell, level - 1), {}).get("type") not in PLATFORMS
+        if any(taken.get((cell, level(m) - 1), {}).get("type") not in PLATFORMS
                for cell in cells(m)):
             raise ValueError(f"{where(m)} is not on a platform")
 
     at = columns(modules)
     for m in modules:
         if len({round(stand(at, m, cell), 4) for cell in cells(m)}) > 1:
-            raise ValueError(f"{where(m)} stands across platforms of "
-                             f"different heights")
+            raise ValueError(f"{where(m)} stands across floor tiles or "
+                             f"platforms of different heights")
 
-    modules.sort(key=lambda m: (m["row"], m["col"], m.get("level", 0),
+    modules.sort(key=lambda m: (m["row"], m["col"], level(m),
                                 m["type"], m.get("rotation", 0)))
-    return {"size": size, "modules": modules}
+    return {"size": size, "base": BASE, "modules": modules}
 
 
 def half(value, name):
@@ -659,7 +692,8 @@ def dumps(layout):
     """JSON with one module per line, so layouts diff well."""
     rows = ",\n".join("    " + json.dumps(m) for m in layout["modules"])
     body = f"[\n{rows}\n  ]" if rows else "[]"
-    return f'{{\n  "size": {layout["size"]},\n  "modules": {body}\n}}\n'
+    return (f'{{\n  "size": {layout["size"]},\n  "base": "{BASE}",\n'
+            f'  "modules": {body}\n}}\n')
 
 
 def modules_info():
@@ -693,8 +727,13 @@ def modules_info():
 
     return {"module": MODULE, "size": SIZE, "peg_line": PEG_LINE,
             "types": info,
-            "floor": {"mesh": FLOOR.mesh, "colour": FLOOR.colour,
-                      "pose": mesh_pose(FLOOR, 0)}}
+            "plate": {"colour": PLATE_COLOUR, "thickness": PLATE_THICKNESS,
+                      "top": -floor_height()}}
+
+
+def floor_height():
+    """How thick a floor tile is: how far the plates' top is below z = 0."""
+    return part_height("floor")
 
 
 def mesh_pose(part, rotation):
@@ -769,26 +808,32 @@ def columns(modules):
             found.setdefault(cell, []).append(m)
 
     for column in found.values():
-        column.sort(key=lambda m: m.get("level", 0))
+        column.sort(key=level)
 
     return found
 
 
 def stand(at, m, cell=None):
-    """How high above the floor a module stands: the platforms under it,
-    on the given cell or its first."""
-    level = m.get("level", 0)
+    """How high above the plates a module stands: the floor tile and
+    platforms under it, on the given cell or its first."""
     return sum(part_height(p["type"])
-               for p in at[cell or cells(m)[0]] if p.get("level", 0) < level)
+               for p in at[cell or cells(m)[0]] if level(p) < level(m))
+
+
+def floor_top(column):
+    """Height of the floor in a cell: a tile's top, or the bare plate."""
+    return (part_height("floor") if column and column[0]["type"] == "floor"
+            else 0.0)
 
 
 def surface(column):
-    """Height of the top platform of a cell's column, which a module on top
-    or a robot stands on, and the module standing there, if any."""
+    """Height of the top platform or floor tile of a cell's column, which
+    a module on top or a robot stands on, and the module standing there, if
+    any."""
     height = 0.0
 
     for m in column or ():
-        if m["type"] not in PLATFORMS:
+        if m["type"] not in PLATFORMS and m["type"] != "floor":
             return height, m
         height += part_height(m["type"])
 
@@ -826,6 +871,7 @@ def placement(part, x, y, rotation, base=0.0):
 
 def model_sdf(layout, name="arena"):
     """The arena as an SDF <model>, meshes as model://robogame_arena_cad."""
+    layout = normalise(layout)
     parts = []
 
     def add(label, part, x, y, rotation, base=0.0):
@@ -855,17 +901,27 @@ def model_sdf(layout, name="arena"):
             f"</visual>\n"
             f'      <collision name="{label}">{collision}</collision>')
 
+    # The quadrant plates, boxes with their top under the floor tiles.
     size = layout["size"]
-    for row in range(size):
-        for col in range(size):
-            add(f"floor_{col}_{row}", FLOOR, *centre(layout, col, row), 0)
+    r, g, b = PLATE_COLOUR
+    for x0, x1, y0, y1 in plates(size):
+        cx, cy = centre(layout, (x0 + x1 - 1) / 2, (y0 + y1 - 1) / 2)
+        w, d, t = (x1 - x0) * MODULE, (y1 - y0) * MODULE, PLATE_THICKNESS
+        box = (f"<pose>{cx:.5f} {cy:.5f} {-floor_height() - t / 2:.5f} 0 0 0"
+               f"</pose><geometry><box><size>{w:.5f} {d:.5f} {t:.5f}"
+               f"</size></box></geometry>")
+        parts.append(
+            f'      <visual name="plate_{x0}_{y0}_visual">{box}<material>'
+            f"<ambient>{r} {g} {b} 1</ambient><diffuse>{r} {g} {b} 1"
+            f"</diffuse></material></visual>\n"
+            f'      <collision name="plate_{x0}_{y0}">{box}</collision>')
 
     at = columns(layout["modules"])
     names = set()
     for m in layout["modules"]:
-        level = m.get("level", 0)
+        height = m.get("level", 0)
         name = (f"{m['type']}_{m['col']}_{m['row']}".replace(".", "p")
-                + (f"_{level}" if level else ""))
+                + (f"_{height}" if height else ""))
         # Walls side by side on one square.
         if name in names:
             name += f"_r{m['rotation']}"
@@ -875,11 +931,19 @@ def model_sdf(layout, name="arena"):
             dx, dy = block_offset(m["type"], m["rotation"])
             x, y = x + dx, y + dy
         add(name, PARTS[m["type"]], x, y, m.get("rotation", 0),
-            stand(at, m))
+            stand(at, m) - floor_height())
 
     return (f'<model name="{name}">\n    <static>true</static>\n'
             f'    <link name="link">\n' + "\n".join(parts)
             + "\n    </link>\n  </model>")
+
+
+def plates(size):
+    """The quadrant plates, as (col from, col to, row from, row to), the
+    squares each covers, to but not including the second of each."""
+    k = size // 2
+    return [(x0, x1, y0, y1) for y0, y1 in ((0, k), (k, size))
+            for x0, x1 in ((0, k), (k, size)) if x1 > x0 and y1 > y0]
 
 
 def triangles(layout):
@@ -1006,7 +1070,11 @@ def crossable(at, a, b):
     height_b, blocker_b = edge(at, b, (-side[0], -side[1]))
 
     if height_a is not None and height_b is not None:
-        return same_height(height_a, height_b)
+        # The edge of a floor tile on the bare plate, half an inch, is
+        # under terrain.STEP, so the planner drives over it; so do these.
+        low, high = sorted((height_a, height_b))
+        return same_height(low, high) or (
+            same_height(low, 0.0) and same_height(high, part_height("floor")))
 
     # Ramps side by side, rising the same way from the same height and
     # level with each other, are one wider ramp.
@@ -1018,8 +1086,12 @@ def crossable(at, a, b):
 
 
 def inches(height):
-    n = round(height / 0.0254)
-    return "an inch" if n == 1 else f"{n} inches"
+    halves = round(height / 0.0127)
+    if halves == 1:
+        return "half an inch"
+    if halves % 2:
+        return f"{halves / 2:g} inches"
+    return "an inch" if halves == 2 else f"{halves // 2} inches"
 
 
 def same_height(a, b):
@@ -1129,7 +1201,8 @@ def check(layout):
     # other height a ramp leads to. The rest, like a 2 inch platform no
     # ramp reaches, are obstacles.
     for region in platform_regions(at):
-        height = region[0][1]
+        cell = region[0][0]
+        height = region[0][1] - floor_top(at[cell])
         if not (same_height(height, part_height("platform"))
                 or any(cell in ramp_tops for cell, _, _ in region)):
             continue

@@ -16,6 +16,8 @@
     --accent-ink: #ffffff;
     --floor: #c9cbcf;
     --floor-line: #b3b6bc;
+    --plate: #8e949c;
+    --plate-line: #767c85;
     --peg: #a9adb4;
     --platform: #3b61b4;
     --platform-edge: #2a4a8f;
@@ -47,6 +49,8 @@
       --accent-ink: #0d1117;
       --floor: #4a4e57;
       --floor-line: #3c4048;
+      --plate: #262a31;
+      --plate-line: #1b1e23;
       --peg: #3a3e46;
       --platform: #4f78cf;
       --platform-edge: #33589f;
@@ -71,7 +75,8 @@
   :root[data-theme="dark"] {
     --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
     --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
-    --floor: #4a4e57; --floor-line: #3c4048; --peg: #3a3e46;
+    --floor: #4a4e57; --floor-line: #3c4048;
+    --plate: #262a31; --plate-line: #1b1e23; --peg: #3a3e46;
     --platform: #4f78cf; --platform-edge: #33589f; --platform2: #2c4a8c;
     --platform2-edge: #1a2f5c; --platform2-ink: #d5e0f7;
     --ramp-low: #a9c9e3; --ramp-high: #5d93c4; --ramp-arrow: #0f2650;
@@ -391,7 +396,7 @@ function cellXY(col, row) {
 // its square like a tier, as the editor draws it.
 function drawPlaced(parent, m) {
   const [x, y] = cellXY(m.col, m.row);
-  const i = m.level && isPlatform(m.type) ?
+  const i = m.level > 0 && isPlatform(m.type) ?
     Math.min(m.level * 0.08, 0.24) * CELL : 0;
   drawModule(parent, m.type, x + i, y + i, CELL - 2 * i, m.rotation,
              "board");
@@ -424,19 +429,19 @@ function drawHeights(parent, map) {
 
 function drawArena(arena) {
   size = arena.size;
-  modules = (arena.modules || []).map(m => ({ rotation: 0, level: 0, ...m }));
+  modules = loadModules(arena.modules);
   const total = PAD * 2 + size * CELL;
   board.setAttribute("viewBox", `0 0 ${total} ${total}`);
   arenaLayer.replaceChildren();
   defs(arenaLayer, "board");
 
-  for (let row = 0; row < size; row++) {
+  // A layout's floor tiles are among its modules, on bare plates; the
+  // Onshape export, with no layout, has a tile on every square.
+  if (arena.modules) drawPlates(arenaLayer, size, CELL, PAD);
+  for (let row = 0; !arena.modules && row < size; row++) {
     for (let col = 0; col < size; col++) {
       const [x, y] = cellXY(col, row);
-      el("rect", { x, y, width: CELL, height: CELL, fill: "var(--floor)",
-                   stroke: "var(--floor-line)", "stroke-width": 1 },
-         arenaLayer);
-      drawPegs(arenaLayer, x, y, CELL);
+      drawFloor(arenaLayer, x, y, CELL);
     }
   }
 
@@ -446,12 +451,12 @@ function drawArena(arena) {
   const drawn = [...modules].sort((a, b) => a.level - b.level);
   for (const m of drawn) drawPlaced(el("g", {}, arenaLayer), m);
   for (const m of drawn) {
-    if (!m.level || !cellsOf(m).every(cell => topAt(cols, cell) === m)) {
+    if (m.level <= 0 || !cellsOf(m).every(cell => topAt(cols, cell) === m)) {
       continue;
     }
     const [x, y] = cellXY(m.col, m.row);
     drawBadge(arenaLayer, x, y, CELL, inches(
-      standing(m, cols) + (isPlatform(m.type) ? heightOf(m.type) : 0)));
+      aboveFloor(m, cols) + (isPlatform(m.type) ? heightOf(m.type) : 0)));
   }
 
   // Metres along the edges, the arena's middle being 0, 0.

@@ -625,9 +625,10 @@ script was checked to parse.
 
 ## Arena layouts
 
-The arena is a 12 x 12 grid of 4 inch (10.16 cm) floor tiles, 48 inches
-square, and the modules of the CAD's MODULES part studio stand on them,
-moved about between games:
+The arena is a 12 x 12 grid of 4 inch (10.16 cm) squares, 48 inches
+square, on four bare quadrant plates. Floor tiles lie on the plates where
+a layout puts them, and the modules of the CAD's MODULES part studio stand
+on the tiles or on the bare plates, moved about between games:
 
 | Module | In the layout | |
 |---|---|---|
@@ -636,6 +637,30 @@ moved about between games:
 | Curved ramp | `ramp` | rises 1 inch over one square |
 | Wall | `wall` | 1 x 4 inches, 2 high, pegged on one side of a square |
 | Thwomp | `thwomp` | 1 x 4 inches, 6 high, pegged like a wall; fixed in the sim |
+| Floor tile | `floor` | 4 x 4 inches, half an inch thick, on a whole square, under everything |
+
+A floor tile is a module like the others: a new layout starts as bare
+plates, and the Floor tile tool (6) puts tiles down. A module on the bare
+plate stands half an inch lower than one on a tile, and must be all on
+tiles or all on the plate. Deleting a tile takes what stands on it too.
+The plates are plain boxes in the sim, as the CAD export leaves them out,
+with their top half an inch under z = 0, so the tiles' top stays at
+z = 0 as before. A layout file has `"base": "quadrants"` and its tiles
+among its modules; one without `base`, from before, gets a tile on every
+square when it opens, so it is the arena it was. The layouts in
+`layouts/` have their tiles written in. The edge of a tile on the bare
+plate is under the planner's 1.3 cm step, so chase_node drives over it,
+and the editor's checks count it as crossable too; whether a robot does
+in Gazebo is not yet checked.
+
+Checked 2026-11-03: tests (`test_arena_layout.py`: bare plates, old
+layouts' tiles, modules on the plate a tile lower, the checks), `chase_sim
+mazetest default --seeds 4` the same as before for every run (the layouts
+with their tiles written in), and the editor in Chromium without ROS:
+Clear left bare plates, tiles and a platform across two of them placed,
+a tile put under a platform, and delete taking the platform then the
+tile. The 3D view (three.js from unpkg.com, not reachable there) and
+Gazebo itself are not yet checked.
 
 Every module pegs into the same 2 inch grid of holes, four to a tile and
 evenly spaced across the joins between tiles, so a module can go half a
