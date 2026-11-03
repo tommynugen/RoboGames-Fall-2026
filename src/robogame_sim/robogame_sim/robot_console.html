@@ -1009,7 +1009,7 @@ async function update() {
     state = await api("/api/state");
   } catch {
     setStatus("Console not running: start it with ros2 run robogame_sim " +
-              "robot_console", true);
+              "robogame_gamemaster", true);
     return;
   }
   if (state.arena.error) setStatus(state.arena.error, true);

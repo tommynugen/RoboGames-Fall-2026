@@ -27,7 +27,7 @@ from robogame_sim.robot_console import (  # noqa: E402
     height_map,
     newest_layout,
 )
-from robogame_sim.robogame_app import handler  # noqa: E402
+from robogame_sim.gamemaster import handler  # noqa: E402
 from robogame_sim.terrain import Terrain  # noqa: E402
 
 CAD = os.path.join(os.path.dirname(__file__), "..", "models",

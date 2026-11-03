@@ -92,7 +92,7 @@ class ChaseNode(Node):
             "stow_arm": True,
             "pose_timeout": 0.5,
             "rate": 20.0,
-            # The arena layout, by name or path, made with arena_editor;
+            # The arena layout, by name or path, made with the arena editor;
             # sim.launch.py passes the one it built the world from. Empty
             # for arena_model, an SDF model whose collision geometry is the
             # terrain, taken to sit at the world origin. Both empty for the

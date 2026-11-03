@@ -10,7 +10,7 @@ setup(
     packages=find_packages(exclude=['test']),
     package_data={package_name: ['arena_editor.html', 'arena_draw.js',
                                  'arena_view3d.js', 'robot_console.html',
-                                 'robogame_app.html']},
+                                 'gamemaster.html']},
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -37,13 +37,10 @@ setup(
             'robot_sdf = robogame_sim.robot_sdf:main',
             'racing_teleop = robogame_sim.racing_teleop:main',
             'chase_node = robogame_sim.chase_node:main',
-            'arena_editor = robogame_sim.arena_editor:main',
             'fpv_toggle = robogame_sim.fpv_toggle:main',
             'controller_robots = robogame_sim.controller_robots:main',
             'active_arena = robogame_sim.active_arena:main',
-            'robot_console = robogame_sim.robot_console:main',
-            'robogame_gamemaster = robogame_sim.robogame_app:main',
-            'robogame_app = robogame_sim.robogame_app:main',
+            'robogame_gamemaster = robogame_sim.gamemaster:main',
         ],
     },
 )

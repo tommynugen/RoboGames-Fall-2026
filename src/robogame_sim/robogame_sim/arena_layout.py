@@ -49,7 +49,7 @@ square, on the side its rotation points to: at 0 along the +y side.
 From a layout this builds the Gazebo model of the arena, out of the meshes
 scripts/export_onshape_arena.py exported from the CAD, a world around it,
 and the terrain chase_node plans over, so the sim and the planner always
-see the same arena. Layouts are made with arena_editor.
+see the same arena. Layouts are made with the arena editor.
 """
 
 import json

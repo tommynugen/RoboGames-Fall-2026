@@ -478,10 +478,10 @@ arena editor (see Arena layouts) in its other tab. It opens
 http://localhost:8766 in the browser (only this computer can reach it;
 `--port`, `--no-browser` and `--tab editor|console` change that);
 `#console` and `#editor` in the address pick the tab, and `#editor/NAME`
-opens a saved layout in the editor. `ros2 run robogame_sim robot_console`,
-`arena_editor` and `robogame_app` (its old name) still work: they
-start the same app on their tab, or, if it is already running, open it
-there. Both tabs stay loaded, so unsaved
+opens a saved layout in the editor. If it is already running, starting it
+again opens it in the browser instead. (`robogame_gamemaster` is the only
+command for it: `arena_editor`, `robot_console` and `robogame_app` were
+removed on 2026-11-03; checked with the tests, 156 pass.) Both tabs stay loaded, so unsaved
 edits are kept while you look at the console. The console's Edit link,
 beside the Arena list, opens the arena in use in the editor, and a layout
 saved there is the one the console uses next, unless a sim publishes its
