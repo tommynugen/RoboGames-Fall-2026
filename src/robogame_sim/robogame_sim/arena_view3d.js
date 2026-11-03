@@ -167,7 +167,7 @@ export function create(container) {
   // see-through, red where it does not fit, or the module it would take
   // off, tinted red.
   function buildGhost() {
-    const key = JSON.stringify([hover, tool, newRotation, stacking,
+    const key = JSON.stringify([hover, tool, deleting, newRotation, stacking,
                                 shiftHeld, halves, painting, modules]);
     if (key === builtGhost) return;
     clear(ghost);
@@ -176,7 +176,7 @@ export function create(container) {
 
     const accent = new THREE.Color(css("--accent") || "#2f5fb4");
     const red = new THREE.Color(css("--bad") || "#d23c3c");
-    if (tool === "erase") {
+    if (deleting) {
       const m = under(hover);
       const mesh = m && meshOf.get(m);
       if (!mesh) return;

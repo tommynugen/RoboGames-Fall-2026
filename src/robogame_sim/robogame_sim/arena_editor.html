@@ -166,6 +166,22 @@
     border-color: var(--accent); background: var(--accent);
     color: var(--accent-ink);
   }
+  #delete[aria-pressed=true] {
+    border-color: var(--bad); background: var(--bad); color: #fff;
+  }
+  /* Launch, then Launching..., Running, and Stop while the pointer is on
+     Running. */
+  button.launch[data-state=launching] { font-style: italic; }
+  button.launch[data-state=running] {
+    background: var(--good); border-color: var(--good); color: #fff;
+  }
+  button.launch[data-state=running]:hover,
+  button.launch[data-state=stopping] {
+    background: var(--bad); border-color: var(--bad); color: #fff;
+  }
+  body.deleting #board { cursor: not-allowed; }
+  .help-box summary { cursor: pointer; color: var(--muted); margin-top: 10px; }
+  .help-box .help { margin-top: 4px; }
   .tool kbd { color: var(--muted); }
   kbd {
     font: 11px ui-monospace, monospace; border: 1px solid var(--line);
@@ -214,10 +230,7 @@
     color: var(--ramp-arrow); pointer-events: none;
   }
   body.dragging #drop-hint { display: flex; }
-  #stl-dialog { border-radius: 8px; min-width: 280px; }
   #stl-dialog label { display: block; margin: 8px 0; }
-  #stl-dialog input, #stl-dialog select { width: 100%; }
-  .dialog-buttons { display: flex; gap: 8px; justify-content: flex-end; }
 </style>
 </head>
 <body>
@@ -230,7 +243,8 @@
   <div class="field">
     <label for="name">Name</label>
     <input id="name" type="text" value="default" spellcheck="false"
-           autocomplete="off">
+           autocomplete="off" title="Letters, digits, spaces, - and _;
+the file has - for spaces">
   </div>
   <div class="field">
     <label for="size">Grid</label>
@@ -273,12 +287,17 @@ middle"></select>
           <button id="stack" style="margin-top:4px" aria-pressed="false"
                   title="Place on top of platforms instead of replacing
 them. Shift does the same while held">Stack <kbd>S</kbd></button>
+          <button id="delete" style="margin-top:4px" aria-pressed="false"
+                  title="Delete mode: click or drag to take modules off.
+X again or Escape to go back to placing">Delete <kbd>X</kbd></button>
           <button id="halves" style="margin-top:4px" aria-pressed="true"
                   title="Place on the peg holes half a square apart, across
 floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
           </button>
         </div>
       </div>
+      <details class="help-box">
+      <summary>Help</summary>
       <ul class="help">
         <li>Click or drag to place. The peg holes are evenly spaced across
           the floor tiles, so modules go where the pointer is, to the
@@ -291,7 +310,9 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
         <li>Shift-click, or turn on Stack, to put a module on top of
           platforms: a ramp, wall, thwomp or another platform, across two
           if they are as high. The corner shows how high the top is.</li>
-        <li>Right-click to take the top module off.</li>
+        <li>Right-click to take the top module off, or press <kbd>X</kbd>
+          for delete mode, where clicks and drags take modules off;
+          <kbd>X</kbd> again or <kbd>Esc</kbd> to go back.</li>
         <li>Drag an STL file onto the page to add it as a module of its
           own. It is a block over the 2 inch cells under it, which robots
           go round, and is saved next to the layouts in parts.</li>
@@ -299,6 +320,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
           module's top. Right-drag turns the view, middle-drag moves it
           and the wheel zooms.</li>
       </ul>
+      </details>
     </div>
 
     <div class="panel">
@@ -323,8 +345,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       <h2>Run it</h2>
       <pre id="command"></pre>
       <div class="row"><button id="copy" data-from="command">Copy</button>
-        <button id="launch">Launch in Gazebo</button>
-        <button id="sim-stop" disabled>Stop</button></div>
+        <button id="launch" class="launch">Launch in Gazebo</button></div>
       <p class="note" id="sim-status"></p>
       <p class="note" id="folder"></p>
     </div>
@@ -333,7 +354,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       <h2>Test it</h2>
       <pre id="test-command"></pre>
       <div class="row"><button id="copy-test" data-from="test-command">Copy
-      </button> <button id="launch-test">Launch in Gazebo</button></div>
+      </button> <button id="launch-test" class="launch">Launch in Gazebo</button></div>
       <p class="note">Sim only. Robot 1 chases robot 2, which the first
         controller drives, and every controller connected after it gets a
         robot of its own. <kbd>F</kbd> in the Gazebo window toggles FPV,
@@ -375,6 +396,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
 } }
 </script>
 <script src="arena_draw.js"></script>
+<script src="dialogs.js"></script>
 <script>
 "use strict";
 
@@ -400,7 +422,6 @@ let info = {
 const CAD_TOOLS = [
   ["platform", '1" platform'], ["platform_2", '2" platform'],
   ["ramp", "Ramp"], ["wall", "Wall"], ["thwomp", "Thwomp"],
-  ["erase", "Floor"],
 ];
 // The CAD's modules, then the STL parts dropped onto the page.
 let TOOLS = CAD_TOOLS;
@@ -410,6 +431,8 @@ let size = info.size;
 // row go in halves, since modules peg in anywhere on the grid of holes.
 let modules = [];
 let tool = "platform";
+// Delete mode: clicks take modules off instead of placing the tool's.
+let deleting = false;
 let newRotation = 0;
 // The pointer, in squares like col and row: {x, y}.
 let hover = null;
@@ -633,7 +656,7 @@ function render() {
 // would take off. Red where it does not fit.
 function drawHover() {
   const g = el("g", { "pointer-events": "none" }, board);
-  if (tool === "erase") {
+  if (deleting) {
     const m = under(hover);
     outline(g, footprint(m ? cellsOf(m) : [hoverCell(hover)]), "var(--bad)");
     return;
@@ -649,7 +672,7 @@ function drawHover() {
 function drawPanel() {
   for (const [type] of TOOLS) {
     const svg = document.getElementById(`tool-${type}`);
-    if (!svg || type === "erase") continue;
+    if (!svg) continue;
     svg.replaceChildren();
     defs(svg, `tool-${type}`);
     el("rect", { x: 2, y: 2, width: 26, height: 26, rx: 2,
@@ -704,16 +727,9 @@ function buildTools() {
     const b = document.createElement("button");
     b.className = "tool";
     b.dataset.tool = type;
-    b.setAttribute("aria-pressed", type === tool);
-    b.title = type === "erase" ? "Clear squares back to the floor tile"
-                               : `Place a ${label(type)}`;
+    b.setAttribute("aria-pressed", type === tool && !deleting);
+    b.title = `Place a ${label(type)}`;
     const svg = el("svg", { viewBox: "0 0 30 30", id: `tool-${type}` }, b);
-    if (type === "erase") {
-      el("rect", { x: 3, y: 3, width: 24, height: 24, rx: 2,
-                   fill: "var(--floor)" }, svg);
-      el("path", { d: "M9 9l12 12M21 9L9 21", stroke: "var(--bad)",
-                   "stroke-width": 2.5, "stroke-linecap": "round" }, svg);
-    }
     const kbd = document.createElement("kbd");
     kbd.textContent = i + 1;
     b.append(svg, name);
@@ -778,7 +794,7 @@ function under(point) {
 // the height of what is there. Whatever stood on what is taken away goes
 // too.
 function plan(point, erase, stroke) {
-  if (erase || tool === "erase") {
+  if (erase || deleting) {
     const m = under(point);
     return m && { modules: settle(modules.filter(p => p !== m)) };
   }
@@ -828,7 +844,7 @@ function apply(point, erase, stroke) {
 // What a stroke has been over already: a cell when erasing, or where the
 // tool's module would go.
 function strokeKey(point, erase) {
-  return erase || tool === "erase" ? cellKey(hoverCell(point))
+  return erase || deleting ? cellKey(hoverCell(point))
                                    : moduleKey(candidate(point));
 }
 
@@ -886,11 +902,23 @@ board.addEventListener("contextmenu", event => event.preventDefault());
 
 function setTool(name) {
   tool = name;
+  setDeleting(false);
+}
+
+// X, or the Delete button, goes into delete mode and out again, as do
+// Escape and picking a tool.
+function setDeleting(on) {
+  deleting = on;
   for (const b of document.querySelectorAll(".tool")) {
-    b.setAttribute("aria-pressed", b.dataset.tool === name);
+    b.setAttribute("aria-pressed", b.dataset.tool === tool && !on);
   }
+  document.getElementById("delete").setAttribute("aria-pressed", on);
+  document.body.classList.toggle("deleting", on);
   render();
 }
+
+document.getElementById("delete").addEventListener(
+  "click", () => setDeleting(!deleting));
 
 // Turns the module under the pointer a quarter turn if it can, or else
 // the way new modules face.
@@ -929,16 +957,16 @@ document.getElementById("halves").addEventListener("click", toggleHalves);
 
 // Grows or shrinks the grid about its middle, so modules stay where they
 // are on the table as far as whole squares allow.
-function resize(next) {
+async function resize(next) {
   if (next === size) return;
   const shift = Math.floor((next - size) / 2);
   const kept = settle(modules
     .map(m => ({ ...m, col: m.col + shift, row: m.row + shift }))
     .filter(m => cellsOf(m).every(cell => onGrid(cell, next))));
   const lost = modules.length - kept.length;
-  if (lost && !confirm(`${lost} module${lost === 1 ? " is" : "s are"} ` +
+  if (lost && !await askYes(`${lost} module${lost === 1 ? " is" : "s are"} ` +
                        `off a ${next} × ${next} grid and will be removed. ` +
-                       `Resize?`)) {
+                       `Resize?`, "Resize")) {
     sizeEl.value = size;
     return;
   }
@@ -966,6 +994,7 @@ document.getElementById("clear").addEventListener("click", () => {
 });
 
 document.addEventListener("keydown", event => {
+  if (dialogOpen()) return;
   if (event.target === nameEl) {
     if (event.key === "Enter") save();
     return;
@@ -982,7 +1011,10 @@ document.addEventListener("keydown", event => {
     return;
   } else if (/^[1-9]$/.test(event.key) && TOOLS[+event.key - 1]) {
     setTool(TOOLS[+event.key - 1][0]);
-  } else if (event.key.toLowerCase() === "r") rotate();
+  } else if (event.key === "Escape") {
+    if (deleting) setDeleting(false);
+  } else if (event.key.toLowerCase() === "x") setDeleting(!deleting);
+  else if (event.key.toLowerCase() === "r") rotate();
   else if (event.key.toLowerCase() === "s") toggleStacking();
   else if (event.key.toLowerCase() === "h") toggleHalves();
   else if (event.key.toLowerCase() === "v") {
@@ -1092,8 +1124,11 @@ function showProblems() {
 
 // Run it is the sim as the real arena runs. Test it adds what only the sim
 // can do: a robot for every controller.
+// A layout's file name from its name as typed: - for each space.
+const fileName = () => nameEl.value.trim().split(/\s+/).join("-");
+
 function updateCommand() {
-  const name = nameEl.value.trim() || "default";
+  const name = fileName() || "default";
   const run = `ros2 launch robogame_sim sim.launch.py layout:=${name} ` +
               `robots:=1,2 chase:=1,2`;
   document.getElementById("command").textContent = run;
@@ -1116,19 +1151,30 @@ for (const id of ["copy", "copy-test"]) {
   });
 }
 
-// Launch starts the sim on the saved layout from the app (sim_runner.py),
-// Stop stops it, and the line under them says what runs.
+// Each Launch button starts the sim on the saved layout from the app
+// (sim_runner.py). It says Launching... until Gazebo is up, then Running,
+// which turns to Stop under the pointer and stops the sim when clicked.
+// The line under Run it says what runs.
 const simStatusEl = document.getElementById("sim-status");
-const simStopEl = document.getElementById("sim-stop");
+const launchEls = { false: document.getElementById("launch"),
+                    true: document.getElementById("launch-test") };
+let simStopping = false;
 
 function showSim(sim) {
-  simStopEl.disabled = !sim.running;
-  for (const id of ["launch", "launch-test"]) {
-    document.getElementById(id).disabled = sim.running;
+  for (const [test, b] of Object.entries(launchEls)) {
+    const mine = sim.running && String(!!sim.test) === test;
+    const state = !mine ? "idle" : simStopping ? "stopping"
+      : sim.ready === false ? "launching" : "running";
+    b.dataset.state = state;
+    b.disabled = sim.running && !mine;
+    b.textContent = { idle: "Launch in Gazebo", launching: "Launching…",
+                      running: b.matches(":hover") ? "Stop" : "Running",
+                      stopping: "Stopping…" }[state];
+    b.title = state === "running" ? "Click to stop the sim" : "";
   }
   if (sim.running) {
-    simStatusEl.textContent = `Gazebo is running ${sim.layout}. ` +
-      `Output in ${sim.log}.`;
+    simStatusEl.textContent = `Gazebo is ${sim.ready === false
+      ? "launching" : "running"} ${sim.layout}. Output in ${sim.log}.`;
   } else if (sim.exit !== null && sim.exit !== undefined) {
     const lines = sim.tail.trim().split("\n").slice(-3).join(" ");
     simStatusEl.textContent = `Gazebo stopped (exit ${sim.exit}). ` +
@@ -1136,6 +1182,16 @@ function showSim(sim) {
   } else {
     simStatusEl.textContent = "";
   }
+}
+
+// Running reads Stop while the pointer is on it.
+for (const b of Object.values(launchEls)) {
+  b.addEventListener("pointerenter", () => {
+    if (b.dataset.state === "running") b.textContent = "Stop";
+  });
+  b.addEventListener("pointerleave", () => {
+    if (b.dataset.state === "running") b.textContent = "Running";
+  });
 }
 
 async function pollSim() {
@@ -1146,8 +1202,29 @@ async function pollSim() {
   }
 }
 
+async function stopSim() {
+  simStopping = true;
+  for (const b of Object.values(launchEls)) {
+    if (b.dataset.state !== "idle") {
+      b.dataset.state = "stopping";
+      b.textContent = "Stopping…";
+    }
+  }
+  simStatusEl.textContent = "Stopping Gazebo...";
+  try {
+    showSim(await api("/api/sim/stop", { method: "POST" }));
+  } catch (error) {
+    updateStatus(`Cannot stop: ${error.message}`, "dirty");
+  }
+  simStopping = false;
+  pollSim();
+}
+
 async function launchSim(test) {
-  const name = nameEl.value.trim();
+  const state = launchEls[test].dataset.state;
+  if (state === "running") return stopSim();
+  if (state !== "idle") return;
+  const name = fileName();
   if (!name || snapshot() !== savedSnapshot) {
     updateStatus("Save the layout before launching it", "dirty");
     return;
@@ -1161,19 +1238,8 @@ async function launchSim(test) {
   }
 }
 
-document.getElementById("launch").addEventListener(
-  "click", () => launchSim(false));
-document.getElementById("launch-test").addEventListener(
-  "click", () => launchSim(true));
-simStopEl.addEventListener("click", async () => {
-  simStatusEl.textContent = "Stopping Gazebo...";
-  simStopEl.disabled = true;
-  try {
-    showSim(await api("/api/sim/stop", { method: "POST" }));
-  } catch (error) {
-    updateStatus(`Cannot stop: ${error.message}`, "dirty");
-  }
-});
+launchEls.false.addEventListener("click", () => launchSim(false));
+launchEls.true.addEventListener("click", () => launchSim(true));
 pollSim();
 setInterval(pollSim, 2000);
 
@@ -1205,7 +1271,8 @@ async function openLayout(name) {
 savedEl.addEventListener("change", async () => {
   const name = savedEl.value;
   if (snapshot() !== savedSnapshot &&
-      !confirm("Discard unsaved changes and open " + name + "?")) {
+      !await askYes(`Discard unsaved changes and open ${name}?`, "Discard",
+                    true)) {
     savedEl.value = nameEl.value;
     return;
   }
@@ -1215,15 +1282,17 @@ savedEl.addEventListener("change", async () => {
 });
 
 async function save() {
-  const name = nameEl.value.trim();
+  // Spaces are - in the file name, as parts have.
+  const name = fileName();
   if (!/^[A-Za-z0-9_-]{1,40}$/.test(name)) {
-    updateStatus("Names are letters, digits, - and _ only", "dirty");
+    updateStatus("Names are letters, digits, spaces, - and _ only", "dirty");
     nameEl.focus();
     return;
   }
   try {
     const result = await api(`/api/layouts/${encodeURIComponent(name)}`, {
       method: "PUT", body: JSON.stringify(layout()) });
+    nameEl.value = name;
     savedSnapshot = snapshot();
     problems = result.problems;
     await refreshSaved(name);
@@ -1406,8 +1475,8 @@ const partType = name => name.trim().split(/\s+/).join("-");
 
 async function renamePart(type) {
   const old = label(type);
-  const name = prompt(`Rename ${old} to (letters, digits, spaces, - and _):`,
-                      old);
+  const name = await askText(
+    `Rename ${old} to (letters, digits, spaces, - and _):`, old, "Rename");
   if (!name || name.trim() === old) return;
   try {
     const result = await partAction(
@@ -1423,8 +1492,9 @@ async function renamePart(type) {
 
 async function deletePart(type) {
   const old = label(type);
-  if (!confirm(`Move ${old} to the archive? It can be restored from ` +
-               "there. Layouts that use it will not open until it is.")) {
+  if (!await askYes(`Move ${old} to the archive? It can be restored ` +
+                    "from there. Layouts that use it will not open until " +
+                    "it is.", "Delete", true)) {
     return;
   }
   try {
@@ -1445,8 +1515,8 @@ async function restorePart(archived, part) {
   // Restored as its own name, unless that is taken by a part now.
   let name = part;
   if (info.types[partType(name)]) {
-    name = prompt(`There is a ${name} already. Restore it as:`,
-                  `${name}_2`);
+    name = await askText(`There is a ${name} already. Restore it as:`,
+                         `${name}_2`, "Restore");
     if (!name) return;
   }
   try {

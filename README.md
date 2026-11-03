@@ -232,8 +232,11 @@ button, which starts that panel's command on the layout open in the
 editor. Save the layout first: the sim reads the saved file. One sim runs
 at a time. The line under Run it says which layout runs and where its
 output goes (`robogame_sim.log` in the temp folder, `/tmp` on Linux), and
-gives the last lines when it ends. Stop sends Ctrl-C to the launch, as the
-terminal would, and kills it if it is still up 10 s later. Quitting the
+gives the last lines when it ends. The button says Launching… until a
+robot is spawned in Gazebo (or 90 s at most), then Running; with the
+pointer on it, Running turns red and reads Stop, and a click stops the
+sim. Stop sends Ctrl-C to the launch, as the terminal would, and kills it
+if it is still up 10 s later. Quitting the
 app stops the sim too. ROS and the workspace must be sourced in the
 terminal that starts the app, or Launch says there is no `ros2`.
 `sim_runner.py` does this.
@@ -241,6 +244,13 @@ terminal that starts the app, or Launch says there is no `ros2`.
 Checked 2026-11-02: tests (`test_sim_runner.py`, with a stand-in for
 `ros2`) and the app's routes by hand without ROS. Not yet run against
 Gazebo itself.
+
+Checked 2026-11-03: Launching and Running from the stand-in's log in the
+tests, and the button's Launching…, Running and Stop on hover in Chromium
+(Playwright). Which line ros_gz_sim's `create` prints once a robot is in
+(`Entity creation successful`, or `OK creation of entity` in older
+releases) is not yet checked against Gazebo; if neither shows, the button
+turns to Running after 90 s.
 
 ## The app's Console tab
 
@@ -655,9 +665,11 @@ or press R over it. A ramp's arrow points uphill.
 Shift-click, or turn on Stack (S), to put the tool on top of platforms
 instead of replacing them; a stack shows how many inches up its top is in
 its corner. A plain click replaces whatever is in the way, at the height
-of the top of what is there. Right-click or the Floor tool (6) takes the
-top module under the pointer off, along with anything standing on it, and
-Ctrl+Z undoes. As
+of the top of what is there. Right-click takes the top module under the
+pointer off, along with anything standing on it, and Ctrl+Z undoes. X, or
+the Delete button, is delete mode, where clicks and drags take modules
+off; X again, Esc or picking a tool goes back to placing. Help, under the
+tools, opens these instructions in short. As
 you edit it checks the layout and outlines in red any ramp whose low end
 runs into the edge, a module, a wall facing it, the side of a ramp or a
 drop, any ramp whose high end is not a platform (or the foot of another
@@ -671,7 +683,19 @@ chase_node's planner is more cautious: the robot only turns where it has
 a wall that a robot driven by hand gets over. Name the layout and Save,
 and it is written to
 `src/robogame_sim/layouts/NAME.json`, one module per line so it diffs
-well. `http://localhost:8766/#editor/NAME` opens a saved one directly.
+well. The name may have spaces, which are - in the file name, so
+`my arena` is saved as `my-arena.json` and the editor then shows
+`my-arena`.
+
+Every question the app asks (renaming or deleting a part, discarding
+unsaved changes, removing a robot) is its own dialog, the same on both
+tabs: Enter is OK and Esc is Cancel, and the page's keys (V, X, the tool
+numbers and so on) do nothing while one is open.
+
+Checked 2026-11-03: tests, and in Chromium (Playwright) against the app
+without ROS: saving `my  arena` wrote `my-arena.json`, X then a click took
+a module off and Esc left delete mode, Enter and Esc in the dialogs, and
+V typed into a dialog did not change the view. `http://localhost:8766/#editor/NAME` opens a saved one directly.
 
 The editor also shows the layout in 3D, built from the same CAD meshes
 and posed as the sim poses them, so what it shows is what Gazebo loads.
@@ -737,7 +761,7 @@ module needs an entry in `PARTS` in `arena_layout.py` and a tool in
 ### STL parts
 
 Drag an STL file from your desktop onto the editor to add it as a module
-of its own. It asks for a name (letters, digits, - and _), the file's
+of its own. It asks for a name (letters, digits, spaces, - and _), the file's
 units (millimetres, centimetres, inches, metres, or a guess from its size:
 over 30 is millimetres, over 1.3 inches, else metres) and which axis
 points up (Z, or Y as some CAD exports have it). The part is turned so z

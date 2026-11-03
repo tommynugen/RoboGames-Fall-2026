@@ -274,6 +274,7 @@
 </main>
 
 <script src="arena_draw.js"></script>
+<script src="dialogs.js"></script>
 <script>
 "use strict";
 
@@ -801,8 +802,9 @@ function buildDetail(robot) {
       state.manager ? h("button", {
         class: "danger", style: "margin-left:auto",
         title: "Take this robot out of the world",
-        onclick: () => {
-          if (confirm(`Remove robot ${robot.id} from the world?`)) {
+        onclick: async () => {
+          if (await askYes(`Remove robot ${robot.id} from the world?`,
+                           "Remove", true)) {
             send(`/api/robots/${robot.id}/remove`, {});
           }
         },
@@ -1028,7 +1030,7 @@ async function update() {
 }
 
 document.addEventListener("keydown", event => {
-  if (event.target.closest("input, select")) return;
+  if (dialogOpen() || event.target.closest("input, select")) return;
   if (/^[1-9]$/.test(event.key) && robotById(+event.key)) select(+event.key);
   if (event.key === "Escape" && robotById(selected) &&
       robotById(selected).autonomous) {

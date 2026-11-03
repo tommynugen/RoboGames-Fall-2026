@@ -25,11 +25,15 @@ def test_launch_and_stop(runner):
     assert status["running"] and status["layout"] == "default"
     assert "layout:=default" in status["command"]
     assert "controller:=hotplug" in status["command"]
+    assert status["test"] and not status["ready"]  # still launching
     for _ in range(50):
         if "launched" in runner.status()["tail"]:
             break
         time.sleep(0.05)
     assert "launch robogame_sim sim.launch.py" in runner.status()["tail"]
+    with open(runner.log, "ab") as log:
+        log.write(b"[create-9] Entity creation successful.\n")
+    assert runner.status()["ready"]  # a robot is in: running
     with pytest.raises(ValueError):
         runner.start("default")  # one at a time
     status = runner.stop()

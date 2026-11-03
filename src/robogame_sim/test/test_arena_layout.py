@@ -264,7 +264,12 @@ def test_editor_serves_saves_and_checks(editor):
                         {"size": 12, "modules": [ramp(0, 0, 180)]})
     assert status == 200 and json.loads(body)["problems"]
 
-    assert call(url + "/api/layouts/bad%20name", "PUT", layout)[0] == 400
+    # Spaces are - in the file name.
+    status, body = call(url + "/api/layouts/my%20%20arena", "PUT", layout)
+    assert status == 200 and json.loads(body)["name"] == "my-arena"
+    assert json.loads(call(url + "/api/layouts/my%20arena")[1]) == \
+        al.normalise(layout)
+    assert call(url + "/api/layouts/bad%2Fname", "PUT", layout)[0] == 400
     assert call(url + "/api/layouts/nothere")[0] == 404
     assert call(url + "/api/check", "POST",
                 {"modules": [ramp(1, 1, 45)]})[0] == 400

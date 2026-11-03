@@ -112,6 +112,15 @@ BLOCK_COLOUR = (0.910, 0.627, 0.478)
 PLATFORMS = ("platform", "platform_2")
 
 NAME = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
+
+
+def layout_name(name):
+    """A layout's file name, without .json, from its name as typed: letters,
+    digits, spaces, - and _, with - for each space, as parts have."""
+    name = "-".join(str(name or "").split())
+    if not NAME.match(name):
+        raise ValueError("names are letters, digits, spaces, - and _ only")
+    return name
 HERE = os.path.dirname(os.path.realpath(__file__))
 
 
@@ -536,7 +545,7 @@ def find_layout(name):
         return os.path.abspath(name)
 
     for folder in layout_dirs():
-        path = os.path.join(folder, f"{name}.json")
+        path = os.path.join(folder, f"{'-'.join(name.split())}.json")
         if os.path.isfile(path):
             return path
 
@@ -633,8 +642,7 @@ def load(name):
 
 
 def save(name, layout, folder=None):
-    if not NAME.match(name):
-        raise ValueError("names are letters, digits, - and _ only")
+    name = layout_name(name)
 
     folder = folder or layout_dirs()[0]
     os.makedirs(folder, exist_ok=True)
