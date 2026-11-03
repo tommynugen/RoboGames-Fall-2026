@@ -35,7 +35,7 @@ from robogame_sim import arena_editor
 from robogame_sim.sim_runner import SimRunner
 
 HERE = os.path.dirname(os.path.realpath(__file__))
-SHELL = os.path.join(HERE, "robogame_app.html")
+SHELL = os.path.join(HERE, "gamemaster.html")
 # Draws the modules, for both tabs.
 DRAW = os.path.join(HERE, "arena_draw.js")
 TABS = ("editor", "console")
@@ -150,12 +150,12 @@ def start_console(args):
     return RobotConsole()
 
 
-def main(args=None, tab="editor"):
+def main(args=None):
     parser = argparse.ArgumentParser(description="RoboGame Gamemaster")
     parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--no-browser", action="store_true",
                         help="do not open a browser window")
-    parser.add_argument("--tab", choices=TABS, default=tab,
+    parser.add_argument("--tab", choices=TABS, default="editor",
                         help="the tab the browser opens on")
     # ros2 run passes --ros-args on, which rclpy takes.
     options, _ = parser.parse_known_args(args)
@@ -164,8 +164,7 @@ def main(args=None, tab="editor"):
     try:
         server = ThreadingHTTPServer(("127.0.0.1", options.port), None)
     except OSError:
-        # Already running, as when arena_editor and robot_console are both
-        # started: one app serves both, so show it and stop.
+        # Already running: show it and stop.
         print(f"The RoboGame Gamemaster is already on {url}.", flush=True)
         if not options.no_browser:
             webbrowser.open(url)

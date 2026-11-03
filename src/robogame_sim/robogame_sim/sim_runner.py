@@ -6,7 +6,7 @@ temp folder. Stop sends Ctrl-C (SIGINT) to the whole group, as the
 terminal would, then SIGKILL if it is still up 10 s later. Quitting the app
 stops the sim too.
 
-Routes, served by robogame_app.py:
+Routes, served by gamemaster.py:
 
 - GET /api/sim: {"running", "layout", "command", "log", "tail"}
 - POST /api/sim {"layout": NAME, "test": bool}: launches it

@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from robogame_sim import arena_layout as al
-from robogame_sim.robogame_app import handler
+from robogame_sim.gamemaster import handler
 from robogame_sim.terrain import Terrain, read_stl
 from robogame_sim.terrain import parse_stl as read_stl_bytes
 

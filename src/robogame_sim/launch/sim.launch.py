@@ -13,7 +13,7 @@
     ros2 launch robogame_sim sim.launch.py robots:=1,2 chase:=1,2 \
         controller:=hotplug drive:=2
 
-layout names an arena layout made with arena_editor (or a path to one), and
+layout names an arena layout made in the arena editor (or a path to one), and
 the world is built from it; cad uses the Onshape export as it is.
 
 Only one sim can run in a Gazebo partition, since the world's name is the
@@ -579,7 +579,7 @@ def generate_launch_description():
                         "first robot drives after the second"),
         DeclareLaunchArgument(
             "layout", default_value="default",
-            description="Arena layout from arena_editor, by name or path; "
+            description="Arena layout from the arena editor, by name or path; "
                         "cad uses the Onshape export as it is"),
         DeclareLaunchArgument(
             "partition", default_value="",

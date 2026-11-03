@@ -2,10 +2,9 @@
 
     ros2 run robogame_sim robogame_gamemaster
 
-The Arena editor tab of the RoboGame Gamemaster (robogame_app.py), at
+The Arena editor tab of the RoboGame Gamemaster (gamemaster.py), at
 http://localhost:8766/#editor. This file has the editor's page API, which
-the app serves; arena_editor.html is the page. `ros2 run robogame_sim
-arena_editor` opens the app on this tab.
+the app serves; arena_editor.html is the page.
 
 A page where the arena's modules, 1 and 2
 inch platforms, ramps, walls and the thwomp, are placed on the floor grid
@@ -141,12 +140,3 @@ def post(path, read_body):
     except OSError as error:
         return 500, {"error": str(error)}
     return None
-
-
-def main(args=None):
-    from robogame_sim import robogame_app
-    robogame_app.main(args, tab="editor")
-
-
-if __name__ == "__main__":
-    main()

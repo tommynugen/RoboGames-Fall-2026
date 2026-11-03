@@ -2,10 +2,9 @@
 
     ros2 run robogame_sim robogame_gamemaster
 
-The Robot console tab of the RoboGame Gamemaster (robogame_app.py), at
+The Robot console tab of the RoboGame Gamemaster (gamemaster.py), at
 http://localhost:8766/#console. This file has the console's node and its
 page API, which the app serves; robot_console.html is the page.
-`ros2 run robogame_sim robot_console` opens the app on this tab.
 
 The page shows the arena drawn as the arena
 editor draws it and every robot on it, found by its
@@ -675,12 +674,3 @@ def post(console, path, read_body):
 
     ok, result = console.call(*call)
     return (200, {"ok": True}) if ok else (400, {"error": result})
-
-
-def main(args=None):
-    from robogame_sim import robogame_app
-    robogame_app.main(args, tab="console")
-
-
-if __name__ == "__main__":
-    main()
