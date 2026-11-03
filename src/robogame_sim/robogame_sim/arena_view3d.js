@@ -11,17 +11,25 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
 
 const loader = new STLLoader();
 const geometries = new Map();
+// Who to tell when each mesh still loading has come.
+const waiting = new Map();
 
-// One geometry for each mesh, shared by every module of that kind.
+// One geometry for each mesh, shared by every module of that kind; null,
+// and done called later, while it loads.
 function geometry(mesh, done) {
-  if (!geometries.has(mesh)) {
+  if (geometries.get(mesh)) return geometries.get(mesh);
+  if (!waiting.has(mesh)) {
+    waiting.set(mesh, new Set());
     geometries.set(mesh, null);
     loader.load(`/api/meshes/${mesh}`, g => {
       geometries.set(mesh, g);
-      done();
+      const calls = waiting.get(mesh);
+      waiting.delete(mesh);
+      for (const call of calls) call();
     });
   }
-  return geometries.get(mesh);
+  waiting.get(mesh).add(done);
+  return null;
 }
 
 const css = name =>
@@ -273,4 +281,77 @@ export function create(container) {
 
   resize();
   return { update, resize };
+}
+
+// -- icons -------------------------------------------------------------------
+
+// The tool and part icons, drawn from each module's mesh: from straight
+// above for the top view, and isometric for the 3D view. One small
+// renderer draws them all; each picture is kept by type, view and turn.
+let iconRenderer = null;
+const icons = new Map();
+const ICON_PX = 96;
+
+function drawIcon(g, part, view, rotation) {
+  if (!iconRenderer) {
+    iconRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true,
+                                             preserveDrawingBuffer: true });
+    iconRenderer.setSize(ICON_PX, ICON_PX, false);
+  }
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 1.4));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.4);
+  sun.position.set(-0.7, -0.4, 1.2);
+  scene.add(sun);
+  const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+    color: new THREE.Color(...(part.colour || [0.6, 0.6, 0.6])),
+    roughness: 0.75, metalness: 0.05 }));
+  const pose = (part.poses && part.poses[part.turns ? rotation : 0]) ||
+               [0, 0, 0, 0];
+  mesh.rotation.z = pose[3];
+  scene.add(mesh);
+  mesh.updateMatrixWorld();
+  const box = new THREE.Box3().setFromObject(mesh);
+  const mid = box.getCenter(new THREE.Vector3());
+
+  // Straight down for the top view, +y up the picture as on the grid;
+  // from the -y, +x side and above for the isometric one.
+  const way = view === "top" ? new THREE.Vector3(0, 0, 1)
+                             : new THREE.Vector3(1, -1, 1).normalize();
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.001, 10);
+  camera.up.set(0, view === "top" ? 1 : 0, view === "top" ? 0 : 1);
+  camera.position.copy(mid).addScaledVector(way, 2);
+  camera.lookAt(mid);
+  camera.updateMatrixWorld();
+  // Fit the box's corners, seen from the camera, with a little margin.
+  let reach = 1e-4;
+  const inverse = camera.matrixWorldInverse;
+  for (let i = 0; i < 8; i++) {
+    const p = new THREE.Vector3(i & 1 ? box.max.x : box.min.x,
+                                i & 2 ? box.max.y : box.min.y,
+                                i & 4 ? box.max.z : box.min.z)
+      .applyMatrix4(inverse);
+    reach = Math.max(reach, Math.abs(p.x), Math.abs(p.y));
+  }
+  reach *= 1.08;
+  Object.assign(camera, { left: -reach, right: reach, top: reach,
+                          bottom: -reach });
+  camera.updateProjectionMatrix();
+  iconRenderer.render(scene, camera);
+  mesh.material.dispose();
+  return iconRenderer.domElement.toDataURL("image/png");
+}
+
+// A picture of a module, as a data URL, or null while its mesh loads (done
+// is called once it has) or for a module with no mesh. view is "top" or
+// "iso"; rotation in degrees, for modules that turn.
+export function icon(type, view, rotation = 0, done = () => {}) {
+  const part = info.types[type];
+  if (!part || !part.mesh) return null;
+  const key = `${type}|${part.mesh}|${view}|${part.turns ? rotation : 0}`;
+  if (icons.has(key)) return icons.get(key);
+  const g = geometry(part.mesh, done);
+  if (!g) return null;
+  icons.set(key, drawIcon(g, part, view, rotation));
+  return icons.get(key);
 }

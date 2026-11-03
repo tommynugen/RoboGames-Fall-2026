@@ -709,6 +709,14 @@ wheel zooms. Modules the checks find a problem with glow red. The 3D view
 loads three.js 0.160 from unpkg.com, so it needs the internet when the
 page opens; without it the page says so and the top view works as before.
 
+The tool buttons and the STL parts list show a picture of each module
+made from its mesh: seen from straight above with Top or Both picked, and
+from the side and above (isometric) with 3D picked. Modules that turn are
+drawn turned the way new ones face, so R turns their pictures too. This
+is the same for the CAD modules and for STL parts, whose pictures are made
+as soon as they are added. Until three.js and the mesh load, the buttons
+show the old flat drawings.
+
 Layouts made for the old 9 x 9 grid of 5 inch modules still open, with a
 warning; pick 12 x 12 under Grid to grow one about the middle and Save.
 
@@ -824,6 +832,10 @@ dark, on `default` and `mazetest`: the modules stand where the top view
 has them, a click on a tile in 3D placed a 1" platform and a right-click
 took it off again, and a right-drag turned the view without editing. A
 test checks the poses the editor is given add up to the sim's.
+
+The module pictures were checked on 2026-11-03 in headless Chromium: the
+five CAD modules' buttons showed top-down pictures under Top and Both and
+isometric ones under 3D, and R turned the ramp's.
 
 ## Tests
 
