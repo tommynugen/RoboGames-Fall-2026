@@ -56,7 +56,8 @@
   }
   h2 { font-size: 14px; margin: 0 0 10px; }
   .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  #source { width: 220px; }
+  #source { max-width: 280px; }
+  #source-url { width: 220px; }
   #feed {
     position: relative; background: var(--feed); border-radius: 8px;
     aspect-ratio: 16 / 9; overflow: hidden; margin-top: 12px;
@@ -109,10 +110,11 @@
     <section>
       <div class="bar">
         <label for="source">Camera</label>
-        <input id="source" list="sources" placeholder="0, /dev/video0, URL">
-        <datalist id="sources">
-          <option value="0"><option value="1"><option value="test">
-        </datalist>
+        <select id="source"></select>
+        <input id="source-url" placeholder="rtsp:// or http:// URL"
+               aria-label="Camera URL" hidden>
+        <button id="refresh" title="Look for cameras again"
+                aria-label="Look for cameras again">↻</button>
         <button id="start" class="primary">Start</button>
         <button id="stop">Stop</button>
         <a id="snapshot" href="/vision/frame.jpg" download="arena.jpg"
@@ -205,6 +207,7 @@ const NUMBERS = ["arena_cm", "corner_push", "thresh_min", "thresh_max",
   "thresh_step", "min_perimeter", "width", "height", "fps", "jpeg_quality"];
 const CHECKS = ["draw_tags", "draw_arena", "draw_grid"];
 const CORNERS = [1, 2, 3, 4];
+const OTHER = "other:";  // the Other choice, not a camera
 const DEFAULTS = {
   arena_cm: 112, corner_push: 40, thresh_min: 3, thresh_max: 53,
   thresh_step: 4, min_perimeter: 0.02, width: 1280, height: 720, fps: 30,
@@ -234,8 +237,7 @@ async function call(path, body) {
 function fillForm(settings) {
   for (const key of NUMBERS) $(key).value = settings[key];
   for (const key of CHECKS) $(key).checked = settings[key];
-  if (document.activeElement !== $("source")) $("source").value =
-    settings.source;
+  showSource(settings.source);
   formFilled = true;
 }
 
@@ -414,15 +416,52 @@ async function act(path, body) {
   }
 }
 
-$("start").addEventListener("click", async () => {
-  if ($("source").value.trim() !== state.settings.source) {
-    await act("/api/vision", {source: $("source").value.trim()});
+// The camera picked: one listed, or the URL typed under Other.
+function picked() {
+  return $("source").value === OTHER ? $("source-url").value.trim()
+    : $("source").value;
+}
+
+function showSource(source) {
+  const listed = [...$("source").options].some((o) => o.value === source);
+  $("source").value = listed ? source : OTHER;
+  $("source-url").hidden = listed;
+  if (!listed && document.activeElement !== $("source-url")) {
+    $("source-url").value = source;
   }
-  act("/api/vision/start");
+}
+
+async function findCameras() {
+  try {
+    const {cameras} = await call("/api/vision/cameras");
+    const options = cameras.map(({source, name}) => new Option(name, source));
+    options.push(new Option("Other: a URL…", OTHER));
+    $("source").replaceChildren(...options);
+    if (state) showSource(state.settings.source);
+  } catch (error) {
+    say(`Could not list cameras: ${error.message}`, true);
+  }
+}
+
+$("start").addEventListener("click", async () => {
+  const source = picked();
+  if (!source) return say("Type the camera's URL first.", true);
+  if (source !== state.settings.source) {
+    await act("/api/vision", {source});
+  }
+  act("/api/vision/start", {});
 });
-$("stop").addEventListener("click", () => act("/api/vision/stop"));
-$("source").addEventListener("change", () =>
-  act("/api/vision", {source: $("source").value.trim()}));
+$("stop").addEventListener("click", () => act("/api/vision/stop", {}));
+$("source").addEventListener("change", () => {
+  const other = $("source").value === OTHER;
+  $("source-url").hidden = !other;
+  if (other) $("source-url").focus();
+  else act("/api/vision", {source: picked()});
+});
+$("source-url").addEventListener("change", () => {
+  if (picked()) act("/api/vision", {source: picked()});
+});
+$("refresh").addEventListener("click", findCameras);
 $("settings").addEventListener("submit", (event) => {
   event.preventDefault();
   const body = {};
@@ -436,7 +475,7 @@ $("tag-form").addEventListener("submit", (event) => {
          Number($("map-turn").value) || 0);
 });
 $("reset").addEventListener("click", () => act("/api/vision", DEFAULTS));
-poll();
+findCameras().then(poll);
 setInterval(poll, 300);
 </script>
 </body>

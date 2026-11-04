@@ -1027,3 +1027,17 @@ def test_checks_go_by_the_floor_under_a_platform():
     # A tile's edge is driven over, so tiles here and there are no island.
     assert al.check(bare(tile(5, 5), tile(5, 4), tile(5, 3), platform(5, 5),
                          ramp(5, 4, 0))) == []
+
+
+def test_a_module_keeps_its_own_colour_into_the_sim():
+    layout = al.normalise(bare(dict(platform(5, 5), colour="#E0A030 "),
+                               platform(2, 2)))
+    painted = [m for m in layout["modules"] if "colour" in m]
+    assert [m["colour"] for m in painted] == ["#e0a030"]
+    assert json.loads(al.dumps(layout)) == layout
+    sdf = al.model_sdf(layout)
+    assert "<diffuse>0.878 0.627 0.188 1</diffuse>" in sdf
+    r, g, b = al.PARTS["platform"].colour
+    assert f"<diffuse>{r} {g} {b} 1</diffuse>" in sdf
+    with pytest.raises(ValueError):
+        al.normalise(bare(dict(platform(5, 5), colour="red")))

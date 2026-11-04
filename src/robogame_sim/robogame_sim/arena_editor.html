@@ -187,6 +187,14 @@
     background: var(--bad); border-color: var(--bad); color: #fff;
   }
   body.deleting #board { cursor: not-allowed; }
+  body.painting #board { cursor: crosshair; }
+  #paint[aria-pressed=true] {
+    border-color: var(--accent); background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .paint-row { display: inline-flex; gap: 4px; align-items: center; }
+  #paint-colour { width: 32px; height: 26px; padding: 0 2px;
+                  border: 1px solid var(--line, #888); border-radius: 4px; }
   .help-box summary { cursor: pointer; color: var(--muted); margin-top: 10px; }
   .help-box .help { margin-top: 4px; }
   .tool kbd { color: var(--muted); }
@@ -307,6 +315,14 @@ them. Shift does the same while held">Stack <kbd>S</kbd></button>
           <button id="delete" style="margin-top:4px" aria-pressed="false"
                   title="Delete mode: click or drag to take modules off.
 X again or Escape to go back to placing">Delete <kbd>X</kbd></button>
+          <span class="paint-row" style="margin-top:4px">
+            <button id="paint" aria-pressed="false"
+                    title="Paint mode: click or drag to give modules this
+colour, right click to give them their part's colour back. P again or
+Escape to go back to placing">Paint <kbd>P</kbd></button>
+            <input type="color" id="paint-colour" value="#e0a030"
+                   title="Paint colour">
+          </span>
           <button id="halves" style="margin-top:4px" aria-pressed="true"
                   title="Place on the peg holes half a square apart, across
 floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
@@ -334,6 +350,9 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
         <li>Right-click to take the top module off, or press <kbd>X</kbd>
           for delete mode, where clicks and drags take modules off;
           <kbd>X</kbd> again or <kbd>Esc</kbd> to go back.</li>
+        <li>Press <kbd>P</kbd> for paint mode: clicks and drags give the top
+          module the colour beside Paint, right-clicks its own colour back.
+          The sim builds it in that colour too.</li>
         <li>Drag an STL file onto the page to add it as a module of its
           own. It is a block over the 2 inch cells under it, which robots
           go round, and is saved next to the layouts in parts.</li>
@@ -532,6 +551,10 @@ let modules = [];
 let tool = "platform";
 // Delete mode: clicks take modules off instead of placing the tool's.
 let deleting = false;
+// Paint mode: clicks give modules the paint colour, right clicks their
+// part's colour back.
+let paintMode = false;
+const paintEl = () => document.getElementById("paint-colour");
 let newRotation = 0;
 // The pointer, in squares like col and row: {x, y}.
 let hover = null;
@@ -608,6 +631,7 @@ function layout() {
     const entry = { type: m.type, col: m.col, row: m.row };
     if (m.level > 0) entry.level = m.level;
     if (turns(m.type)) entry.rotation = m.rotation;
+    if (m.colour) entry.colour = m.colour;
     return entry;
   });
   list.sort((a, b) => a.row - b.row || a.col - b.col ||
@@ -675,7 +699,7 @@ function drawPlaced(parent, m, prefix, opacity = 1) {
   const i = m.level > 0 && isPlatform(m.type) ?
     Math.min(m.level * 0.08, 0.24) * CELL : 0;
   drawModule(parent, m.type, x + i, y + i, CELL - 2 * i, m.rotation, prefix,
-             opacity);
+             opacity, false, m.colour);
 }
 
 function render() {
@@ -754,9 +778,10 @@ function render() {
 // would take off. Red where it does not fit.
 function drawHover() {
   const g = el("g", { "pointer-events": "none" }, board);
-  if (deleting) {
+  if (deleting || paintMode) {
     const m = under(hover);
-    outline(g, footprint(m ? cellsOf(m) : [hoverCell(hover)]), "var(--bad)");
+    outline(g, footprint(m ? cellsOf(m) : [hoverCell(hover)]),
+            deleting ? "var(--bad)" : paintEl().value);
     return;
   }
   const result = plan(hover, false, false);
@@ -854,7 +879,8 @@ function buildTools() {
     const b = document.createElement("button");
     b.className = "tool";
     b.dataset.tool = type;
-    b.setAttribute("aria-pressed", type === tool && !deleting);
+    b.setAttribute("aria-pressed",
+                   type === tool && !deleting && !paintMode);
     b.title = `Place a ${label(type)}`;
     const svg = el("svg", { viewBox: "0 0 30 30", id: `tool-${type}` }, b);
     const img = document.createElement("img");
@@ -926,6 +952,14 @@ function under(point) {
 // the height of what is there. Whatever stood on what is taken away goes
 // too.
 function plan(point, erase, stroke) {
+  if (paintMode) {
+    const m = under(point);
+    const colour = erase ? undefined : paintEl().value;
+    if (!m || m.colour === colour) return null;
+    const painted = { ...m };
+    if (colour) painted.colour = colour; else delete painted.colour;
+    return { modules: modules.map(p => p === m ? painted : p) };
+  }
   if (erase || deleting) {
     const m = under(point);
     if (!m) return null;
@@ -988,7 +1022,7 @@ function apply(point, erase, stroke) {
 // What a stroke has been over already: a cell when erasing, or where the
 // tool's module would go.
 function strokeKey(point, erase) {
-  return erase || deleting ? cellKey(hoverCell(point))
+  return erase || deleting || paintMode ? cellKey(hoverCell(point))
                                    : moduleKey(candidate(point));
 }
 
@@ -1046,12 +1080,31 @@ board.addEventListener("contextmenu", event => event.preventDefault());
 
 function setTool(name) {
   tool = name;
+  if (paintMode) setPainting(false);
   setDeleting(false);
 }
+
+function setPainting(on) {
+  if (on && deleting) setDeleting(false);
+  paintMode = on;
+  document.getElementById("paint").setAttribute("aria-pressed", on);
+  document.body.classList.toggle("painting", on);
+  if (on) {
+    for (const b of document.querySelectorAll(".tool")) {
+      b.setAttribute("aria-pressed", false);
+    }
+  } else if (!deleting) setDeleting(false);
+  render();
+}
+
+document.getElementById("paint").addEventListener(
+  "click", () => setPainting(!paintMode));
+paintEl().addEventListener("input", () => setPainting(true));
 
 // X, or the Delete button, goes into delete mode and out again, as do
 // Escape and picking a tool.
 function setDeleting(on) {
+  if (on && paintMode) setPainting(false);
   deleting = on;
   for (const b of document.querySelectorAll(".tool")) {
     b.setAttribute("aria-pressed", b.dataset.tool === tool && !on);
@@ -1157,7 +1210,9 @@ document.addEventListener("keydown", event => {
     setTool(TOOLS[+event.key - 1][0]);
   } else if (event.key === "Escape") {
     if (deleting) setDeleting(false);
+    if (paintMode) setPainting(false);
   } else if (event.key.toLowerCase() === "x") setDeleting(!deleting);
+  else if (event.key.toLowerCase() === "p") setPainting(!paintMode);
   else if (event.key.toLowerCase() === "r") rotate();
   else if (event.key.toLowerCase() === "s") toggleStacking();
   else if (event.key.toLowerCase() === "h") toggleHalves();

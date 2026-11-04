@@ -26,6 +26,8 @@ the tab says so, and still shows /arena/tags.
 
 import json
 import math
+import os
+import re
 import threading
 import time
 
@@ -260,6 +262,42 @@ class TestCamera:
         pass
 
 
+def list_cameras(root="/sys/class/video4linux"):
+    """The cameras connected, as [{"source", "name"}]: on Linux each
+    /dev/video device that gives pictures (a camera's other nodes, for
+    metadata, have an index over 0), named as the camera names itself.
+    Elsewhere, the first few device numbers that open."""
+    if os.path.isdir(root):
+        found = []
+        for entry in os.listdir(root):
+            match = re.fullmatch(r"video(\d+)", entry)
+            if not match:
+                continue
+
+            def read(name):
+                try:
+                    with open(os.path.join(root, entry, name)) as file:
+                        return file.read().strip()
+                except OSError:
+                    return ""
+            if read("index") not in ("", "0"):
+                continue
+            number = match.group(1)
+            found.append({"source": number,
+                          "name": f"{read('name') or 'Camera'} "
+                                  f"(/dev/video{number})"})
+        return sorted(found, key=lambda c: int(c["source"]))
+    if cv2 is None:
+        return []
+    found = []
+    for number in range(4):
+        camera = cv2.VideoCapture(number)
+        if camera.isOpened():
+            found.append({"source": str(number), "name": f"Camera {number}"})
+        camera.release()
+    return found
+
+
 def open_camera(settings):
     """A cv2.VideoCapture (or TestCamera) for the source, or raises
     RuntimeError saying why not."""
@@ -452,10 +490,25 @@ class Vision:
         if restart:
             self.start()
 
+    def cameras(self):
+        """The cameras to pick from: those connected, the one in use (it
+        may be a URL, or held open so not listed), and the test one."""
+        cameras = list_cameras() if not self.running.is_set() or \
+            os.path.isdir("/sys/class/video4linux") else []
+        source = self.settings["source"]
+        if source != "test" and all(c["source"] != source for c in cameras):
+            name = f"Camera {source}, not found" if source.isdigit() \
+                else source
+            cameras.append({"source": source, "name": name})
+        return cameras + [{"source": "test", "name": "Test camera "
+                           "(made-up arena)"}]
+
     def get(self, path):
         """GET routes: (status, body), or None for a path not the tab's."""
         if path == "/api/vision":
             return 200, self.state()
+        if path == "/api/vision/cameras":
+            return 200, {"cameras": self.cameras()}
         if path == "/vision/frame.jpg":
             if self.jpeg is None:
                 return 404, {"error": "no picture yet"}

@@ -56,6 +56,9 @@ toward +y, at 90 toward -x, at 180 toward -y and at 270 toward +x. A wall
 or thwomp pegs in on the line of holes 1 inch from the middle of its
 square, on the side its rotation points to: at 0 along the +y side.
 
+A module may have its own "colour", like "#e0a030", painted in the
+editor; without one it has its part's colour. The sim uses it too.
+
 From a layout this builds the Gazebo model of the arena, out of the meshes
 scripts/export_onshape_arena.py exported from the CAD, a world around it,
 and the terrain chase_node plans over, so the sim and the planner always
@@ -683,6 +686,8 @@ def normalise(layout):
                 raise ValueError(f"{kind} rotation must be one of "
                                  f"{ROTATIONS}")
             entry["rotation"] = rotation
+        if module.get("colour"):
+            entry["colour"] = hex_colour(module["colour"])
         modules.append(entry)
 
     taken = {}
@@ -723,6 +728,19 @@ def half(value, name):
 
     doubled = round(doubled)
     return doubled // 2 if doubled % 2 == 0 else doubled / 2
+
+
+def hex_colour(value):
+    """A module's own colour, as "#rrggbb" in lower case."""
+    text = str(value).strip().lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", text):
+        raise ValueError(f"colour must be like #3a6bb4, not {value!r}")
+    return text
+
+
+def rgb(text):
+    """A "#rrggbb" colour as r, g, b from 0 to 1."""
+    return tuple(round(int(text[i:i + 2], 16) / 255, 3) for i in (1, 3, 5))
 
 
 def where(m):
@@ -943,13 +961,13 @@ def model_sdf(layout, name="arena"):
     layout = normalise(layout)
     parts = []
 
-    def add(label, part, x, y, rotation, base=0.0):
+    def add(label, part, x, y, rotation, base=0.0, colour=None):
         (px, py, pz, yaw), (bx, by, bz) = placement(part, x, y, rotation,
                                                     base)
         uri = (f"file://{part.mesh}" if os.path.isabs(part.mesh)
                else f"model://{CAD_MODEL}/meshes/{part.mesh}")
         pose = f"{px:.5f} {py:.5f} {pz:.5f} 0 0 {yaw:.5f}"
-        r, g, b = part.colour
+        r, g, b = rgb(colour) if colour else part.colour
         material = (f"<material><ambient>{r} {g} {b} 1</ambient>"
                     f"<diffuse>{r} {g} {b} 1</diffuse>"
                     f"<specular>0.1 0.1 0.1 1</specular></material>")
@@ -1000,7 +1018,7 @@ def model_sdf(layout, name="arena"):
             dx, dy = block_offset(m["type"], m["rotation"])
             x, y = x + dx, y + dy
         add(name, PARTS[m["type"]], x, y, m.get("rotation", 0),
-            stand(at, m) - floor_height())
+            stand(at, m) - floor_height(), m.get("colour"))
 
     return (f'<model name="{name}">\n    <static>true</static>\n'
             f'    <link name="link">\n' + "\n".join(parts)
