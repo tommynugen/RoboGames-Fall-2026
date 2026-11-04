@@ -29,7 +29,9 @@ the console's Edit link opens the arena in use in the editor. Only this
 computer can reach the page.
 
 The editor's Launch buttons start the Gazebo sim on the layout open in it
-and Stop stops it (sim_runner.py). Quitting the app stops the sim too.
+and Stop stops it (sim_runner.py), with every sim.launch.py option from
+its Launch options panel, and its Gazebo camera panel moves the Gazebo
+window's view (sim_camera.py). Quitting the app stops the sim too.
 
 Without ROS (no rclpy), as on a laptop only mapping the table, the editor
 still works and the console tab says ROS is not sourced.

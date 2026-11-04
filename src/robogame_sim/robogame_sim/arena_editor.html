@@ -227,6 +227,16 @@
     word-break: break-all; font: 12px/1.5 ui-monospace, monospace;
   }
   .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  /* Launch options and the Gazebo camera: label left, control right. */
+  .opts { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px;
+          align-items: center; font-size: 13px; }
+  .opts label { color: var(--muted); }
+  .opts input[type=text], .opts select { width: 100%; box-sizing: border-box; }
+  .opts input[type=checkbox] { justify-self: start; margin: 0; }
+  .opts .bad { border-color: #d33; }
+  #views { display: flex; flex-wrap: wrap; gap: 6px; }
+  #views button[aria-pressed=true] { border-color: var(--ink);
+                                     font-weight: 650; }
   .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0;
           overflow-wrap: anywhere; }
   #drop-hint {
@@ -353,6 +363,69 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
     </div>
 
     <div class="panel">
+      <h2>Launch options</h2>
+      <div class="opts" id="launch-opts">
+        <label for="o-robots">Robots</label>
+        <input type="text" id="o-robots" data-opt="robots" value="1,2"
+               title="Robot numbers to spawn, such as 1,2,3">
+        <label for="o-chase">Chase</label>
+        <input type="text" id="o-chase" data-opt="chase" value="1,2"
+               title="Hunter,target: the first drives after the second. Empty for no chase">
+        <label for="o-gui">Gazebo window</label>
+        <input type="checkbox" id="o-gui" data-opt="gui" data-default="true" checked
+               title="Off runs the Gazebo server only, faster">
+        <label for="o-fpv">FPV cameras</label>
+        <input type="checkbox" id="o-fpv" data-opt="fpv" data-default="true" checked
+               title="An FPV camera on the front of every robot">
+        <label for="o-speed">Speed</label>
+        <select id="o-speed" data-opt="speed" data-default="1"
+                title="Real time factor: 0 runs as fast as the computer can">
+          <option value="1">1× real time</option><option value="2">2×</option>
+          <option value="3">3×</option><option value="0">As fast as it can</option>
+        </select>
+        <label for="o-step">Physics step</label>
+        <select id="o-step" data-opt="step" data-default="0.001"
+                title="0.002 s about halves the work per sim second">
+          <option value="0.001">1 ms</option><option value="0.002">2 ms</option>
+        </select>
+        <label for="o-controller">Controller</label>
+        <select id="o-controller" data-opt="controller" data-default="none"
+                title="none leaves controllers for the Robot console to bind">
+          <option value="none">None</option>
+          <option value="joy">Racing (joy)</option>
+          <option value="classic">Classic</option>
+          <option value="hotplug">Hotplug: a robot per controller</option>
+        </select>
+        <label for="o-drive">Drives robot</label>
+        <input type="text" id="o-drive" data-opt="drive" data-default=""
+               placeholder="first robot" title="The robot the controller drives">
+        <label for="o-drive_model">Drive model</label>
+        <select id="o-drive_model" data-opt="drive_model" data-default="ideal"
+                title="firmware copies the ESP32 mixing and stall floor">
+          <option value="ideal">Ideal</option><option value="firmware">Firmware</option>
+        </select>
+        <label for="o-autonomy">Autonomy</label>
+        <input type="checkbox" id="o-autonomy" data-opt="autonomy" data-default="false"
+               title="Starts arena_perception autonomy_node, which drives robot 1 to points on /robot_1/goal">
+      </div>
+      <details>
+        <summary class="note">More</summary>
+        <div class="opts">
+          <label for="o-joy">Joystick index</label>
+          <input type="text" id="o-joy" data-opt="joy_device_id" data-default="0"
+                 value="0" title="For the racing (joy) controller">
+          <label for="o-motion">Motion device</label>
+          <input type="text" id="o-motion" data-opt="motion_device" data-default=""
+                 placeholder="found by itself" title="Such as /dev/input/js1, for wheel steering">
+          <label for="o-partition">Partition</label>
+          <input type="text" id="o-partition" data-opt="partition" data-default=""
+                 placeholder="as GZ_PARTITION" title="Run beside a sim already going">
+        </div>
+      </details>
+      <div class="row"><button id="o-reset">Defaults</button></div>
+    </div>
+
+    <div class="panel">
       <h2>Run it</h2>
       <pre id="command"></pre>
       <div class="row"><button id="copy" data-from="command">Copy</button>
@@ -366,11 +439,24 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       <pre id="test-command"></pre>
       <div class="row"><button id="copy-test" data-from="test-command">Copy
       </button> <button id="launch-test" class="launch">Launch in Gazebo</button></div>
-      <p class="note">Sim only. Robot 1 chases robot 2, which the first
+      <p class="note">Sim only. Robot 1 chases robot 2 (as set above), which the first
         controller drives, and every controller connected after it gets a
-        robot of its own. <kbd>F</kbd> in the Gazebo window toggles FPV,
-        number keys pick the robot. Run it is left as the real arena runs,
+        robot of its own. Launch options apply here too, but for
+        the controller, which is hotplug and drives robot 2 unless set. Run it is left as the real arena runs,
         where controllers are bound to robots by address.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Gazebo camera</h2>
+      <div id="views">
+        <button data-view="top">Top</button>
+        <button data-view="front">Front</button>
+        <button data-view="front_right">Corner</button>
+        <button data-view="fpv">FPV</button>
+        <select id="view-robot" title="The robot FPV looks through"></select>
+      </div>
+      <p class="note" id="view-status">Moves the Gazebo window's view, as
+        keys 1 to 4 in it do.</p>
     </div>
   </aside>
 </main>
@@ -1178,14 +1264,69 @@ function showProblems() {
 // A layout's file name from its name as typed: - for each space.
 const fileName = () => nameEl.value.trim().split(/\s+/).join("-");
 
-function updateCommand() {
-  const name = fileName() || "default";
-  const run = `ros2 launch robogame_sim sim.launch.py layout:=${name} ` +
-              `robots:=1,2 chase:=1,2`;
-  document.getElementById("command").textContent = run;
-  document.getElementById("test-command").textContent =
-    `${run} controller:=hotplug drive:=2`;
+// Launch options: sim.launch.py's arguments. Robots and chase are always
+// sent; the others only when not the launch file's default (data-default),
+// so Test it keeps its hotplug controller unless one is picked. Kept in
+// this browser between visits.
+const optEls = [...document.querySelectorAll("[data-opt]")];
+const optValue = el => el.type === "checkbox" ? String(el.checked)
+                                                : el.value.trim();
+
+function launchOptions() {
+  const options = {};
+  for (const el of optEls) {
+    const value = optValue(el);
+    if (!("default" in el.dataset) || value !== el.dataset.default) {
+      options[el.dataset.opt] = value;
+    }
+  }
+  return options;
 }
+
+function commandFor(test) {
+  const options = launchOptions();
+  const used = test ? { controller: "hotplug", drive: "2" } : {};
+  Object.assign(used, options);
+  const args = Object.entries(used).filter(([, v]) => v !== "")
+    .map(([k, v]) => `${k}:=${v}`);
+  return ["ros2 launch robogame_sim sim.launch.py",
+          `layout:=${fileName() || "default"}`, ...args].join(" ");
+}
+
+function updateCommand() {
+  document.getElementById("command").textContent = commandFor(false);
+  document.getElementById("test-command").textContent = commandFor(true);
+}
+
+try {
+  const saved = JSON.parse(localStorage.getItem("launch-options") || "{}");
+  for (const el of optEls) {
+    if (!(el.dataset.opt in saved)) continue;
+    if (el.type === "checkbox") el.checked = saved[el.dataset.opt] === "true";
+    else el.value = saved[el.dataset.opt];
+  }
+} catch {}
+
+for (const el of optEls) {
+  el.addEventListener(el.type === "text" ? "input" : "change", () => {
+    el.classList.remove("bad");
+    const all = Object.fromEntries(optEls.map(e => [e.dataset.opt,
+                                                    optValue(e)]));
+    try { localStorage.setItem("launch-options", JSON.stringify(all)); }
+    catch {}
+    updateCommand();
+  });
+}
+
+document.getElementById("o-reset").addEventListener("click", () => {
+  for (const el of optEls) {
+    const start = el.dataset.default ?? el.defaultValue;
+    if (el.type === "checkbox") el.checked = start === "true";
+    else el.value = start;
+  }
+  try { localStorage.removeItem("launch-options"); } catch {}
+  updateCommand();
+});
 
 nameEl.addEventListener("input", updateCommand);
 
@@ -1282,12 +1423,67 @@ async function launchSim(test) {
   }
   try {
     showSim(await api("/api/sim", {
-      method: "POST", body: JSON.stringify({ layout: name, test }) }));
+      method: "POST", body: JSON.stringify({ layout: name, test,
+                                             options: launchOptions() }) }));
     updateStatus(`Launching ${name} in Gazebo`, "saved");
   } catch (error) {
     updateStatus(`Cannot launch: ${error.message}`, "dirty");
+    // Outline the option the error names.
+    for (const el of optEls) {
+      if (error.message.startsWith(el.dataset.opt + " ")) {
+        el.classList.add("bad");
+      }
+    }
   }
 }
+
+// The Gazebo camera panel: the views fpv_toggle gives keys 1 to 4, by
+// /api/sim/view (sim_camera.py). Its buttons work while a sim with the
+// window on is up; the one shown is pressed.
+const viewButtons = [...document.querySelectorAll("#views button")];
+const viewRobotEl = document.getElementById("view-robot");
+const viewStatusEl = document.getElementById("view-status");
+
+function showView(state) {
+  for (const b of viewButtons) {
+    b.disabled = !state.available ||
+      (b.dataset.view === "fpv" && !state.robots.length);
+    b.setAttribute("aria-pressed", String(state.view === b.dataset.view));
+  }
+  const robots = state.robots || [];
+  if (robots.join() !== [...viewRobotEl.options].map(o => o.value).join()) {
+    viewRobotEl.replaceChildren(...robots.map(r =>
+      new Option(r.replace("robot_", "Robot "), r)));
+  }
+  if (document.activeElement !== viewRobotEl && state.robot) {
+    viewRobotEl.value = state.robot;
+  }
+  viewRobotEl.disabled = !state.available || !robots.length;
+  viewStatusEl.textContent = state.available
+    ? "Moves the Gazebo window's view, as keys 1 to 4 in it do."
+    : state.error;
+}
+
+async function pollView() {
+  try { showView(await api("/api/sim/view")); } catch {}
+}
+
+async function look(view) {
+  try {
+    showView(await api("/api/sim/view", { method: "POST",
+      body: JSON.stringify({ view, robot: viewRobotEl.value }) }));
+    setTimeout(pollView, 400);
+  } catch (error) {
+    viewStatusEl.textContent = `Cannot move the view: ${error.message}`;
+  }
+}
+
+for (const b of viewButtons) {
+  b.addEventListener("click", () => look(b.dataset.view));
+}
+viewRobotEl.addEventListener("change", () => look("fpv"));
+pollView();
+setInterval(pollView, 2000);
 
 launchEls.false.addEventListener("click", () => launchSim(false));
 launchEls.true.addEventListener("click", () => launchSim(true));

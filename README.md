@@ -252,6 +252,32 @@ tests, and the button's Launching…, Running and Stop on hover in Chromium
 releases) is not yet checked against Gazebo; if neither shows, the button
 turns to Running after 90 s.
 
+The Launch options panel above Run it sets every `sim.launch.py`
+argument: robots, chase (empty for none), the Gazebo window (`gui`), FPV
+cameras, speed, physics step, controller (none, racing `joy`, `classic`,
+hotplug), the robot it drives, drive model, autonomy, and under More the
+joystick index, motion device and partition. Both commands show them as
+they change, and the browser keeps them between visits; Defaults puts
+them back. Robots and chase always go in the command, the rest only when
+not the launch file's default, so Test it keeps its hotplug controller
+driving robot 2 unless another is picked. The app checks each option as
+the launch file would before it starts anything (a chase robot that is
+not spawned, a speed below 0, a step over 10 ms), and Launch says what is
+wrong and outlines the field.
+
+The Gazebo camera panel moves the Gazebo window's view as keys 1 to 4 in
+it do: Top, Front, Corner and FPV, with the robot FPV looks through. It
+talks to `fpv_toggle` over gz-transport (`/robogame/view`, and
+`/robogame/view/state` for the view shown and the robots), in the sim's
+partition, so it works while a sim with the window on is up; otherwise it
+says why not. `sim_camera.py` does this, at GET and POST `/api/sim/view`.
+
+Checked 2026-11-04: tests (`test_sim_runner.py`: options in the command,
+16 bad ones refused, the camera route with no Gazebo), and the panel in
+Chromium (Playwright): commands follow the fields and a chase robot not in
+robots comes back as a 400 naming it. No ROS or gz-transport here, so the
+camera panel is not yet checked against a running Gazebo window.
+
 ## The app's status bar and tabs
 
 Right of the Gamemaster's tabs a status bar shows, every 2 s, whether ROS
