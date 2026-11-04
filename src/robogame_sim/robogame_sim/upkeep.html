@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upkeep</title>
+<style>
+  /* The colours of the other tabs. */
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2433; --muted: #5d6677;
+    --line: #d9dde4; --accent: #2f5fb4; --accent-ink: #ffffff;
+    --bad: #d23c3c; --good: #2e8b57; --warn: #a86a00; --feed: #0d1117;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+      --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+      --bad: #f06b6b; --good: #5cc28a; --warn: #e0a640; --feed: #000;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+    --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+    --bad: #f06b6b; --good: #5cc28a; --warn: #e0a640; --feed: #000;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  button, input {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); font-weight: 600;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+  .jobs {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  section {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; display: flex;
+    flex-direction: column; gap: 8px;
+  }
+  h2 { font-size: 14px; margin: 0; }
+  p { margin: 0; color: var(--muted); }
+  .fact.good { color: var(--good); }
+  .fact.bad { color: var(--bad); }
+  section button { align-self: flex-start; margin-top: auto; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px;
+          color: var(--muted); }
+  #out { margin-top: 20px; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #state { color: var(--muted); }
+  #state.good { color: var(--good); }
+  #state.bad { color: var(--bad); }
+  #state.warn { color: var(--warn); }
+  #stop { margin-left: auto; }
+  pre {
+    background: var(--feed); color: #d6dbe4; border-radius: 8px;
+    padding: 10px 12px; margin: 10px 0 0; min-height: 120px;
+    max-height: 50vh; overflow: auto; font-size: 12px;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  #noroot { background: var(--bad); color: #fff; padding: 10px 14px;
+            border-radius: 8px; margin-bottom: 16px; }
+  #noroot[hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <div id="noroot" hidden>This app is not run from a checkout of the repo,
+    so it has no scripts to run. Start it from a workspace built with
+    <code>colcon build --symlink-install</code>.</div>
+  <div class="jobs">
+    <section>
+      <h2>Arena CAD from Onshape</h2>
+      <p>Downloads the arena's parts and rebuilds the
+        <code>robogame_arena_cad</code> model. Build after it.</p>
+      <p class="fact" id="keys"></p>
+      <p class="fact" id="cad"></p>
+      <button data-job="onshape">Export from Onshape</button>
+    </section>
+    <section>
+      <h2>arena_perception</h2>
+      <p>Copies it from a ROBOGAME-2.0 checkout, for
+        <code>controller:=classic</code> and <code>autonomy:=true</code>.
+        Build after it.</p>
+      <p class="fact" id="perception"></p>
+      <label>ROBOGAME-2.0 folder (blank for the script's default)
+        <input id="path" placeholder="~/…/ROBOGAME-2.0"
+               spellcheck="false"></label>
+      <button data-job="perception">Copy arena_perception</button>
+    </section>
+    <section>
+      <h2>Build</h2>
+      <p>Runs <code>colcon build --symlink-install</code> in the workspace.
+        Start the app and the sim again to use what changed.</p>
+      <p class="fact" id="root"></p>
+      <button data-job="build" class="primary">Build</button>
+    </section>
+  </div>
+  <section id="out">
+    <div class="bar">
+      <h2>Output</h2>
+      <span id="state">Nothing run yet.</span>
+      <button id="stop" disabled>Stop</button>
+    </div>
+    <pre id="tail" aria-live="polite"></pre>
+  </section>
+</main>
+<script src="dialogs.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const PATH = "upkeep.path";
+try { $("path").value = localStorage.getItem(PATH) || ""; } catch (e) {}
+
+let last = null;
+let refused = null;  // why the last Run was refused, until the next
+
+function when(seconds) {
+  return seconds ? new Date(seconds * 1000).toLocaleString() : null;
+}
+
+function fact(id, text, look) {
+  $(id).textContent = text;
+  $(id).className = `fact ${look || ""}`;
+}
+
+function paint(state) {
+  last = state;
+  $("noroot").hidden = !!state.root;
+  fact("keys", state.keys ? "Onshape keys found."
+       : "No Onshape keys: put them in ~/.config/onshape/keys.env.",
+       state.keys ? "good" : "bad");
+  const cad = when(state.cad);
+  fact("cad", cad ? `Model written ${cad}.` : "No model yet.");
+  const copy = when(state.perception);
+  fact("perception", copy ? `Copied ${copy}.` : "Not copied yet.",
+       copy ? "good" : "");
+  fact("root", state.root ? `In ${state.root}` : "");
+
+  for (const button of document.querySelectorAll("button[data-job]")) {
+    button.disabled = !state.root || state.running
+      || (button.dataset.job === "onshape" && !state.keys);
+  }
+  $("stop").disabled = !state.running;
+
+  const name = state.job && state.jobs[state.job];
+  const status = $("state");
+  if (refused && !state.running) {
+    status.textContent = refused;
+    status.className = "bad";
+  } else if (!state.job) {
+    status.textContent = "Nothing run yet.";
+    status.className = "";
+  } else if (state.running) {
+    status.textContent = `${name}: running…`;
+    status.className = "warn";
+  } else if (state.stopped) {
+    status.textContent = `${name}: stopped.`;
+    status.className = "";
+  } else if (state.exit === 0) {
+    status.textContent = `${name}: done.`
+      + (state.job === "build" ? "" : " Build next.");
+    status.className = "good";
+  } else {
+    status.textContent = `${name}: failed (code ${state.exit}).`;
+    status.className = "bad";
+  }
+  const tail = $("tail");
+  const atEnd = tail.scrollTop + tail.clientHeight >= tail.scrollHeight - 4;
+  if (tail.textContent !== state.tail) {
+    tail.textContent = state.tail;
+    if (atEnd) tail.scrollTop = tail.scrollHeight;
+  }
+}
+
+async function call(path, body) {
+  const reply = await fetch(path, {
+    method: body ? "POST" : "GET", cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await reply.json();
+  if (!reply.ok) throw new Error(data.error || reply.statusText);
+  return data;
+}
+
+async function poll() {
+  try {
+    paint(await call("/api/upkeep"));
+  } catch (error) { /* the shell's red bar says the app is gone */ }
+  setTimeout(poll, last && last.running ? 1000 : 3000);
+}
+
+async function run(job) {
+  if (job === "onshape" && !await askYes(
+      "Download the arena from Onshape and write over the CAD model?",
+      "Export")) return;
+  const path = $("path").value.trim();
+  try { localStorage.setItem(PATH, path); } catch (e) {}
+  refused = null;
+  try {
+    paint(await call("/api/upkeep", { job, path: job === "perception"
+                                      ? path : undefined }));
+  } catch (error) {
+    refused = error.message;
+    if (last) paint(last);
+  }
+}
+
+for (const button of document.querySelectorAll("button[data-job]")) {
+  button.addEventListener("click", () => run(button.dataset.job));
+}
+$("stop").addEventListener("click", async () => {
+  try { paint(await call("/api/upkeep/stop", {})); } catch (e) {}
+});
+poll();
+</script>
+</body>
+</html>

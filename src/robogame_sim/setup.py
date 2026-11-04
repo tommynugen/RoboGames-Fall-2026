@@ -11,7 +11,8 @@ setup(
     package_data={package_name: ['arena_editor.html', 'arena_draw.js',
                                  'dialogs.js', 'arena_view3d.js',
                                  'robot_console.html', 'gamemaster.html',
-                                 'app_log.html', 'vision.html']},
+                                 'app_log.html', 'vision.html',
+                                 'upkeep.html']},
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
