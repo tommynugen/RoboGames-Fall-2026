@@ -3,13 +3,15 @@
     ros2 run robogame_sim robogame_gamemaster
     ros2 run robogame_sim robogame_gamemaster --port 8768 --tab console
 
-Serves http://localhost:8766 with three tabs:
+Serves http://localhost:8766 with four tabs:
 
 - Arena editor (#editor, or #editor/NAME to open a saved layout): maps the
   modules as they are set up on the table. arena_editor.py and
   arena_editor.html.
 - Robot console (#console): every robot in the arena, who drives it and
   where it goes. robot_console.py and robot_console.html.
+- Vision (#vision): the arena camera live, the AprilTags it finds, where
+  each robot is and the detector's settings. vision.py and vision.html.
 - Logs (#logs): the log lines of the editor, the robot console, the
   controller nodes, the sim and the app, each on its own tab and all
   together on All. app_log.py and app_log.html.
@@ -41,7 +43,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
-from robogame_sim import app_log, arena_editor
+from robogame_sim import app_log, arena_editor, vision as vision_tab
 from robogame_sim.ble_bridge import BridgeRunner
 from robogame_sim.sim_runner import SimRunner
 
@@ -51,7 +53,8 @@ SHELL = os.path.join(HERE, "gamemaster.html")
 DRAW = os.path.join(HERE, "arena_draw.js")
 DIALOGS = os.path.join(HERE, "dialogs.js")
 LOGS_PAGE = os.path.join(HERE, "app_log.html")
-TABS = ("editor", "console", "logs")
+VISION_PAGE = os.path.join(HERE, vision_tab.PAGE_NAME)
+TABS = ("editor", "console", "vision", "logs")
 # Changes the editor makes as it is used, not worth a log line each.
 QUIET = ("/api/check",)
 PORT = 8766
@@ -65,13 +68,15 @@ NO_ROS = b"""<!doctype html><meta charset="utf-8">
 the app again. The arena editor works without it.</p>"""
 
 
-def handler(console=None, sim=None, book=None, bridge=None):
+def handler(console=None, sim=None, book=None, bridge=None, vision=None):
     """A request handler for the app. console is the RobotConsole node, or
     None to serve the editor alone. sim is the SimRunner behind the
     editor's Launch buttons, or None for none. book is the LogBook the
     Logs tab shows, which gets a line for each change asked. bridge
-    is the BridgeRunner behind the console's Bridge buttons, or None."""
+    is the BridgeRunner behind the console's Bridge buttons, or None.
+    vision is the Vision tab's camera and tags."""
     book = book or app_log.LogBook()
+    vision = vision or vision_tab.Vision(book)
     if console is not None:
         from robogame_sim import robot_console
         console_page = robot_console.PAGE
@@ -147,16 +152,35 @@ def handler(console=None, sim=None, book=None, bridge=None):
                                  "text/javascript; charset=utf-8")
             if path == "/logs":
                 return self.file(LOGS_PAGE, HTML)
+            if path == "/vision":
+                return self.file(VISION_PAGE, HTML)
+            if path == "/vision/stream.mjpg":
+                return self.stream()
             if path == "/api/app":
                 return self.reply(200, status(console, sim, book, bridge))
             source = self.answer(
                 ("app", lambda: book.get(self.path)),
                 ("sim", lambda: sim and sim.get(path)),
                 ("bridge", lambda: bridge and bridge.get(path)),
+                ("vision", lambda: vision.get(path)),
                 ("console", lambda: self.console_route("get", path)),
                 ("editor", lambda: arena_editor.get(path)))
             if self.status >= 400:
                 self.note(source, path)
+
+        def stream(self):
+            """The Vision tab's picture, live, as MJPEG."""
+            if not vision.running.is_set():
+                return self.reply(503, {"error": "the camera is not on"})
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; "
+                             f"boundary={vision_tab.BOUNDARY}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                vision.stream(self.wfile.write)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def read_raw(self, limit):
             length = int(self.headers.get("Content-Length", 0))
@@ -176,6 +200,7 @@ def handler(console=None, sim=None, book=None, bridge=None):
                 ("sim", lambda: sim and sim.post(path, self.read_body)),
                 ("bridge", lambda: bridge and bridge.post(
                     path, self.read_body)),
+                ("vision", lambda: vision.post(path, self.read_body)),
                 ("console", lambda: self.console_route(
                     "post", path, self.read_body)),
                 ("editor", lambda: arena_editor.post(path, self.read_body))),
@@ -261,7 +286,10 @@ def main(args=None):
     bridge = BridgeRunner(book=book)
     if console is not None:
         console.bridge = bridge
-    server.RequestHandlerClass = handler(console, sim, book, bridge)
+    vision = vision_tab.Vision(book)
+    if console is not None:
+        vision.attach(console)
+    server.RequestHandlerClass = handler(console, sim, book, bridge, vision)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     say(book, f"RoboGame Gamemaster on {url}, saving layouts to "
@@ -287,6 +315,7 @@ def main(args=None):
         server.server_close()
         sim.stop()
         bridge.stop()
+        vision.stop()
         if console is not None:
             import rclpy
             if rclpy.ok():

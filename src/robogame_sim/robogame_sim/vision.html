@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vision</title>
+<style>
+  /* The colours of the other tabs. */
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2433; --muted: #5d6677;
+    --line: #d9dde4; --accent: #2f5fb4; --accent-ink: #ffffff;
+    --floor: #c9cbcf; --bad: #d23c3c; --good: #2e8b57; --corner: #d23c3c;
+    --robot: #e0a43a; --feed: #0d1117;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+      --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+      --floor: #4a4e57; --bad: #f06b6b; --good: #5cc28a; --corner: #f06b6b;
+      --robot: #e8ad45; --feed: #000;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+    --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+    --floor: #4a4e57; --bad: #f06b6b; --good: #5cc28a; --corner: #f06b6b;
+    --robot: #e8ad45; --feed: #000;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  button, input, select {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); font-weight: 600;
+  }
+  main {
+    display: grid; grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 20px; padding: 20px; max-width: 1500px; margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; margin-bottom: 20px;
+  }
+  h2 { font-size: 14px; margin: 0 0 10px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #source { width: 220px; }
+  #feed {
+    position: relative; background: var(--feed); border-radius: 8px;
+    aspect-ratio: 16 / 9; overflow: hidden; margin-top: 12px;
+    display: grid; place-items: center;
+  }
+  #feed img { width: 100%; height: 100%; object-fit: contain; }
+  #feed p { color: #9aa3b2; max-width: 460px; text-align: center; margin: 0;
+            padding: 16px; }
+  #status { color: var(--muted); font-size: 13px; margin-left: auto; }
+  #status.bad { color: var(--bad); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-size: 12px; padding: 2px 8px; border-radius: 99px;
+    border: 1px solid var(--line); color: var(--muted);
+  }
+  .chip.good { color: var(--good); border-color: var(--good); }
+  .chip.bad { color: var(--bad); border-color: var(--bad); }
+  canvas { width: 100%; aspect-ratio: 1; display: block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px;
+          font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 3px 4px;
+           border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 500; }
+  .empty { color: var(--muted); font-size: 13px; margin: 0; }
+  form { display: grid; grid-template-columns: 1fr 110px; gap: 6px 10px;
+         align-items: center; font-size: 13px; }
+  form input[type=number] { width: 110px; padding: 3px 6px; }
+  form .check { grid-column: 1 / -1; display: flex; gap: 6px;
+                align-items: center; }
+  form h3 { grid-column: 1 / -1; font-size: 12px; color: var(--muted);
+            margin: 8px 0 0; font-weight: 600; text-transform: uppercase;
+            letter-spacing: .04em; }
+  form .bar { grid-column: 1 / -1; margin-top: 6px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <section>
+      <div class="bar">
+        <label for="source">Camera</label>
+        <input id="source" list="sources" placeholder="0, /dev/video0, URL">
+        <datalist id="sources">
+          <option value="0"><option value="1"><option value="test">
+        </datalist>
+        <button id="start" class="primary">Start</button>
+        <button id="stop">Stop</button>
+        <a id="snapshot" href="/vision/frame.jpg" download="arena.jpg"
+           hidden>Save picture</a>
+        <span id="status" role="status">Loading…</span>
+      </div>
+      <div id="feed">
+        <p id="feed-note">The camera is off.</p>
+        <img id="picture" alt="Arena camera, with the tags found drawn on"
+             hidden>
+      </div>
+      <p class="hint">Start opens the camera here and publishes
+        <code>/arena/tags</code> as apriltag_node does. While apriltag_node
+        holds the camera instead, this tab shows its tags without a picture.
+        <code>test</code> draws a made-up arena to try the tab.</p>
+    </section>
+  </div>
+  <aside>
+    <section>
+      <h2>Arena</h2>
+      <div class="chips" id="chips"></div>
+      <canvas id="plan" width="600" height="600"
+              aria-label="Plan of the arena with each tag where it was seen">
+      </canvas>
+    </section>
+    <section>
+      <h2>Tags</h2>
+      <div id="tags"></div>
+    </section>
+    <section>
+      <h2>Settings</h2>
+      <form id="settings">
+        <h3>Arena</h3>
+        <label for="arena_cm">Arena side, cm</label>
+        <input type="number" id="arena_cm" step="0.5">
+        <label for="corner_push">Corners pushed out, px</label>
+        <input type="number" id="corner_push" step="1">
+        <h3>Detector</h3>
+        <label for="thresh_min">Threshold window min, px</label>
+        <input type="number" id="thresh_min" step="2">
+        <label for="thresh_max">Threshold window max, px</label>
+        <input type="number" id="thresh_max" step="2">
+        <label for="thresh_step">Threshold window step, px</label>
+        <input type="number" id="thresh_step" step="1">
+        <label for="min_perimeter">Smallest tag, share of picture</label>
+        <input type="number" id="min_perimeter" step="0.005">
+        <h3>Camera</h3>
+        <label for="width">Width, px</label>
+        <input type="number" id="width" step="1">
+        <label for="height">Height, px</label>
+        <input type="number" id="height" step="1">
+        <label for="fps">Frames a second</label>
+        <input type="number" id="fps" step="1">
+        <label for="jpeg_quality">Picture quality, %</label>
+        <input type="number" id="jpeg_quality" step="5">
+        <h3>Drawn on the picture</h3>
+        <label class="check"><input type="checkbox" id="draw_tags"> Tags</label>
+        <label class="check"><input type="checkbox" id="draw_arena">
+          Arena outline</label>
+        <label class="check"><input type="checkbox" id="draw_grid">
+          Quarter lines</label>
+        <div class="bar">
+          <button type="submit" class="primary">Apply</button>
+          <button type="button" id="reset">Defaults</button>
+        </div>
+      </form>
+    </section>
+  </aside>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const NUMBERS = ["arena_cm", "corner_push", "thresh_min", "thresh_max",
+  "thresh_step", "min_perimeter", "width", "height", "fps", "jpeg_quality"];
+const CHECKS = ["draw_tags", "draw_arena", "draw_grid"];
+const CORNERS = [1, 2, 3, 4];
+const DEFAULTS = {
+  arena_cm: 112, corner_push: 40, thresh_min: 3, thresh_max: 53,
+  thresh_step: 4, min_perimeter: 0.02, width: 1280, height: 720, fps: 30,
+  jpeg_quality: 75, draw_tags: true, draw_arena: true, draw_grid: false,
+};
+let state = null;
+let formFilled = false;
+let streaming = false;
+
+function say(text, bad = false) {
+  $("status").textContent = text;
+  $("status").classList.toggle("bad", bad);
+}
+
+async function call(path, body) {
+  const response = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+function fillForm(settings) {
+  for (const key of NUMBERS) $(key).value = settings[key];
+  for (const key of CHECKS) $(key).checked = settings[key];
+  if (document.activeElement !== $("source")) $("source").value =
+    settings.source;
+  formFilled = true;
+}
+
+function showFeed() {
+  const on = state.running;
+  if (on && !streaming) {
+    // A new stream each start: the old one ended with the camera.
+    $("picture").src = `/vision/stream.mjpg?t=${Date.now()}`;
+    streaming = true;
+  } else if (!on && streaming) {
+    $("picture").removeAttribute("src");
+    streaming = false;
+  }
+  $("picture").hidden = !on;
+  $("feed-note").hidden = on;
+  $("snapshot").hidden = !on;
+  let note = "The camera is off. Pick a camera and press Start.";
+  if (!state.opencv) note = "OpenCV is not installed, so the camera cannot "
+    + "be opened here: sudo apt install python3-opencv. Tags from "
+    + "apriltag_node still show on the right.";
+  else if (state.tags_from === "topic") note = "apriltag_node holds the "
+    + "camera: its tags show on the right. Stop it to see the picture here.";
+  if (state.error) note = `The camera stopped: ${state.error}`;
+  $("feed-note").textContent = note;
+  $("start").disabled = on || !state.opencv;
+  $("stop").disabled = !on;
+}
+
+function chips() {
+  const list = [];
+  if (state.running) list.push(["good", `camera ${state.source}, `
+    + `${state.fps} fps`]);
+  else list.push(["", "camera off"]);
+  if (state.tags_from === "topic") list.push(["good", "apriltag_node"]);
+  list.push(state.arena_found ? ["good", "corners 1–4 found"]
+    : ["bad", "corners not all seen"]);
+  list.push(state.ros ? ["good", "ROS /arena/tags"] : ["", "no ROS"]);
+  $("chips").replaceChildren(...list.map(([kind, text]) => {
+    const chip = document.createElement("span");
+    chip.className = `chip ${kind}`;
+    chip.textContent = text;
+    return chip;
+  }));
+}
+
+function table() {
+  const tags = [...state.tags].sort((a, b) => a.id - b.id);
+  if (!tags.length) {
+    $("tags").innerHTML = '<p class="empty">No tags seen.</p>';
+    return;
+  }
+  const cell = (v, digits = 0) => v === undefined ? "–" : v.toFixed(digits);
+  const rows = tags.map((t) => `<tr><td>${t.id}${CORNERS.includes(t.id)
+    ? " corner" : " robot"}</td><td>${t.x}, ${t.y}</td>`
+    + `<td>${cell(t.x_cm, 1)}</td><td>${cell(t.y_cm, 1)}</td>`
+    + `<td>${cell(t.yaw)}</td></tr>`).join("");
+  $("tags").innerHTML = `<table><tr><th>Tag</th><th>px</th><th>x cm</th>`
+    + `<th>y cm</th><th>yaw °</th></tr>${rows}</table>`;
+}
+
+function plan() {
+  const canvas = $("plan");
+  const ctx = canvas.getContext("2d");
+  const css = getComputedStyle(document.documentElement);
+  const colour = (name) => css.getPropertyValue(name).trim();
+  const size = canvas.width, pad = 30, side = state.settings.arena_cm;
+  const scale = (size - 2 * pad) / side;
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = colour("--floor");
+  ctx.fillRect(pad, pad, size - 2 * pad, size - 2 * pad);
+  ctx.strokeStyle = colour("--line");
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const v = pad + (size - 2 * pad) * i / 4;
+    ctx.beginPath(); ctx.moveTo(v, pad); ctx.lineTo(v, size - pad);
+    ctx.moveTo(pad, v); ctx.lineTo(size - pad, v); ctx.stroke();
+  }
+  ctx.fillStyle = colour("--muted");
+  ctx.font = "20px system-ui";
+  ctx.fillText("0, 0", pad, pad - 8);
+  ctx.textAlign = "right";
+  ctx.fillText(`${side} cm`, size - pad, size - 6);
+  ctx.textAlign = "center";
+  for (const tag of state.tags) {
+    if (tag.x_cm === undefined) continue;
+    const x = pad + tag.x_cm * scale, y = pad + tag.y_cm * scale;
+    const corner = CORNERS.includes(tag.id);
+    ctx.fillStyle = colour(corner ? "--corner" : "--robot");
+    ctx.beginPath();
+    ctx.arc(x, y, corner ? 7 : 14, 0, 2 * Math.PI);
+    ctx.fill();
+    if (!corner && tag.yaw !== undefined) {
+      const a = tag.yaw * Math.PI / 180;
+      ctx.strokeStyle = colour("--ink");
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x, y);
+      ctx.lineTo(x + 26 * Math.cos(a), y + 26 * Math.sin(a)); ctx.stroke();
+    }
+    ctx.fillStyle = colour("--ink");
+    ctx.fillText(String(tag.id), x, y - (corner ? 12 : 20));
+  }
+  if (!state.arena_found) {
+    ctx.fillStyle = colour("--muted");
+    ctx.fillText("Positions need corner tags 1 to 4 in view.",
+      size / 2, size / 2);
+  }
+}
+
+async function poll() {
+  try {
+    state = await call("/api/vision");
+    if (!formFilled) fillForm(state.settings);
+    showFeed(); chips(); table(); plan();
+    if (state.error) say(`Camera stopped: ${state.error}`, true);
+    else if (state.running) say(`${state.tags.length} tags`);
+    else if (state.tags_from === "topic") say("From apriltag_node");
+    else say("Camera off");
+  } catch (error) {
+    say(`No answer from the app: ${error.message}`, true);
+  }
+}
+
+async function act(path, body) {
+  try {
+    state = await call(path, body);
+    fillForm(state.settings);
+    await poll();
+  } catch (error) {
+    say(error.message, true);
+  }
+}
+
+$("start").addEventListener("click", async () => {
+  if ($("source").value.trim() !== state.settings.source) {
+    await act("/api/vision", {source: $("source").value.trim()});
+  }
+  act("/api/vision/start");
+});
+$("stop").addEventListener("click", () => act("/api/vision/stop"));
+$("source").addEventListener("change", () =>
+  act("/api/vision", {source: $("source").value.trim()}));
+$("settings").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const body = {};
+  for (const key of NUMBERS) body[key] = Number($(key).value);
+  for (const key of CHECKS) body[key] = $(key).checked;
+  act("/api/vision", body);
+});
+$("reset").addEventListener("click", () => act("/api/vision", DEFAULTS));
+poll();
+setInterval(poll, 300);
+</script>
+</body>
+</html>

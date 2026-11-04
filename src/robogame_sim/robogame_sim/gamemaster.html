@@ -110,7 +110,8 @@
        and so on show the tabs in this order. -->
   <a href="#editor" data-tab="editor" title="Arena editor (Alt+1)">Arena editor</a>
   <a href="#console" data-tab="console" title="Robot console (Alt+2)">Robot console</a>
-  <a href="#logs" data-tab="logs" title="Logs (Alt+3)"><span>Logs</span>
+  <a href="#vision" data-tab="vision" title="Vision (Alt+3)">Vision</a>
+  <a href="#logs" data-tab="logs" title="Logs (Alt+4)"><span>Logs</span>
     <span class="badge" id="errors" hidden></span></a>
   <div id="status" aria-live="polite">
     <button class="chip" id="ros" data-go="console">ROS</button>
@@ -166,7 +167,7 @@ function remember(key, value) {
 
 let current = null;
 
-// #editor, #editor/NAME (opens that layout), #console or #logs. With
+// #editor, #editor/NAME (opens that layout), #console, #vision or #logs. With
 // none, the tab shown last.
 function show() {
   const [asked, layout] = decodeURIComponent(location.hash.slice(1))

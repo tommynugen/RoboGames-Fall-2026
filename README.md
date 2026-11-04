@@ -264,7 +264,7 @@ buttons, or Logs after a failed run. The Logs tab shows in red how many
 errors came since it was last looked at, and a new error pops up in the
 bottom corner for 15 s while another tab shows, with Show to open Logs.
 If the app stops answering, a red bar says how to start it again, and
-the page reconnects by itself. Alt+1, Alt+2 and Alt+3 switch tabs, and
+the page reconnects by itself. Alt+1 to Alt+4 switch tabs, and
 opening http://localhost:8766 with no tab named opens the one shown last.
 GET `/api/app` gives what the bar shows.
 
@@ -275,7 +275,7 @@ stopped. Not yet run with ROS or a sim.
 
 ## The app's Logs tab
 
-The Logs tab, right of Arena editor and Robot console, shows the
+The Logs tab, right of Arena editor, Robot console and Vision, shows the
 app's log lines as they come, once a second. Its own tabs split them by
 where they came from, and All shows them together, each tagged:
 
@@ -284,6 +284,8 @@ where they came from, and All shows them together, each tagged:
   autonomous on and off), and each change asked of it.
 - Teleop: the ROS log of `controller_robots` and `racing_teleop`, from
   `/rosout`, so wherever they run. Needs ROS sourced, as the console does.
+- Vision: the Vision tab's camera starting, stopping and failing, and the
+  ROS log of arena_perception's `apriltag_node` and `gazebo_viz_node`.
 - Gazebo sim: the output of a sim started with Launch in Gazebo, read from
   `robogame_sim.log` as it grows. A new launch starts it again.
 - App: the app's own lines (started, no ROS).
@@ -295,6 +297,42 @@ GET `/api/logs?after=N` gives the lines after line N.
 
 Checked 2026-11-03: tests (`test_app_log.py`, with the app's routes over
 HTTP) and the tab in Chromium without ROS. Not yet run with ROS or a sim.
+
+## The app's Vision tab
+
+The Vision tab (`#vision`) shows the arena camera live, with the AprilTags
+it finds drawn on: corner tags 1 to 4 in red, robot tags in amber, each
+with its place in cm, and the arena's outline in blue. Beside it, a plan
+of the arena puts each tag where it is and points each robot tag the way
+it faces, and a table gives every tag's px, cm and heading (degrees, 0
+along +x, counted towards +y). Tags not seen for 1 s drop off.
+
+Pick the camera (a device number, a `/dev/video` path, an `http://` or
+`rtsp://` URL, or `test`) and press Start. The app then finds the tags as
+arena_perception's `apriltag_node` does, with the same tag family and
+detector settings and the same cm mapping from the corner tags, and
+publishes them on `/arena/tags` in the same JSON with `yaw` added, so
+anything reading that topic works as before. Run one or the other, not
+both, since only one program can hold the camera. While `apriltag_node`
+holds it, the tab shows its tags from `/arena/tags` with no picture.
+
+Settings, changed while it runs: the arena's side (112 cm, as the node
+has it), how far the corners are pushed out from the corner tags (40 px,
+its `resize_parameter`), the detector's threshold windows and smallest
+tag, the camera's size and frame rate, the picture quality, and what is
+drawn. Save picture downloads the frame. `test` draws a made-up arena
+with tag 5 going round, for trying the tab with no camera.
+
+Needs OpenCV with aruco (`sudo apt install python3-opencv`); without it
+the tab says so and still shows `/arena/tags`. `vision.py` does this:
+GET `/api/vision` (state and tags), `/vision/stream.mjpg`,
+`/vision/frame.jpg`, POST `/api/vision` (settings),
+`/api/vision/start` and `/api/vision/stop`.
+
+Checked 2026-11-04: tests (`test_vision.py`: cm mapping and heading, the
+test camera end to end, the routes and stream over HTTP) and the tab in
+Chromium, light and dark, on the `test` camera without ROS, at 20 fps.
+Not yet run on the real arena camera or with ROS.
 
 ## A robot for every controller
 
@@ -542,7 +580,8 @@ ros2 run robogame_sim robogame_gamemaster
 The console is the Robot console tab of the RoboGame Gamemaster, which has the
 arena editor (see Arena layouts) in its other tab. It opens
 http://localhost:8766 in the browser (only this computer can reach it;
-`--port`, `--no-browser` and `--tab editor|console` change that);
+`--port`, `--no-browser` and `--tab editor|console|vision|logs` change
+that);
 `#console` and `#editor` in the address pick the tab, and `#editor/NAME`
 opens a saved layout in the editor. If it is already running, starting it
 again opens it in the browser instead. (`robogame_gamemaster` is the only
@@ -1012,8 +1051,8 @@ Run headless on 2026-10-16:
 
 ## Not done yet
 
-- No overhead camera or AprilTags. `apriltag_node` and `gazebo_viz_node`
-  still need the real camera.
+- No overhead camera in the sim, so no AprilTags there. `apriltag_node`,
+  `gazebo_viz_node` and the Vision tab still need the real camera.
 - Arm lengths and the servo angle that counts as level are guesses. Measure
   a real robot and change `robot_sdf.py`.
 - `wheel_top_speed` is a guess. Time a real robot across the arena at full

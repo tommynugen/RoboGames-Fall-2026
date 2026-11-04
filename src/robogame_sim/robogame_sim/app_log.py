@@ -8,6 +8,8 @@ with where it came from:
 - console: the robot console node's ROS log (/rosout).
 - teleop: the ROS log of the controller nodes (controller_robots,
   racing_teleop), wherever they run.
+- vision: the Vision tab's camera, and the ROS log of arena_perception's
+  apriltag_node and gazebo_viz_node.
 - sim: the output of the Gazebo sim started from the editor's Launch
   buttons, read from its log file as it grows.
 - bridge: the output of the BLE bridge started from the console's Bridge
@@ -26,11 +28,14 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
-SOURCES = ("editor", "console", "teleop", "sim", "bridge", "app")
+SOURCES = ("editor", "console", "teleop", "vision", "sim", "bridge",
+           "app")
 KEEP = 5000  # lines kept, for all sources together
 READ = 1 << 20  # bytes of sim log read at most per poll
 # ROS node names whose log goes to the teleop tab.
 TELEOP_NODES = ("controller_robots", "racing_teleop")
+# And to the vision tab.
+VISION_NODES = ("apriltag_node", "gazebo_viz_node")
 # rcl_interfaces/msg/Log levels.
 ROS_LEVELS = {10: "debug", 20: "info", 30: "warn", 40: "error",
               50: "error"}
@@ -138,6 +143,8 @@ def rosout_source(name, own):
         return "console"
     if name in TELEOP_NODES:
         return "teleop"
+    if name in VISION_NODES:
+        return "vision"
     return None
 
 
