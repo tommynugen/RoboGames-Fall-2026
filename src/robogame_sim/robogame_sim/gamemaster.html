@@ -111,14 +111,16 @@
   <a href="#editor" data-tab="editor" title="Arena editor (Alt+1)">Arena editor</a>
   <a href="#console" data-tab="console" title="Robot console (Alt+2)">Robot console</a>
   <a href="#vision" data-tab="vision" title="Vision (Alt+3)">Vision</a>
-  <a href="#logs" data-tab="logs" title="Logs (Alt+4)"><span>Logs</span>
+  <a href="#chase" data-tab="chase" title="Chase tests (Alt+4)">Chase</a>
+  <a href="#logs" data-tab="logs" title="Logs (Alt+5)"><span>Logs</span>
     <span class="badge" id="errors" hidden></span></a>
-  <a href="#upkeep" data-tab="upkeep" title="Upkeep (Alt+5)">Upkeep</a>
+  <a href="#upkeep" data-tab="upkeep" title="Upkeep (Alt+6)">Upkeep</a>
   <div id="status" aria-live="polite">
     <button class="chip" id="ros" data-go="console">ROS</button>
     <button class="chip" id="sim" data-go="editor">Sim</button>
     <button class="chip" id="bridge" data-go="console" hidden>Bridge</button>
     <button class="chip" id="upkeep" data-go="upkeep" hidden>Upkeep</button>
+    <button class="chip" id="chases" data-go="chase" hidden>Chase</button>
     <button class="chip" id="robots" data-go="console">Robots</button>
     <button class="chip" id="arena" data-go="console">Arena</button>
   </div>
@@ -169,8 +171,8 @@ function remember(key, value) {
 
 let current = null;
 
-// #editor, #editor/NAME (opens that layout), #console, #vision, #logs or
-// #upkeep. With none, the tab shown last.
+// #editor, #editor/NAME (opens that layout), #console, #vision, #chase,
+// #logs or #upkeep. With none, the tab shown last.
 function show() {
   const [asked, layout] = decodeURIComponent(location.hash.slice(1))
     .split("/");
@@ -295,6 +297,16 @@ function paint(app) {
   } else if (failed) {
     chip("upkeep", `Upkeep failed`, "bad",
          `${job.job} ended with code ${job.exit}. Open the Upkeep tab.`);
+  }
+
+  // Chase tests running from the Chase tab, and how far along.
+  const chase = app.chase || {};
+  const going = Object.entries(chase)
+    .map(([kind, [done, all]]) => `${kind === "2d" ? "2D" : "Gazebo"} ${done}/${all}`);
+  document.getElementById("chases").hidden = !going.length;
+  if (going.length) {
+    chip("chases", `Chase: ${going.join(", ")}`, "warn",
+         "Chase tests running. Open the Chase tab for the scores.");
   }
 
   const robots = app.robots;

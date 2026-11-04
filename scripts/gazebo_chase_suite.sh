@@ -20,6 +20,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=${1:?usage: $0 OUT_DIR [SCENARIO ...]}
 shift
 mkdir -p "$OUT"
+rm -f "$OUT/.launches"
 ALL="slot_sw slot_se slot_ne slot_nw slot_in_ne slot_in_sw slot_follow
      tower_e tower_w tower_n tower_ring tower_nudge tower_nudge2 tower_follow"
 SCENARIOS=${*:-$ALL}
@@ -36,8 +37,10 @@ run() {
             robots:=1,2 chase:=1,2 layout:=test4 partition:=$GZ_PARTITION \
             speed:=0 step:=0.002 > "$OUT/$name.launch.log" 2>&1 &
         local launch=$!
+        # For the Gamemaster's Stop, which ends the launches by these.
+        echo $launch >> "$OUT/.launches"
         sleep 6
-        timeout $(( ${SECONDS_CAP%.*} * 3 + 60 )) python3 \
+        timeout --foreground $(( ${SECONDS_CAP%.*} * 3 + 60 )) python3 \
             "$HERE/gazebo_chase_test.py" "$name" "$SECONDS_CAP" \
             "$OUT/$name.csv" > "$OUT/$name.log" 2>&1
         local code=$?

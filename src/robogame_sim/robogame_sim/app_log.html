@@ -79,7 +79,7 @@
 const TABS = [
   ["all", "All"], ["editor", "Arena editor"], ["console", "Robot console"],
   ["teleop", "Teleop"], ["vision", "Vision"], ["sim", "Gazebo sim"],
-  ["bridge", "Bridge"], ["upkeep", "Upkeep"], ["app", "App"],
+  ["chase", "Chase"], ["bridge", "Bridge"], ["upkeep", "Upkeep"], ["app", "App"],
 ];
 const NAMES = Object.fromEntries(TABS);
 const KEEP = 5000;  // lines kept in the page
@@ -91,6 +91,7 @@ const EMPTY = {
     + " shows here, wherever they run.",
   vision: "The arena camera and apriltag_node's ROS log show here.",
   sim: "The output of a sim launched from the editor shows here.",
+  chase: "The output of chase tests run from the Chase tab shows here.",
   bridge: "The BLE bridge's output shows here, once it is started from"
     + " the Robot console.",
   upkeep: "The output of the Upkeep tab's jobs shows here.",
