@@ -76,7 +76,8 @@ scripts/sync_arena_perception.sh PATH/TO/ROBOGAME-2.0
 colcon build --symlink-install
 ```
 
-Run the same two lines again to pick up changes from the repo.
+Run the same two lines again to pick up changes from the repo. The
+Gamemaster's Upkeep tab runs both, and the Onshape export, with buttons.
 
 ## Run
 
@@ -252,19 +253,46 @@ tests, and the button's Launching…, Running and Stop on hover in Chromium
 releases) is not yet checked against Gazebo; if neither shows, the button
 turns to Running after 90 s.
 
+The Launch options panel above Run it sets every `sim.launch.py`
+argument: robots, chase (empty for none), the Gazebo window (`gui`), FPV
+cameras, speed, physics step, controller (none, racing `joy`, `classic`,
+hotplug), the robot it drives, drive model, autonomy, and under More the
+joystick index, motion device and partition. Both commands show them as
+they change, and the browser keeps them between visits; Defaults puts
+them back. Robots and chase always go in the command, the rest only when
+not the launch file's default, so Test it keeps its hotplug controller
+driving robot 2 unless another is picked. The app checks each option as
+the launch file would before it starts anything (a chase robot that is
+not spawned, a speed below 0, a step over 10 ms), and Launch says what is
+wrong and outlines the field.
+
+The Gazebo camera panel moves the Gazebo window's view as keys 1 to 4 in
+it do: Top, Front, Corner and FPV, with the robot FPV looks through. It
+talks to `fpv_toggle` over gz-transport (`/robogame/view`, and
+`/robogame/view/state` for the view shown and the robots), in the sim's
+partition, so it works while a sim with the window on is up; otherwise it
+says why not. `sim_camera.py` does this, at GET and POST `/api/sim/view`.
+
+Checked 2026-11-04: tests (`test_sim_runner.py`: options in the command,
+16 bad ones refused, the camera route with no Gazebo), and the panel in
+Chromium (Playwright): commands follow the fields and a chase robot not in
+robots comes back as a 400 naming it. No ROS or gz-transport here, so the
+camera panel is not yet checked against a running Gazebo window.
+
 ## The app's status bar and tabs
 
 Right of the Gamemaster's tabs a status bar shows, every 2 s, whether ROS
 is sourced, the sim's state (No sim, Launching NAME, Sim: NAME, or Sim
 stopped in red when a run ended on its own with an error code), the
 BLE bridge's once it is started (searching, found or lost), how many
-robots the console sees and the arena in use. Click one to open the tab
+robots the console sees, the arena in use, and Chase N/M while chase
+tests run from the Chase tab. Click one to open the tab
 that deals with it: the sim's opens the Arena editor and its Launch
 buttons, or Logs after a failed run. The Logs tab shows in red how many
 errors came since it was last looked at, and a new error pops up in the
 bottom corner for 15 s while another tab shows, with Show to open Logs.
 If the app stops answering, a red bar says how to start it again, and
-the page reconnects by itself. Alt+1 to Alt+4 switch tabs, and
+the page reconnects by itself. Alt+1 to Alt+6 switch tabs, and
 opening http://localhost:8766 with no tab named opens the one shown last.
 GET `/api/app` gives what the bar shows.
 
@@ -275,7 +303,7 @@ stopped. Not yet run with ROS or a sim.
 
 ## The app's Logs tab
 
-The Logs tab, right of Arena editor, Robot console and Vision, shows the
+The Logs tab, right of Arena editor, Robot console, Vision and Chase, shows the
 app's log lines as they come, once a second. Its own tabs split them by
 where they came from, and All shows them together, each tagged:
 
@@ -288,6 +316,7 @@ where they came from, and All shows them together, each tagged:
   ROS log of arena_perception's `apriltag_node` and `gazebo_viz_node`.
 - Gazebo sim: the output of a sim started with Launch in Gazebo, read from
   `robogame_sim.log` as it grows. A new launch starts it again.
+- Chase: the output of chase tests run from the Chase tab.
 - App: the app's own lines (started, no ROS).
 
 Warnings show in amber and errors in red, and a tab with errors has its
@@ -297,6 +326,36 @@ GET `/api/logs?after=N` gives the lines after line N.
 
 Checked 2026-11-03: tests (`test_app_log.py`, with the app's routes over
 HTTP) and the tab in Chromium without ROS. Not yet run with ROS or a sim.
+
+## The app's Upkeep tab
+
+The Upkeep tab, last of the Gamemaster's tabs, runs the repo's upkeep
+jobs with a button each, one at a time, and shows their output as they
+run:
+
+- Export from Onshape: `scripts/export_onshape_arena.py`, after a yes. It
+  is greyed out until the Onshape keys are in
+  `~/.config/onshape/keys.env`, and the card says when the CAD model was
+  last written.
+- Copy arena_perception: `scripts/sync_arena_perception.sh`, from the
+  ROBOGAME-2.0 folder typed in (kept for next time), or the script's own
+  default when it is blank. The card says when it was last copied.
+- Build: `colcon build --symlink-install` in the workspace, which both
+  of the others need after them. Start the app and the sim again to use
+  what changed.
+
+Stop sends Ctrl-C, then kills the job 5 s later. While a job runs, and
+after one fails, a chip in the status bar says so and opens the tab. The
+output also goes to the Logs tab's Upkeep source. The jobs run from the
+checkout the app is in, found from `upkeep.py`'s own place, so the app
+must come from a `--symlink-install` build. `upkeep.py` does this: GET
+`/api/upkeep`, POST `/api/upkeep {"job": "onshape" | "perception" |
+"build", "path": ...}` and POST `/api/upkeep/stop`.
+
+Checked 2026-11-04: tests (`test_upkeep.py`, with stand-in scripts and
+the app's routes over HTTP) and the tab in Chromium without ROS: the
+missing keys, a failed copy with no checkout and its chip. Not yet run
+against Onshape or a real build.
 
 ## The app's Vision tab
 
@@ -373,6 +432,39 @@ the sim has the topic, controllers.yaml read, checked and written, the
 nodes run with a stand-in `ros2`, the routes over HTTP) and both boxes in
 Chromium with the app's answers stood in. Not yet run with ROS, the real
 camera or real robots.
+
+## The app's Chase tab
+
+The Chase tab (`#chase`) runs the chase tests and shows their scores, so
+there is no need for a terminal to try a change to the hunter:
+
+- 2D chase runs `chase_sim` (see Chase another robot) on the layouts
+  picked, against the targets ticked, for so many seeds and seconds. A
+  table gives, for each target, how many runs reached it, how soon on
+  average, the share of time with it after, the longest it was stuck and
+  how often it was blocked; Every run has each run's line. It needs no
+  ROS or Gazebo, and a run takes a second or two.
+- Gazebo chase suite runs `scripts/gazebo_chase_suite.sh` on the
+  scenarios ticked, so many at once, each capped at so many seconds of
+  sim time. Each scenario's row fills in as its run ends, with
+  `gazebo_chase_score.py`'s numbers: when it reached robot 2, how high it
+  got, falls, worst tilt, longest stall, how often it freed itself, and
+  any notes on the tower's legs and the slots. It needs ROS sourced and a
+  `colcon build --symlink-install` (the scripts are found from the
+  package's real path), or `ROBOGAME_SCRIPTS` set to the scripts folder.
+  Results go to `robogame_chase_suite/` in the temp folder.
+
+Each has Stop, which for the suite ends the sims it started too (their
+launch ids are kept in `.launches` there), and quitting the app stops
+both. Their output shows under Output and on the Logs tab's Chase tab.
+`chase_runs.py` does this: GET `/api/chase`, POST `/api/chase/2d`,
+`/api/chase/gazebo` and `/api/chase/stop`. `chase_sim --json` prints one
+JSON line a run for it.
+
+Checked 2026-11-04: tests (`test_chase_runs.py`: real 2D runs, the suite
+and its scoring and Stop with stand-in scripts) and the tab in Chromium
+without ROS, 12 2D runs on default and mazetest. The Gazebo suite from
+the tab is not yet run with ROS.
 
 ## A robot for every controller
 
@@ -620,7 +712,7 @@ ros2 run robogame_sim robogame_gamemaster
 The console is the Robot console tab of the RoboGame Gamemaster, which has the
 arena editor (see Arena layouts) in its other tab. It opens
 http://localhost:8766 in the browser (only this computer can reach it;
-`--port`, `--no-browser` and `--tab editor|console|vision|logs` change
+`--port`, `--no-browser` and `--tab editor|console|vision|chase|logs|upkeep` change
 that);
 `#console` and `#editor` in the address pick the tab, and `#editor/NAME`
 opens a saved layout in the editor. If it is already running, starting it

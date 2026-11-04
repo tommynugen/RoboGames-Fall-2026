@@ -19,6 +19,7 @@ circling the hunter as fast as it can turn stays a few centimetres off.
 """
 
 import argparse
+import json
 import math
 import random
 import time
@@ -374,6 +375,9 @@ def main(argv=None):
     parser.add_argument("--seeds", type=int, default=4)
     parser.add_argument("--seconds", type=float, default=40.0)
     parser.add_argument("--behaviours", default=",".join(BEHAVIOURS))
+    parser.add_argument("--json", action="store_true",
+                        help="one JSON line a run, as the Gamemaster's "
+                        "Chase tab reads them")
     args = parser.parse_args(argv)
 
     for name in args.layouts:
@@ -382,6 +386,9 @@ def main(argv=None):
         for behaviour in args.behaviours.split(","):
             for seed in range(args.seeds):
                 r = run(world, behaviour, seed, args.seconds)
+                if args.json:
+                    print(json.dumps({"layout": name, **r}), flush=True)
+                    continue
                 reach = (f"{r['first_reach']:5.1f}s"
                          if r["first_reach"] is not None else "never")
                 print(f"{behaviour:9s} seed {seed}: reached {reach}, "

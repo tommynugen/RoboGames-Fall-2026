@@ -20,14 +20,17 @@ LANE = 0.1524
 SLOT = 0.343
 
 
-def score(path):
+def measure(path):
+    """The numbers score() prints, as a dict, or None for a run with no
+    rows. first is None when it never reached robot 2; times in s, heights
+    in m, tilt in degrees."""
     rows = list(csv.DictReader(open(path)))
     if not rows:
-        return "no rows"
+        return None
     col = {k: np.array([float(r[k]) for r in rows]) for k in rows[0]}
     t, hx, hy, hz = col["t"], col["hx"], col["hy"], col["hz"]
     near = (col["gap"] < 0.06) & (np.abs(hz - col["tz"]) < 0.02) & (t > 1.0)
-    first = f"{t[np.argmax(near)]:.1f} s" if near.any() else "never"
+    first = float(t[np.argmax(near)]) if near.any() else None
 
     falls = []
     for k in range(len(t)):
@@ -75,10 +78,21 @@ def score(path):
                 f"{100 * np.abs(across[through]).max():.1f} cm off its "
                 f"middle")
 
-    return (f"{t[-1]:.1f} s, reached {first}, up to {hz.max():.3f} m "
-            f"(robot 2 at {col['tz'][-1]:.3f}), falls {len(falls)} {falls}, "
-            f"tilt {tilt:.0f} degrees, longest stall {worst:.1f} s"
-            + "".join(f"; {n}" for n in notes))
+    return {"seconds": float(t[-1]), "first": first,
+            "top": float(hz.max()), "target_z": float(col["tz"][-1]),
+            "falls": falls, "tilt": float(tilt), "stall": float(worst),
+            "notes": notes}
+
+
+def score(path):
+    m = measure(path)
+    if m is None:
+        return "no rows"
+    first = "never" if m["first"] is None else f"{m['first']:.1f} s"
+    return (f"{m['seconds']:.1f} s, reached {first}, up to {m['top']:.3f} m "
+            f"(robot 2 at {m['target_z']:.3f}), falls {len(m['falls'])} "
+            f"{m['falls']}, tilt {m['tilt']:.0f} degrees, longest stall "
+            f"{m['stall']:.1f} s" + "".join(f"; {n}" for n in m["notes"]))
 
 
 def plot(path, out):

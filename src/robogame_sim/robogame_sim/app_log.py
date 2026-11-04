@@ -28,8 +28,8 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
-SOURCES = ("editor", "console", "teleop", "vision", "sim", "bridge",
-           "app")
+SOURCES = ("editor", "console", "teleop", "vision", "sim", "chase",
+           "bridge", "upkeep", "app")
 KEEP = 5000  # lines kept, for all sources together
 READ = 1 << 20  # bytes of sim log read at most per poll
 # ROS node names whose log goes to the teleop tab.
