@@ -13,6 +13,9 @@
     --muted: #5d6677;
     --line: #d9dde4;
     --accent: #2f5fb4;
+    --good: #2e7d4f;
+    --warn: #a86a00;
+    --bad: #c0392b;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -22,6 +25,9 @@
       --muted: #9aa3b2;
       --line: #2e3440;
       --accent: #6d97e6;
+      --good: #5cc28a;
+      --warn: #e0a640;
+      --bad: #ef6b5e;
     }
   }
   * { box-sizing: border-box; }
@@ -32,12 +38,13 @@
     font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   nav {
-    display: flex; align-items: stretch; gap: 4px;
+    display: flex; align-items: stretch; gap: 4px; flex-wrap: wrap;
     padding: 0 12px; background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
   nav strong { align-self: center; margin-right: 12px; }
   nav a {
+    display: flex; align-items: center; gap: 6px;
     padding: 8px 12px; color: var(--muted); text-decoration: none;
     border-bottom: 2px solid transparent;
   }
@@ -45,41 +52,129 @@
   nav a[aria-current="page"] {
     color: var(--ink); border-bottom-color: var(--accent);
   }
+  .badge {
+    min-width: 18px; padding: 0 5px; border-radius: 9px;
+    background: var(--bad); color: #fff;
+    font-size: 11px; line-height: 18px; text-align: center;
+  }
+  .badge[hidden] { display: none; }
+  /* At a glance: ROS, the sim, robots and the arena, right of the tabs. */
+  #status {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    margin-left: auto; padding: 4px 0;
+  }
+  .chip {
+    display: flex; align-items: center; gap: 6px;
+    padding: 2px 10px; border: 1px solid var(--line); border-radius: 12px;
+    background: none; color: var(--muted); font: inherit; font-size: 12px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .chip[hidden] { display: none; }
+  .chip:hover { color: var(--ink); border-color: var(--muted); }
+  .chip::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+  }
+  .chip.good::before { background: var(--good); }
+  .chip.warn::before { background: var(--warn); }
+  .chip.bad::before { background: var(--bad); }
+  #banner {
+    padding: 8px 16px; background: var(--bad); color: #fff;
+  }
+  #banner[hidden] { display: none; }
+  #banner code { background: rgba(0, 0, 0, .2); padding: 0 4px; }
   iframe { flex: 1; width: 100%; border: 0; }
   iframe[hidden] { display: none; }
+  /* A new error, while another tab shows. */
+  #toast {
+    position: fixed; right: 16px; bottom: 16px; max-width: min(460px, 90vw);
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 10px 12px; border-radius: 8px;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-left: 4px solid var(--bad);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .18);
+  }
+  #toast[hidden] { display: none; }
+  #toast p { margin: 0; flex: 1; overflow-wrap: anywhere; }
+  #toast small { display: block; color: var(--muted); }
+  #toast button {
+    font: inherit; padding: 2px 10px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
 </style>
 </head>
 <body>
 <nav>
   <strong>RoboGame Gamemaster</strong>
-  <a href="#editor" data-tab="editor">Arena editor</a>
-  <a href="#console" data-tab="console">Robot console</a>
-  <a href="#vision" data-tab="vision">Vision</a>
-  <a href="#logs" data-tab="logs">Console</a>
+  <!-- A tab is a link here and its page, served at /NAME. Alt+1, Alt+2
+       and so on show the tabs in this order. -->
+  <a href="#editor" data-tab="editor" title="Arena editor (Alt+1)">Arena editor</a>
+  <a href="#console" data-tab="console" title="Robot console (Alt+2)">Robot console</a>
+  <a href="#vision" data-tab="vision" title="Vision (Alt+3)">Vision</a>
+  <a href="#logs" data-tab="logs" title="Logs (Alt+4)"><span>Logs</span>
+    <span class="badge" id="errors" hidden></span></a>
+  <div id="status" aria-live="polite">
+    <button class="chip" id="ros" data-go="console">ROS</button>
+    <button class="chip" id="sim" data-go="editor">Sim</button>
+    <button class="chip" id="bridge" data-go="console" hidden>Bridge</button>
+    <button class="chip" id="robots" data-go="console">Robots</button>
+    <button class="chip" id="arena" data-go="console">Arena</button>
+  </div>
 </nav>
+<div id="banner" role="alert" hidden>
+  The Gamemaster app is not answering. Start it again with
+  <code>ros2 run robogame_sim robogame_gamemaster</code>; this page
+  reconnects by itself.
+</div>
 <!-- Each tab is its own page, loaded once and kept, so the editor keeps
      unsaved edits and the console keeps polling while the other shows. -->
-<iframe id="editor" title="Arena editor"></iframe>
-<iframe id="console" title="Robot console"></iframe>
-<iframe id="vision" title="Vision"></iframe>
-<iframe id="logs" title="Console"></iframe>
+<div id="toast" role="status" hidden>
+  <p><strong>Error</strong> <small id="toast-source"></small>
+    <span id="toast-text"></span></p>
+  <button id="toast-show">Show</button>
+  <button id="toast-close" aria-label="Dismiss">×</button>
+</div>
 <script>
-const frames = {
-  editor: document.getElementById("editor"),
-  console: document.getElementById("console"),
-  vision: document.getElementById("vision"),
-  logs: document.getElementById("logs"),
-};
-const TITLES = {
-  editor: "Arena editor", console: "Robot console", vision: "Vision",
-  logs: "Console",
-};
+const links = [...document.querySelectorAll("nav a[data-tab]")];
+const frames = {};
+const TITLES = {};
+for (const link of links) {
+  const name = link.dataset.tab;
+  TITLES[name] = link.firstElementChild
+    ? link.firstElementChild.textContent : link.textContent.trim();
+  const frame = document.createElement("iframe");
+  frame.id = name;
+  frame.title = TITLES[name];
+  frame.hidden = true;
+  document.body.insertBefore(frame, document.getElementById("toast"));
+  // The keys work while the tab's own page has the focus too.
+  frame.addEventListener("load", () => {
+    try {
+      frame.contentWindow.addEventListener("keydown", keys);
+    } catch (error) { /* not the app's own page */ }
+  });
+  frames[name] = frame;
+}
+const SEEN = "gamemaster.seenErrors";  // error lines looked at
+const LAST = "gamemaster.tab";  // the tab shown last, for a bare URL
 
-// #editor, #editor/NAME (opens that layout), #console, #vision or #logs.
+function remember(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    localStorage.setItem(key, value);
+  } catch (error) { return null; }
+}
+
+let current = null;
+
+// #editor, #editor/NAME (opens that layout), #console, #vision or #logs. With
+// none, the tab shown last.
 function show() {
   const [asked, layout] = decodeURIComponent(location.hash.slice(1))
     .split("/");
-  const tab = asked in frames ? asked : "editor";
+  const last = remember(LAST);
+  const tab = asked in frames ? asked
+    : last in frames ? last : links[0].dataset.tab;
 
   const frame = frames[tab];
   if (!frame.src) {
@@ -95,16 +190,155 @@ function show() {
   for (const [name, other] of Object.entries(frames)) {
     other.hidden = name !== tab;
   }
-  for (const link of document.querySelectorAll("nav a")) {
-    link.toggleAttribute("aria-current", link.dataset.tab === tab);
+  for (const link of links) {
     if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
   }
   document.title = `${TITLES[tab]} · RoboGame Gamemaster`;
+  current = tab;
+  remember(LAST, tab);
+  if (tab === "logs") {
+    markSeen();
+    toast.hidden = true;
+  }
+  paintErrors();
   frame.focus();
 }
 
+function go(tab) {
+  if (location.hash === `#${tab}`) show();
+  else location.hash = tab;
+}
+
+function keys(event) {
+  if (!event.altKey || event.ctrlKey || event.metaKey) return;
+  const link = links[Number(event.key) - 1];
+  if (link) {
+    event.preventDefault();
+    go(link.dataset.tab);
+  }
+}
+
+// -- status bar ---------------------------------------------------------
+
+const chip = (id, text, look, tip) => {
+  const node = document.getElementById(id);
+  node.textContent = text;
+  node.className = `chip ${look || ""}`;
+  node.title = tip;
+};
+const toast = document.getElementById("toast");
+const badge = document.getElementById("errors");
+// Error lines counted when the Logs tab was last looked at.
+let seenError = Number(remember(SEEN)) || 0;
+let totalErrors = 0;
+let toastTimer = 0;
+let newestError = null;  // the newest error line's number, once polled
+
+function markSeen() {
+  seenError = totalErrors;
+  remember(SEEN, String(seenError));
+}
+
+function paintErrors() {
+  const errorCount = Math.max(0, totalErrors - seenError);
+  badge.hidden = errorCount === 0;
+  badge.textContent = errorCount > 99 ? "99+" : String(errorCount);
+  badge.title = `${errorCount} new error${errorCount === 1 ? "" : "s"}`;
+}
+
+function paint(app) {
+  chip("ros", app.console ? "ROS" : "No ROS", app.console ? "good" : "bad",
+       app.console ? "ROS is sourced: the robot console sees the robots."
+       : "ROS is not sourced: only the arena editor works.");
+
+  const sim = app.sim;
+  if (!sim) {
+    chip("sim", "Sim off", "", "This app cannot launch the sim.");
+  } else if (sim.running && !sim.ready) {
+    chip("sim", `Launching ${sim.layout}`, "warn",
+         "Gazebo is starting. Open the Arena editor to stop it.");
+  } else if (sim.running) {
+    chip("sim", `Sim: ${sim.layout}`, "good",
+         "Gazebo runs this layout. Open the Arena editor to stop it.");
+  } else if (sim.exit && !sim.stopped) {
+    chip("sim", "Sim stopped", "bad",
+         `The last sim run ended with code ${sim.exit}. See Logs.`);
+  } else {
+    chip("sim", "No sim", "",
+         "No sim running. Launch one from the Arena editor.");
+  }
+  // A failed run's chip opens its output; the others the Launch buttons.
+  document.getElementById("sim").dataset.go =
+    sim && sim.exit && !sim.running && !sim.stopped ? "logs" : "editor";
+
+  // The BLE bridge to the real robots, shown once it is started.
+  const bridge = app.bridge;
+  document.getElementById("bridge").hidden =
+    !bridge || bridge.state === "stopped";
+  if (bridge && bridge.state !== "stopped") {
+    const look = { found: "good", lost: "bad" }[bridge.state] || "warn";
+    chip("bridge", `Bridge: ${bridge.state}`, look,
+         `${bridge.robots} real robot${bridge.robots === 1 ? "" : "s"} `
+         + "seen. Open the Robot console for the Bridge panel.");
+  }
+
+  const robots = app.robots;
+  document.getElementById("robots").hidden = robots === null;
+  document.getElementById("arena").hidden = !app.console;
+  if (robots !== null) {
+    chip("robots", `${robots} robot${robots === 1 ? "" : "s"}`,
+         robots ? "good" : "", robots ? "Robots the console sees."
+         : "No robots yet: launch a sim, or connect a controller.");
+  }
+  if (app.console) {
+    chip("arena", app.arena || "No arena", app.arena ? "good" : "warn",
+         app.arena ? "The arena the robots plan over."
+         : "No arena in use: launch a sim or pick one on the console.");
+  }
+
+  const logs = app.logs;
+  if (logs.errors < seenError) seenError = 0;  // the app started again
+  if (logs.error && newestError !== null && logs.error.n !== newestError
+      && current !== "logs") {
+    document.getElementById("toast-source").textContent = logs.error.source;
+    document.getElementById("toast-text").textContent = logs.error.text;
+    toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.hidden = true; }, 15000);
+  }
+  newestError = logs.error ? logs.error.n : 0;
+  totalErrors = logs.errors;
+  if (current === "logs") markSeen();
+  paintErrors();
+}
+
+async function poll() {
+  try {
+    const reply = await fetch("/api/app", { cache: "no-store" });
+    if (!reply.ok) throw new Error(reply.statusText);
+    paint(await reply.json());
+    document.getElementById("banner").hidden = true;
+  } catch (error) {
+    document.getElementById("banner").hidden = false;
+  }
+  setTimeout(poll, 2000);
+}
+
+for (const button of document.querySelectorAll("#status .chip")) {
+  button.addEventListener("click", () => go(button.dataset.go));
+}
+document.getElementById("toast-show").addEventListener("click", () => {
+  toast.hidden = true;
+  go("logs");
+});
+document.getElementById("toast-close").addEventListener("click", () => {
+  toast.hidden = true;
+});
+window.addEventListener("keydown", keys);
 window.addEventListener("hashchange", show);
 show();
+poll();
 </script>
 </body>
 </html>

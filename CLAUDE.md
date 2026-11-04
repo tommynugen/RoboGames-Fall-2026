@@ -45,7 +45,7 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `ble_bridge.py` | the console's BLE bridge Start/Stop: runs `bridge.launch.py`, reads its log lines for which robots are found or connected |
 | `autopilot.py` | the console's driving: command queue and chase mode, on `Chaser` |
 | `vision.py` + `vision.html` | the app's Vision tab (`#vision`, page at `/vision`): arena camera, AprilTags, robot places, `/arena/tags` |
-| `app_log.py` + `app_log.html` | the app's Console tab (`#logs`, page at `/logs`): log lines by source (editor, console, teleop, sim, app) and `/api/logs` |
+| `app_log.py` + `app_log.html` | the app's Logs tab (`#logs`, page at `/logs`): log lines by source (editor, console, teleop, vision, sim, bridge, app) and `/api/logs` |
 | `active_arena.py` | publishes the arena in use on `/arena/layout`, latched; the sim launch starts one |
 | `robot_sdf.py`, `spawning.py`, `fpv_toggle.py` | robot model, spawn placement, FPV camera and the 1 to 4 views |
 | `src/robogame_gui/src/RobogameView.*` | the Camera view card in the Gazebo side panel, talks to `fpv_toggle` |
