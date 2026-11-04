@@ -36,12 +36,13 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `chase_node.py` | ROS node around `Chaser` |
 | `chase_sim.py` | 2D stand-in for Gazebo to try `Chaser` against moving targets |
 | `arena_layout.py` (890 lines) | layout JSON load/save, `PARTS`, `check()` (the editor's red outlines), world SDF building, spawn spots |
-| `gamemaster.py` + `gamemaster.html` | RoboGame Gamemaster, the one web app at localhost:8766 (`robogame_gamemaster`): serves the editor and console pages and APIs, tabs `#editor`, `#console`, `#vision`, `#chase`, `#logs`, `#upkeep`. `dialogs.js` is the tabs' shared dialogs (`askYes`, `askText`, `dialogOpen`); use it, not `prompt`/`confirm` |
+| `gamemaster.py` + `gamemaster.html` | RoboGame Gamemaster, the one web app at localhost:8766 (`robogame_gamemaster`): serves the editor and console pages and APIs, tabs `#setup`, `#editor`, `#console`, `#vision`, `#chase`, `#logs`, `#upkeep`. `dialogs.js` is the tabs' shared dialogs (`askYes`, `askText`, `dialogOpen`); use it, not `prompt`/`confirm` |
 | `arena_editor.py` + `arena_editor.html` | the layout editor, the app's Arena editor tab (page at `/editor`), its API routes in `get`/`put`/`post`; the html is one big file, grep it. Its module drawing is in `arena_draw.js`, shared with the console, and its 3D view (three.js) in `arena_view3d.js` |
 | `sim_firmware.py`, `firmware_model.py` | stand in for the ESP32 firmware and BLE bridge |
 | `racing_teleop.py`, `drive_controls.py`, `motion_sensor.py` | PS4/PS5 racing controls and wheel steering |
 | `controller_robots.py`, `gamepads.py` | a robot for every controller connected (hotplug); takes rebinds from the console |
 | `robot_console.py` + `robot_console.html` | the robot console, the app's Robot console tab (page at `/console`), its node and `get`/`post` API routes: bind controllers, make robots autonomous, send them places |
+| `setup.html` | the app's Setup tab (`#setup`, page at `/setup`): the real-arena steps, build to go, over `/api/setup` in `gamemaster.py` |
 | `ble_bridge.py` | the console's BLE bridge Start/Stop: runs `bridge.launch.py`, reads its log lines for which robots are found or connected |
 | `autopilot.py` | the console's driving: command queue and chase mode, on `Chaser` |
 | `vision.py` + `vision.html` | the app's Vision tab (`#vision`, page at `/vision`): arena camera, AprilTags, robot places, `/arena/tags` |
