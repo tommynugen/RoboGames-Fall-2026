@@ -771,7 +771,20 @@ http://localhost:8766 in the browser (only this computer can reach it;
 that);
 `#console` and `#editor` in the address pick the tab, and `#editor/NAME`
 opens a saved layout in the editor. If it is already running, starting it
-again opens it in the browser instead. (`robogame_gamemaster` is the only
+again opens it in the browser instead.
+
+To start it from the desktop's app menu instead, run
+`scripts/desktop/install.sh` once (Linux; `--remove` takes it off again,
+and run it again if the repo moves). It adds a RoboGame Gamemaster entry
+with an icon that sources ROS (`/opt/ros/$ROS_DISTRO`, Lyrical if unset)
+and this workspace's `install/`, then starts the app, or only opens the
+browser if it is already up. Its output goes to
+`~/.cache/robogame/gamemaster.log`; if ROS or the build is missing it says
+so in a desktop notice. (Checked 2026-11-04: the entry is written with the
+repo path filled in, and the launcher reports missing ROS; not yet clicked
+on a desktop.)
+
+(`robogame_gamemaster` is the only
 command for it: `arena_editor`, `robot_console` and `robogame_app` were
 removed on 2026-11-03; checked with the tests, 156 pass.) Both tabs stay loaded, so unsaved
 edits are kept while you look at the console. The console's Edit link,
