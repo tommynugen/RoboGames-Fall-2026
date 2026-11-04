@@ -54,24 +54,28 @@
   <strong>RoboGame Gamemaster</strong>
   <a href="#editor" data-tab="editor">Arena editor</a>
   <a href="#console" data-tab="console">Robot console</a>
+  <a href="#vision" data-tab="vision">Vision</a>
   <a href="#logs" data-tab="logs">Console</a>
 </nav>
 <!-- Each tab is its own page, loaded once and kept, so the editor keeps
      unsaved edits and the console keeps polling while the other shows. -->
 <iframe id="editor" title="Arena editor"></iframe>
 <iframe id="console" title="Robot console"></iframe>
+<iframe id="vision" title="Vision"></iframe>
 <iframe id="logs" title="Console"></iframe>
 <script>
 const frames = {
   editor: document.getElementById("editor"),
   console: document.getElementById("console"),
+  vision: document.getElementById("vision"),
   logs: document.getElementById("logs"),
 };
 const TITLES = {
-  editor: "Arena editor", console: "Robot console", logs: "Console",
+  editor: "Arena editor", console: "Robot console", vision: "Vision",
+  logs: "Console",
 };
 
-// #editor, #editor/NAME (opens that layout), #console or #logs.
+// #editor, #editor/NAME (opens that layout), #console, #vision or #logs.
 function show() {
   const [asked, layout] = decodeURIComponent(location.hash.slice(1))
     .split("/");
