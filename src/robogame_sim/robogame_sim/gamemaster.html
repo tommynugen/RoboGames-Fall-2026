@@ -78,6 +78,14 @@
   .chip.good::before { background: var(--good); }
   .chip.warn::before { background: var(--warn); }
   .chip.bad::before { background: var(--bad); }
+  #quit {
+    align-self: center; margin-left: 6px; padding: 2px 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: none;
+    color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  #quit:hover { color: #fff; background: var(--bad); border-color: var(--bad); }
+  #stopped { margin: auto; max-width: 520px; padding: 24px; text-align: center; }
+  #stopped code { background: var(--panel); padding: 2px 6px; border-radius: 4px; }
   #banner {
     padding: 8px 16px; background: var(--bad); color: #fff;
   }
@@ -126,6 +134,7 @@
     <button class="chip" id="robots" data-go="console">Robots</button>
     <button class="chip" id="arena" data-go="console">Arena</button>
   </div>
+  <button id="quit" title="Stop the Gamemaster app and all it started">Quit</button>
 </nav>
 <div id="banner" role="alert" hidden>
   The Gamemaster app is not answering. Start it again with
@@ -140,6 +149,7 @@
   <button id="toast-show">Show</button>
   <button id="toast-close" aria-label="Dismiss">×</button>
 </div>
+<script src="dialogs.js"></script>
 <script>
 const links = [...document.querySelectorAll("nav a[data-tab]")];
 const frames = {};
@@ -354,7 +364,9 @@ function paint(app) {
   paintErrors();
 }
 
+let stopped = false;
 async function poll() {
+  if (stopped) return;
   try {
     const reply = await fetch("/api/app", { cache: "no-store" });
     if (!reply.ok) throw new Error(reply.statusText);
@@ -375,6 +387,31 @@ document.getElementById("toast-show").addEventListener("click", () => {
 });
 document.getElementById("toast-close").addEventListener("click", () => {
   toast.hidden = true;
+});
+// Quit stops the app and all it started (sim, bridge, controllers, jobs),
+// then the page says how to start it again and reloads once it is back.
+document.getElementById("quit").addEventListener("click", async () => {
+  if (!await askYes("Quit the Gamemaster? This stops the sim, the BLE " +
+      "bridge, controller robots and any running jobs.", "Quit", true)) return;
+  try {
+    await fetch("/api/quit", { method: "POST" });
+  } catch (error) { /* gone already */ }
+  stopped = true;
+  document.title = "Gamemaster stopped";
+  document.body.innerHTML = `<div id="stopped"><h2>The Gamemaster has
+    stopped</h2><p>Start it again in a terminal with</p>
+    <p><code>ros2 run robogame_sim robogame_gamemaster</code></p>
+    <p>This page reloads by itself once it is back.</p></div>`;
+  const back = async () => {
+    try {
+      if ((await fetch("/api/app", { cache: "no-store" })).ok) {
+        location.reload();
+        return;
+      }
+    } catch (error) { /* not yet */ }
+    setTimeout(back, 2000);
+  };
+  setTimeout(back, 3000);
 });
 window.addEventListener("keydown", keys);
 window.addEventListener("hashchange", show);

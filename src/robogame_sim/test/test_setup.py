@@ -32,3 +32,21 @@ def test_setup_tab_and_camera_status():
     finally:
         server.shutdown()
     assert gamemaster.TABS[0] == "setup"
+
+
+def test_quit_button_stops_the_app():
+    asked = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), gamemaster.handler(
+        book=app_log.LogBook(), quit=lambda: asked.append(True)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with urllib.request.urlopen(base + "/") as reply:
+            assert b'id="quit"' in reply.read()
+        request = urllib.request.Request(base + "/api/quit", data=b"{}",
+                                         method="POST")
+        with urllib.request.urlopen(request) as reply:
+            assert json.load(reply) == {"stopping": True}
+        assert asked == [True]
+    finally:
+        server.shutdown()
