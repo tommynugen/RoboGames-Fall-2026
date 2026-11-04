@@ -9,8 +9,9 @@ stops the sim too.
 Routes, served by gamemaster.py:
 
 - GET /api/sim: {"running", "ready", "test", "layout", "command", "log",
-  "tail", "exit"}. ready is false while it is still launching: until a
-  robot is spawned in the world, or READY_AFTER seconds at most
+  "tail", "exit", "stopped"}. ready is false while it is still
+  launching: until a robot is spawned in the world, or READY_AFTER
+  seconds at most. stopped is true once Stop ended it
 - POST /api/sim {"layout": NAME, "test": bool}: launches it
 - POST /api/sim/stop: stops it
 """
@@ -45,6 +46,7 @@ class SimRunner:
         self.test = False
         self.started = 0.0
         self.ready = False
+        self.stopped = False  # by Stop, so its exit code is no failure
         self.log = os.path.join(tempfile.gettempdir(), "robogame_sim.log")
         self.lock = threading.Lock()
 
@@ -72,7 +74,7 @@ class SimRunner:
         return {"running": self.running(), "ready": self.is_ready(),
                 "test": self.test, "layout": self.layout,
                 "command": " ".join(self.command or []), "log": self.log,
-                "tail": tail,
+                "tail": tail, "stopped": self.stopped,
                 "exit": None if self.process is None
                 else self.process.poll()}
 
@@ -95,6 +97,7 @@ class SimRunner:
                     stdin=subprocess.DEVNULL, start_new_session=True)
             self.layout, self.command, self.test = layout, command, test
             self.started, self.ready = time.monotonic(), False
+            self.stopped = False
         return self.status()
 
     def stop(self):
@@ -102,6 +105,7 @@ class SimRunner:
             process = self.process
             if process is None or process.poll() is not None:
                 return self.status()
+            self.stopped = True
             try:
                 os.killpg(process.pid, signal.SIGINT)
                 process.wait(STOP_WAIT)

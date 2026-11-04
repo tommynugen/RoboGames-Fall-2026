@@ -74,3 +74,17 @@ def test_app_logs_requests():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_app_status():
+    book = app_log.LogBook()
+    assert book.summary() == {"errors": 0, "error": None}
+    book.add("editor", "saved")
+    book.add("sim", "boom", "error")
+    book.add("sim", "bang", "error")
+    summary = book.summary()
+    assert summary["errors"] == 2
+    assert summary["error"]["text"] == "bang"
+    reply = gamemaster.status(None, None, book)
+    assert reply["console"] is False and reply["robots"] is None
+    assert reply["logs"]["errors"] == 2

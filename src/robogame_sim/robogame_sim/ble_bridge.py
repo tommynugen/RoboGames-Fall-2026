@@ -7,7 +7,7 @@ log lines instead, to tell which robots it has found and whether each is
 connected. parse() holds the wording it looks for, and test_ble_bridge.py
 checks it against lines the bridge prints, so a change there shows up.
 
-Every line the bridge prints goes on the Console tab, under Bridge.
+Every line the bridge prints goes on the Logs tab, under Bridge.
 
 Routes, served by gamemaster.py:
 

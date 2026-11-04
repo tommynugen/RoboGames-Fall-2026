@@ -1,4 +1,4 @@
-"""The log lines behind the RoboGame Gamemaster's Console tab.
+"""The log lines behind the RoboGame Gamemaster's Logs tab.
 
 One LogBook keeps the last lines from every part of the app, each tagged
 with where it came from:
@@ -40,6 +40,8 @@ class LogBook:
     def __init__(self, keep=KEEP):
         self.lines = collections.deque(maxlen=keep)
         self.count = 0
+        self.errors = 0  # error lines so far, for the status bar
+        self.last_error = None  # the newest of them
         self.lock = threading.Lock()
         self.follows = {}  # source: [path, offset, partial line]
         self.follow_lock = threading.Lock()
@@ -48,9 +50,12 @@ class LogBook:
         with self.lock:
             for part in str(text).rstrip("\n").split("\n"):
                 self.count += 1
-                self.lines.append({
-                    "n": self.count, "time": when or time.time(),
-                    "source": source, "level": level, "text": part})
+                line = {"n": self.count, "time": when or time.time(),
+                        "source": source, "level": level, "text": part}
+                self.lines.append(line)
+                if level == "error":
+                    self.errors += 1
+                    self.last_error = line
 
     def follow(self, source, path, start=None):
         """Adds the lines written to the file at path to source, read on
@@ -95,6 +100,13 @@ class LogBook:
         with self.lock:
             lines = [line for line in self.lines if line["n"] > after]
             return {"lines": lines, "last": self.count}
+
+    def summary(self):
+        """The number of error lines so far and the newest of them (or
+        None), for the Gamemaster's status bar."""
+        self.read_follows()
+        with self.lock:
+            return {"errors": self.errors, "error": self.last_error}
 
     def get(self, path):
         parts = urlsplit(path)
