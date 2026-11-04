@@ -321,6 +321,18 @@ too, and autonomous robots get a stop first. The page then says how to
 start it again and reloads by itself once the app is back. It is POST
 `/api/quit`.
 
+The Gamemaster opens in a window of its own, with no browser tabs or
+address bar (`app_window.py`): a pywebview window if pywebview is
+installed (`sudo apt install python3-webview`), or else Chromium,
+Chrome, Brave or Edge in app mode with its own profile under
+`~/.cache/robogame/window`. Closing that window quits the app, the same
+as Quit, and Quit closes the window. With neither installed it opens a
+browser tab as before. `--browser` opens a browser tab instead of the
+window, and the page still works at http://localhost:8766 in any
+browser while the app runs. (Checked 2026-11-04 with the tests and,
+headless under Xvfb, a real Chromium app window: closing it stopped the
+app, and Quit closed it. pywebview not yet tried on a desktop.)
+
 Checked 2026-11-04: `test_setup.py`, and Quit in Chromium (Playwright)
 without ROS: the app exited and the page showed the restart line. The
 ROS loop (spin in 0.25 s steps until Quit) is not yet run with ROS.
@@ -777,19 +789,19 @@ ros2 run robogame_sim robogame_gamemaster
 
 The console is the Robot console tab of the RoboGame Gamemaster, which has the
 arena editor (see Arena layouts) in its other tab. It opens
-http://localhost:8766 in the browser (only this computer can reach it;
-`--port`, `--no-browser` and `--tab editor|console|vision|chase|logs|upkeep` change
-that);
+http://localhost:8766 in its own window (see Quit above; only this
+computer can reach it; `--port`, `--browser`, `--no-browser` and
+`--tab editor|console|vision|chase|logs|upkeep` change that);
 `#console` and `#editor` in the address pick the tab, and `#editor/NAME`
 opens a saved layout in the editor. If it is already running, starting it
-again opens it in the browser instead.
+again opens another window on it instead.
 
 To start it from the desktop's app menu instead, run
 `scripts/desktop/install.sh` once (Linux; `--remove` takes it off again,
 and run it again if the repo moves). It adds a RoboGame Gamemaster entry
 with an icon that sources ROS (`/opt/ros/$ROS_DISTRO`, Lyrical if unset)
-and this workspace's `install/`, then starts the app, or only opens the
-browser if it is already up. Its output goes to
+and this workspace's `install/`, then starts the app in its own window, or only opens a
+window on it if it is already up. Its output goes to
 `~/.cache/robogame/gamemaster.log`; if ROS or the build is missing it says
 so in a desktop notice. (Checked 2026-11-04: the entry is written with the
 repo path filled in, and the launcher reports missing ROS; not yet clicked
@@ -1014,7 +1026,7 @@ Map how they are set up on the table in the layout editor:
 ros2 run robogame_sim robogame_gamemaster
 ```
 
-It opens the RoboGame Gamemaster on http://localhost:8766 in the browser, on its
+It opens the RoboGame Gamemaster (http://localhost:8766) in its own window, on its
 Arena editor tab (see Robot console for the app itself). Pick a module (keys 1
 to 5) and click or drag on the grid, which is seen from above with +x to
 the right and +y up, each square drawn with its tile's four peg holes.

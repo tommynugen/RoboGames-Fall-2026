@@ -2,6 +2,11 @@
 
     ros2 run robogame_sim robogame_gamemaster
     ros2 run robogame_sim robogame_gamemaster --port 8768 --tab console
+    ros2 run robogame_sim robogame_gamemaster --browser
+
+Opens in a window of its own (app_window.py), and closing that window
+quits the app as the Quit button does. --browser opens a browser tab
+instead, and --no-browser neither.
 
 Serves http://localhost:8766 with six tabs:
 
@@ -46,12 +51,14 @@ still works and the console tab says ROS is not sourced.
 import argparse
 import json
 import os
+import subprocess
+import sys
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
-from robogame_sim import (app_log, arena_editor, perception,
+from robogame_sim import (app_log, app_window, arena_editor, perception,
                           vision as vision_tab)
 from robogame_sim.chase_runs import ChaseRunner
 from robogame_sim.ble_bridge import BridgeRunner
@@ -340,13 +347,41 @@ def start_console(args, book):
     return node
 
 
+def window_command(url):
+    return [sys.executable, app_window.__file__, url]
+
+
+def open_window(url, book, quitting):
+    """Open the app's own window on url and set quitting (an Event) when
+    the user closes it. If there is no way to show a window, open a
+    browser tab instead. Returns the window's process, or
+    None."""
+    if not app_window.available():
+        say(book, "No pywebview or Chromium for the app's own window "
+            "(sudo apt install python3-webview): opening the browser.")
+        webbrowser.open(url)
+        return None
+    window = subprocess.Popen(window_command(url))
+
+    def watch():
+        if window.wait() == 2:  # it found no way to show one after all
+            webbrowser.open(url)
+        elif window.returncode == 0 and not quitting.is_set():
+            say(book, "The Gamemaster window was closed: stopping the app.")
+            quitting.set()
+    threading.Thread(target=watch, daemon=True).start()
+    return window
+
+
 def main(args=None):
     parser = argparse.ArgumentParser(description="RoboGame Gamemaster")
     parser.add_argument("--port", type=int, default=PORT)
     parser.add_argument("--no-browser", action="store_true",
-                        help="do not open a browser window")
+                        help="open no window or browser tab")
+    parser.add_argument("--browser", action="store_true",
+                        help="open a browser tab, not the app's own window")
     parser.add_argument("--tab", choices=TABS, default="editor",
-                        help="the tab the browser opens on")
+                        help="the tab it opens on")
     # ros2 run passes --ros-args on, which rclpy takes.
     options, _ = parser.parse_known_args(args)
     url = f"http://localhost:{options.port}/#{options.tab}"
@@ -356,8 +391,13 @@ def main(args=None):
     except OSError:
         # Already running: show it and stop.
         print(f"The RoboGame Gamemaster is already on {url}.", flush=True)
-        if not options.no_browser:
+        if options.no_browser:
+            return
+        if options.browser or not app_window.available():
             webbrowser.open(url)
+        else:
+            # A window of its own, left open after this ends.
+            subprocess.Popen(window_command(url), start_new_session=True)
         return
 
     book = app_log.LogBook()
@@ -388,8 +428,11 @@ def main(args=None):
     say(book, f"RoboGame Gamemaster on {url}, saving layouts to "
         f"{arena_editor.arena_layout.layout_dirs()[0]}. Ctrl-C to stop.")
 
-    if not options.no_browser:
+    window = None
+    if options.browser:
         threading.Timer(0.5, webbrowser.open, [url]).start()
+    elif not options.no_browser:
+        window = open_window(url, book, quitting)
 
     try:
         if console is None:
@@ -405,6 +448,8 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        if window is not None and window.poll() is None:
+            window.terminate()  # Quit from the page or Ctrl-C
         server.shutdown()
         server.server_close()
         sim.stop()
