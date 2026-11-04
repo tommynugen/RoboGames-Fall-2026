@@ -145,10 +145,11 @@ function turned(parent, x, y, s, rotation, opacity) {
   }, parent);
 }
 
-function drawRamp(parent, x, y, s, rotation, prefix, opacity = 1) {
+function drawRamp(parent, x, y, s, rotation, prefix, opacity = 1,
+                  colour = null) {
   const g = turned(parent, x, y, s, rotation, opacity);
   el("rect", { x: x + 1, y: y + 1, width: s - 2, height: s - 2, rx: 2,
-               fill: `url(#${prefix}-ramp)` }, g);
+               fill: colour || `url(#${prefix}-ramp)` }, g);
   el("rect", { x: x + 1, y: y + 1, width: s - 2, height: s * 0.08,
                fill: "var(--platform-edge)", opacity: 0.55 }, g);
   const cx = x + s / 2;
@@ -185,7 +186,8 @@ function drawPlatform2(parent, x, y, s, opacity = 1) {
 }
 
 // A wall or thwomp on the peg line of the side it faces, to scale.
-function drawSide(parent, x, y, s, type, rotation, prefix, opacity = 1) {
+function drawSide(parent, x, y, s, type, rotation, prefix, opacity = 1,
+                  colour = null) {
   const part = info.types[type];
   const scale = s / info.module;
   const depth = Math.max((part.depth || 0.0254) * scale, 3);
@@ -194,7 +196,8 @@ function drawSide(parent, x, y, s, type, rotation, prefix, opacity = 1) {
   const thwomp = type === "thwomp";
   el("rect", { x: x + 1.5, y: middle - depth / 2, width: s - 3,
                height: depth, rx: 1.5,
-               fill: thwomp ? `url(#${prefix}-stripes)` : "var(--wall)",
+               fill: colour || (thwomp ? `url(#${prefix}-stripes)`
+                                       : "var(--wall)"),
                stroke: thwomp ? "var(--thwomp-edge)" : "var(--wall-edge)",
                "stroke-width": thwomp ? 2 : 1.5 }, g);
 }
@@ -226,7 +229,8 @@ function drawBadge(parent, x, y, s, inches) {
 // A dropped part, over the cells it covers about the middle of the square
 // at x, y, s across, or shrunk to fit in it, for a tool button. The notch
 // is its +y side at rotation 0, so it shows which way it is turned.
-function drawBlock(parent, x, y, s, type, rotation, opacity = 1, fit = false) {
+function drawBlock(parent, x, y, s, type, rotation, opacity = 1, fit = false,
+                   colour = null) {
   let [w, d] = blockCells(type, rotation).map(n => n * s / 2);
   const cx = x + s / 2 + (w / (s / 2) % 2) * s / 4;
   const cy = y + s / 2 - (d / (s / 2) % 2) * s / 4;
@@ -237,7 +241,7 @@ function drawBlock(parent, x, y, s, type, rotation, opacity = 1, fit = false) {
   }
   const [mx, my] = fit ? [x + s / 2, y + s / 2] : [cx, cy];
   el("rect", { x: mx - w / 2 + 1.5, y: my - d / 2 + 1.5, width: w - 3,
-               height: d - 3, rx: 3, fill: "#e8a07a", stroke: "#8a4b2a",
+               height: d - 3, rx: 3, fill: colour || "#e8a07a", stroke: "#8a4b2a",
                "stroke-width": 1.5 }, g);
   const [ux, uy] = uphill(rotation);
   const r = Math.min(w, d) / 6;
@@ -254,15 +258,22 @@ function drawFloor(parent, x, y, s, opacity = 1) {
   drawPegs(g, x, y, s);
 }
 
+// colour, a module's own "#rrggbb", fills it instead of its part's colour.
 function drawModule(parent, type, x, y, s, rotation, prefix, opacity = 1,
-                    fit = false) {
+                    fit = false, colour = null) {
+  if (colour) {
+    parent = el("g", { style: `--floor:${colour};--platform:${colour};` +
+                              `--platform2:${colour}` }, parent);
+  }
   if (isFloor(type)) drawFloor(parent, x, y, s, opacity);
-  else if (isBlock(type)) drawBlock(parent, x, y, s, type, rotation, opacity, fit);
+  else if (isBlock(type)) {
+    drawBlock(parent, x, y, s, type, rotation, opacity, fit, colour);
+  }
   else if (type === "platform") drawPlatform(parent, x, y, s, opacity);
   else if (type === "platform_2") drawPlatform2(parent, x, y, s, opacity);
   else if (type === "ramp") drawRamp(parent, x, y, s, rotation, prefix,
-                                     opacity);
+                                     opacity, colour);
   else if (type === "wall" || type === "thwomp") {
-    drawSide(parent, x, y, s, type, rotation, prefix, opacity);
+    drawSide(parent, x, y, s, type, rotation, prefix, opacity, colour);
   }
 }

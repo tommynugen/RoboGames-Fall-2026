@@ -991,7 +991,12 @@ its corner. A plain click replaces whatever is in the way, at the height
 of the top of what is there. Right-click takes the top module under the
 pointer off, along with anything standing on it, and Ctrl+Z undoes. X, or
 the Delete button, is delete mode, where clicks and drags take modules
-off; X again, Esc or picking a tool goes back to placing. Help, under the
+off; X again, Esc or picking a tool goes back to placing. P, or the
+Paint button, is paint mode: pick a colour in the box beside it, and
+clicks and drags give the top module under the pointer that colour, in
+the top view, the 3D view and the robot console; right-click gives it its
+part's colour back. The colour is saved with the module as
+`"colour": "#e0a030"`, and Gazebo builds the part in it. Help, under the
 tools, opens these instructions in short. As
 you edit it checks the layout and outlines in red any ramp whose low end
 runs into the edge, a module, a wall facing it, the side of a ramp or a
@@ -1018,7 +1023,13 @@ numbers and so on) do nothing while one is open.
 Checked 2026-11-03: tests, and in Chromium (Playwright) against the app
 without ROS: saving `my  arena` wrote `my-arena.json`, X then a click took
 a module off and Esc left delete mode, Enter and Esc in the dialogs, and
-V typed into a dialog did not change the view. `http://localhost:8766/#editor/NAME` opens a saved one directly.
+V typed into a dialog did not change the view.
+
+Checked 2026-11-04: tests (a painted platform keeps `#e0a030` through
+save and load and gets diffuse `0.878 0.627 0.188` in the arena SDF, the
+others keep their part's colour), and in Chromium against the app without
+ROS: Paint then three clicks coloured a platform and two floor tiles red
+and `layout()` listed three modules with a colour. `http://localhost:8766/#editor/NAME` opens a saved one directly.
 
 The editor also shows the layout in 3D, built from the same CAD meshes
 and posed as the sim poses them, so what it shows is what Gazebo loads.

@@ -510,7 +510,7 @@ function drawPlaced(parent, m) {
   const i = m.level > 0 && isPlatform(m.type) ?
     Math.min(m.level * 0.08, 0.24) * CELL : 0;
   drawModule(parent, m.type, x + i, y + i, CELL - 2 * i, m.rotation,
-             "board");
+             "board", 1, false, m.colour);
 }
 
 // An arena with no layout, the Onshape export, as the planner sees it:
