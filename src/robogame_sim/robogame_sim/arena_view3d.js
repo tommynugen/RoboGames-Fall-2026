@@ -160,8 +160,9 @@ export function create(container) {
       const extra = bad.has(k) ? {
         emissive: new THREE.Color(css("--bad") || "#d23c3c"),
         emissiveIntensity: highlighted === k ? 0.9 : 0.45 } : {};
-      const mesh = meshFor(m, standing(m, cols), material(part.colour,
-                                                          extra));
+      const rgb = m.colour ? new THREE.Color(m.colour).toArray()
+                           : part.colour;
+      const mesh = meshFor(m, standing(m, cols), material(rgb, extra));
       if (!mesh) { missing = true; continue; }
       mesh.userData.module = m;
       meshOf.set(m, mesh);
@@ -174,8 +175,10 @@ export function create(container) {
   // see-through, red where it does not fit, or the module it would take
   // off, tinted red.
   function buildGhost() {
-    const key = JSON.stringify([hover, tool, deleting, newRotation, stacking,
-                                shiftHeld, halves, painting, modules]);
+    const paint = paintMode && document.getElementById("paint-colour").value;
+    const key = JSON.stringify([hover, tool, deleting, paint, newRotation,
+                                stacking, shiftHeld, halves, painting,
+                                modules]);
     if (key === builtGhost) return;
     clear(ghost);
     builtGhost = key;
@@ -183,13 +186,14 @@ export function create(container) {
 
     const accent = new THREE.Color(css("--accent") || "#2f5fb4");
     const red = new THREE.Color(css("--bad") || "#d23c3c");
-    if (deleting) {
+    if (deleting || paint) {
       const m = under(hover);
       const mesh = m && meshOf.get(m);
       if (!mesh) return;
       const copy = mesh.clone();
       copy.material = new THREE.MeshBasicMaterial({
-        color: red, transparent: true, opacity: 0.55, depthTest: false });
+        color: paint ? new THREE.Color(paint) : red, transparent: true,
+        opacity: 0.55, depthTest: false });
       ghost.add(copy);
       return;
     }
