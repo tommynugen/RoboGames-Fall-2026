@@ -402,8 +402,10 @@ of the arena puts each tag where it is and points each robot tag the way
 it faces, and a table gives every tag's px, cm and heading (degrees, 0
 along +x, counted towards +y). Tags not seen for 1 s drop off.
 
-Pick the camera (a device number, a `/dev/video` path, an `http://` or
-`rtsp://` URL, or `test`) and press Start. The app then finds the tags as
+Pick the camera from the list and press Start. The list has the cameras
+connected (on Linux each `/dev/video` device that gives pictures, by the
+name the camera gives itself; ↻ looks again after plugging one in), the
+test camera, and Other for an `http://` or `rtsp://` URL. The app then finds the tags as
 arena_perception's `apriltag_node` does, with the same tag family and
 detector settings and the same cm mapping from the corner tags, and
 publishes them on `/arena/tags` in the same JSON with `yaw` added, so
@@ -420,7 +422,8 @@ with tag 5 going round, for trying the tab with no camera.
 
 Needs OpenCV with aruco (`sudo apt install python3-opencv`); without it
 the tab says so and still shows `/arena/tags`. `vision.py` does this:
-GET `/api/vision` (state and tags), `/vision/stream.mjpg`,
+GET `/api/vision` (state and tags), `/api/vision/cameras`,
+`/vision/stream.mjpg`,
 `/vision/frame.jpg`, POST `/api/vision` (settings),
 `/api/vision/start` and `/api/vision/stop`.
 
@@ -428,6 +431,8 @@ Checked 2026-11-04: tests (`test_vision.py`: cm mapping and heading, the
 test camera end to end, the routes and stream over HTTP) and the tab in
 Chromium, light and dark, on the `test` camera without ROS, at 20 fps.
 Not yet run on the real arena camera or with ROS.
+The camera list checked the same day: tests on a made-up `/sys` folder,
+and in Chromium, picking Test camera and Other.
 
 ## Real robots placed by the camera
 

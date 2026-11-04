@@ -42,6 +42,28 @@ def test_topic_tags_shown_until_stale():
     assert seen.state()["tags"] == []
 
 
+def test_lists_cameras(tmp_path):
+    for entry, name, index in (("video2", "Arena cam", "0"),
+                               ("video3", "Arena cam", "1"),  # metadata
+                               ("video0", "Laptop", "0"), ("media0", "x", "")):
+        (tmp_path / entry).mkdir()
+        (tmp_path / entry / "name").write_text(name + "\n")
+        (tmp_path / entry / "index").write_text(index)
+    assert vision.list_cameras(str(tmp_path)) == [
+        {"source": "0", "name": "Laptop (/dev/video0)"},
+        {"source": "2", "name": "Arena cam (/dev/video2)"}]
+
+
+def test_camera_choices_keep_the_one_in_use(monkeypatch):
+    monkeypatch.setattr(vision, "list_cameras",
+                        lambda: [{"source": "0", "name": "Laptop"}])
+    seen = vision.Vision()
+    seen.change({"source": "rtsp://cam/1"})
+    status, body = seen.get("/api/vision/cameras")
+    assert status == 200 and [c["source"] for c in body["cameras"]] == \
+        ["0", "rtsp://cam/1", "test"]
+
+
 cv2 = pytest.importorskip("cv2")
 
 
