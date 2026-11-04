@@ -118,7 +118,7 @@
 
   main {
     display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 20px;
-    padding: 20px; max-width: 1220px; margin: 0 auto;
+    padding: 20px; max-width: 1600px; margin: 0 auto;
   }
   @media (max-width: 860px) {
     main { grid-template-columns: minmax(0, 1fr); padding: 16px; }
@@ -132,9 +132,20 @@
   #board { cursor: pointer; }
   .views { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
   .views[data-view=both] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 600px) {
+    .views[data-view=both] { grid-template-columns: minmax(0, 1fr); }
+  }
   .views[data-view="2d"] #view3d, .views[data-view="3d"] #board { display: none; }
-  #view3d { position: relative; aspect-ratio: 1 / 1; border-radius: 6px;
-            overflow: hidden; background: var(--bg); touch-action: none; }
+  /* The 3D view fills its column and stays square, but never taller than
+     the window; on its own it takes the window's height. A box with an
+     aspect ratio does not stretch in a grid by itself, so give it the
+     width. */
+  #view3d { position: relative; width: 100%; aspect-ratio: 1 / 1;
+            max-height: calc(100vh - 150px); min-height: 240px;
+            border-radius: 6px; overflow: hidden; background: var(--bg);
+            touch-action: none; }
+  .views[data-view="3d"] #view3d { aspect-ratio: auto;
+                                   height: calc(100vh - 150px); }
   #view3d canvas { display: block; width: 100%; height: 100%; }
   #view3d .note3d { position: absolute; inset: auto 8px 6px; margin: 0;
                     color: var(--muted); font-size: 12px;
@@ -158,11 +169,16 @@
     font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
     color: var(--muted); margin: 0 0 10px; font-weight: 650;
   }
-  .tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  /* minmax(0, 1fr) so a long module name cannot push its card past the
+     panel's edge; the name breaks at - and _ instead. */
+  .tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+           gap: 6px; }
   .tool {
     display: flex; flex-direction: column; align-items: center; gap: 4px;
-    padding: 8px 4px; font-size: 13px;
+    padding: 8px 4px; font-size: 13px; min-width: 0;
   }
+  .tool .name { max-width: 100%; font-size: 12px; line-height: 1.25;
+                text-align: center; overflow-wrap: anywhere; }
   .tool[aria-pressed=true] {
     border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
   }
@@ -234,8 +250,8 @@
   .opts input[type=text], .opts select { width: 100%; box-sizing: border-box; }
   .opts input[type=checkbox] { justify-self: start; margin: 0; }
   .opts .bad { border-color: #d33; }
-  #views { display: flex; flex-wrap: wrap; gap: 6px; }
-  #views button[aria-pressed=true] { border-color: var(--ink);
+  #cam-views { display: flex; flex-wrap: wrap; gap: 6px; }
+  #cam-views button[aria-pressed=true] { border-color: var(--ink);
                                      font-weight: 650; }
   .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0;
           overflow-wrap: anywhere; }
@@ -448,7 +464,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
 
     <div class="panel">
       <h2>Gazebo camera</h2>
-      <div id="views">
+      <div id="cam-views">
         <button data-view="top">Top</button>
         <button data-view="front">Front</button>
         <button data-view="front_right">Corner</button>
@@ -854,7 +870,11 @@ function buildTools() {
     img.hidden = true;
     const kbd = document.createElement("kbd");
     kbd.textContent = i + 1;
-    b.append(svg, img, name);
+    const text = document.createElement("span");
+    text.className = "name";
+    // Break long CAD names after - and _ (zero-width spaces).
+    text.textContent = name.replace(/([-_])/g, "$1\u200b");
+    b.append(svg, img, text);
     if (i < 9) b.append(kbd);
     b.addEventListener("click", () => setTool(type));
     tools.appendChild(b);
@@ -1440,7 +1460,7 @@ async function launchSim(test) {
 // The Gazebo camera panel: the views fpv_toggle gives keys 1 to 4, by
 // /api/sim/view (sim_camera.py). Its buttons work while a sim with the
 // window on is up; the one shown is pressed.
-const viewButtons = [...document.querySelectorAll("#views button")];
+const viewButtons = [...document.querySelectorAll("#cam-views button")];
 const viewRobotEl = document.getElementById("view-robot");
 const viewStatusEl = document.getElementById("view-status");
 
