@@ -387,7 +387,8 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
         <ul class="parts" id="archive"></ul>
         <p class="note">Deleted parts are kept here, in parts/archive next
           to the layouts. Layouts that use one open again once it is
-          restored.</p>
+          restored. The CAD's own modules are only taken off the palette:
+          layouts that use them still open and run.</p>
       </details>
     </div>
 
@@ -878,8 +879,16 @@ function drawPanel() {
 }
 
 function buildTools() {
-  TOOLS = [...CAD_TOOLS, ...Object.keys(info.types).filter(isBlock).sort()
+  // The CAD's modules by their own names unless renamed, and not those
+  // deleted, which layouts still use but are not placed any more.
+  const cad = CAD_TOOLS.filter(([type]) => !deletedCad(type))
+    .map(([type, name]) => [type, (info.types[type] || {}).renamed
+                                  ? label(type) : name]);
+  TOOLS = [...cad, ...Object.keys(info.types).filter(isBlock).sort()
     .map(type => [type, label(type)])];
+  if (!TOOLS.some(([type]) => type === tool) && TOOLS.length) {
+    tool = TOOLS[0][0];
+  }
   const tools = document.getElementById("tools");
   tools.replaceChildren();
   TOOLS.forEach(([type, name], i) => {
@@ -1721,6 +1730,12 @@ async function addPart(file, point) {
 // -- renaming, deleting and restoring parts ----------------------------------
 
 let archive = [];
+const deletedCad = type => !!(info.types[type] || {}).deleted;
+// A part's name as the palette shows it.
+const shown = type => {
+  const cad = CAD_TOOLS.find(([t]) => t === type);
+  return cad && !(info.types[type] || {}).renamed ? cad[1] : label(type);
+};
 
 function button(text, title, onClick) {
   const b = document.createElement("button");
@@ -1730,22 +1745,16 @@ function button(text, title, onClick) {
   return b;
 }
 
-// The dropped parts, each with Rename and Delete, and the archive's
-// parts, each with Restore.
+// Every part in the palette, each with Rename and Delete, and the
+// archive's parts, each with Restore.
 function buildParts() {
   const list = document.getElementById("parts");
   list.replaceChildren();
-  const parts = Object.keys(info.types).filter(isBlock).sort();
-  if (!parts.length) {
-    const li = document.createElement("li");
-    li.className = "note";
-    li.textContent = "No STL parts yet: drag one onto the page.";
-    list.append(li);
-  }
+  const parts = TOOLS.map(([type]) => type);
   for (const type of parts) {
     const li = document.createElement("li");
     const name = document.createElement("span");
-    name.textContent = label(type);
+    name.textContent = shown(type);
     const img = document.createElement("img");
     img.dataset.type = type;
     img.alt = "";
@@ -1757,6 +1766,12 @@ function buildParts() {
              () => deletePart(type)));
     list.append(li);
   }
+  if (!parts.some(isBlock)) {
+    const li = document.createElement("li");
+    li.className = "note";
+    li.textContent = "Drag an STL onto the page to add a part of your own.";
+    list.append(li);
+  }
 
   const shelf = document.getElementById("archive");
   shelf.replaceChildren();
@@ -1766,11 +1781,13 @@ function buildParts() {
     const li = document.createElement("li");
     const name = document.createElement("span");
     const when = document.createElement("small");
-    name.textContent = (part.label || part.name) + " ";
+    name.textContent = (part.builtin ? shown(part.name)
+                        : part.label || part.name) + " ";
     when.textContent = new Date(part.deleted * 1000).toLocaleString();
     name.append(when);
     li.append(name, button("Restore", `Bring ${part.label} back as a part`,
-                           () => restorePart(part.name, part.label)));
+                           () => restorePart(part.name, part.label,
+                                             part.builtin)));
     shelf.append(li);
   }
 }
@@ -1786,7 +1803,7 @@ function partsChanged(result, old, now) {
     // The board's history may have the old name in it.
     history = [];
   }
-  if (tool === old) tool = now || "platform";
+  if (tool === old && now) tool = now;
   buildTools();
   buildParts();
   changed();
@@ -1818,15 +1835,19 @@ async function renamePart(type) {
 
 async function deletePart(type) {
   const old = label(type);
+  const cad = !!(info.types[type] || {}).builtin;
   if (!await askYes(`Move ${old} to the archive? It can be restored ` +
-                    "from there. Layouts that use it will not open until " +
-                    "it is.", "Delete", true)) {
+                    "from there. " + (cad
+                      ? "Layouts that use it still open and run."
+                      : "Layouts that use it will not open until it is."),
+                    "Delete", true)) {
     return;
   }
   try {
     const result = await partAction(
       `/api/parts/${encodeURIComponent(type)}/delete`);
-    partsChanged(result, type, null);
+    // A CAD module stays on the board: only the palette loses it.
+    partsChanged(result, cad ? null : type, null);
     const used = result.layouts.length
       ? ` ${result.layouts.join(", ")} use it, and open again once it is ` +
         "restored." : "";
@@ -1837,10 +1858,11 @@ async function deletePart(type) {
   }
 }
 
-async function restorePart(archived, part) {
-  // Restored as its own name, unless that is taken by a part now.
-  let name = part;
-  if (info.types[partType(name)]) {
+async function restorePart(archived, part, cad) {
+  // Restored as its own name, unless that is taken by a part now. A CAD
+  // module keeps its type, so it is never taken.
+  let name = cad ? "" : part;
+  if (!cad && info.types[partType(name)]) {
     name = await askText(`There is a ${name} already. Restore it as:`,
                          `${name}_2`, "Restore");
     if (!name) return;

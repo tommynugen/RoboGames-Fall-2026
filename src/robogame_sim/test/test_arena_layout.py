@@ -868,8 +868,6 @@ def test_parts_are_renamed_deleted_to_the_archive_and_restored(parts):
     assert "box" in al.PARTS and "crate" not in al.PARTS
     assert placed(al.load("yard"))[0]["type"] == "box"
     with pytest.raises(ValueError):
-        al.rename_part("ramp", "slope")
-    with pytest.raises(ValueError):
         al.rename_part("box", "wall")
 
     # Deleted, twice under one name, and kept in the archive.
@@ -882,8 +880,6 @@ def test_parts_are_renamed_deleted_to_the_archive_and_restored(parts):
     archive = al.archived_parts()
     assert sorted(p["name"] for p in archive) == ["box", "box.2"]
     assert {p["part"] for p in archive} == {"box"}
-    with pytest.raises(ValueError):
-        al.archive_part("wall")
 
     # Restored under its own name, and the layout opens again.
     assert al.restore_part("box") == "box"
@@ -894,6 +890,33 @@ def test_parts_are_renamed_deleted_to_the_archive_and_restored(parts):
     assert al.archived_parts() == []
     with pytest.raises(ValueError):
         al.restore_part("../escape")
+
+
+def test_cad_modules_are_renamed_deleted_and_restored(parts):
+    al.save("yard", {"modules": [{"type": "ramp", "col": 5, "row": 5,
+                                  "rotation": 0}]})
+    # Renamed: the type stays, so layouts are left as they are.
+    assert al.rename_part("ramp", "slope") == ("ramp", [])
+    assert al.PARTS["ramp"].label == "slope"
+    info = al.modules_info()["types"]["ramp"]
+    assert info["label"] == "slope" and info["renamed"] and info["builtin"]
+    with pytest.raises(ValueError):
+        al.rename_part("ramp", "wall")
+
+    # Deleted: in the archive, off the palette, but layouts still open.
+    assert al.archive_part("ramp") == "ramp"
+    assert al.modules_info()["types"]["ramp"]["deleted"]
+    assert [p["name"] for p in al.archived_parts()] == ["ramp"]
+    assert al.archived_parts()[0]["builtin"]
+    assert placed(al.load("yard"))[0]["type"] == "ramp"
+
+    # Restored, under a new name, and back to the CAD's own name.
+    assert al.restore_part("ramp", "big ramp") == "ramp"
+    assert al.archived_parts() == []
+    assert al.PARTS["ramp"].label == "big ramp"
+    al.rename_part("ramp", al.CAD_LABELS["ramp"])
+    assert not al.modules_info()["types"]["ramp"]["renamed"]
+    assert not al.builtin_state()["labels"]
 
 
 def test_part_names_have_spaces_and_files_dashes(parts):
@@ -946,7 +969,9 @@ def test_editor_routes_for_parts(parts):
     assert arena_editor.get("/api/archive")[1]["archive"][0]["part"] == "box"
     status, body = arena_editor.post("/api/archive/box/restore", lambda: {})
     assert status == 200 and body["name"] == "box" and body["archive"] == []
-    assert arena_editor.post("/api/parts/ramp/delete", dict)[0] == 400
+    status, body = arena_editor.post("/api/parts/ramp/delete", dict)
+    assert status == 200 and body["modules"]["types"]["ramp"]["deleted"]
+    assert arena_editor.post("/api/parts/nothing/delete", dict)[0] == 400
 
 
 def bare(*modules):

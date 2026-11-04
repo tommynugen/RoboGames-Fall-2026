@@ -70,6 +70,7 @@ import math
 import os
 import re
 import tempfile
+import time
 import xml.etree.ElementTree as ElementTree
 
 import numpy as np
@@ -121,6 +122,8 @@ PARTS = {
 }
 TYPES = tuple(PARTS)
 BUILT_IN = dict(PARTS)
+# The CAD modules' own names, for one renamed back.
+CAD_LABELS = {kind: part.label for kind, part in BUILT_IN.items()}
 # Dropped STL parts, so they stand out from the CAD's modules.
 BLOCK_COLOUR = (0.910, 0.627, 0.478)
 # What other modules can stand on.
@@ -263,6 +266,11 @@ def refresh_parts():
     for kind in [k for k in PARTS if k not in BUILT_IN and k not in found]:
         del PARTS[kind]
 
+    # The CAD modules' names as renamed in the editor.
+    renamed = builtin_state()["labels"]
+    for kind, part in BUILT_IN.items():
+        part.label = renamed.get(kind, CAD_LABELS[kind])
+
     for kind, path in found.items():
         label = stl_label(path, kind)
         if (kind not in PARTS or PARTS[kind].mesh != path
@@ -380,6 +388,35 @@ def archive_dir():
     return os.path.join(part_dirs()[0], "archive")
 
 
+def builtin_file():
+    """The CAD modules' new names, and which are deleted: they stay
+    module types, so layouts that use them still open and run, but are
+    not in the editor's palette until restored."""
+    return os.path.join(part_dirs()[0], "builtin.json")
+
+
+def builtin_state():
+    try:
+        with open(builtin_file()) as file:
+            data = json.load(file)
+    except (OSError, ValueError):
+        data = {}
+    labels = data.get("labels") if isinstance(data, dict) else None
+    hidden = data.get("deleted") if isinstance(data, dict) else None
+    return {"labels": {k: str(v) for k, v in (labels or {}).items()
+                       if k in BUILT_IN},
+            "deleted": {k: float(v) for k, v in (hidden or {}).items()
+                        if k in BUILT_IN}}
+
+
+def save_builtin_state(state):
+    os.makedirs(part_dirs()[0], exist_ok=True)
+    with open(builtin_file(), "w") as file:
+        json.dump(state, file, indent=2, sort_keys=True)
+        file.write("\n")
+    refresh_parts()
+
+
 def dropped_part(kind):
     """The path of a dropped part, or ValueError for a CAD module or a
     name that is not a part."""
@@ -438,7 +475,19 @@ def layouts_using(kind):
 def rename_part(kind, name):
     """Rename a dropped part, and its modules in the layouts saved in the
     first layout folder. NAME may have spaces. Returns the new type and
-    those layouts' names."""
+    those layouts' names. A CAD module keeps its type, so only its name
+    changes and layouts are left as they are."""
+    if kind in BUILT_IN:
+        name, label = part_name(name)
+        if name in PARTS and name != kind:
+            raise ValueError(f"there is a {PARTS[name].label} already, "
+                             f"pick another name")
+        state = builtin_state()
+        state["labels"][kind] = label
+        if label == CAD_LABELS[kind]:
+            del state["labels"][kind]
+        save_builtin_state(state)
+        return kind, []
     dropped_part(kind)
     name, label = free_name(name, keep=kind)
     target = os.path.join(part_dirs()[0], f"{name}.stl")
@@ -469,7 +518,13 @@ def rename_part(kind, name):
 def archive_part(kind):
     """Move a dropped part to the archive. Layouts that use it are left
     as they are, and open again once it is restored. Returns its name in
-    the archive, which has .2, .3... added if that name is taken."""
+    the archive, which has .2, .3... added if that name is taken. A CAD
+    module is only marked deleted, under its own type."""
+    if kind in BUILT_IN:
+        state = builtin_state()
+        state["deleted"][kind] = time.time()
+        save_builtin_state(state)
+        return kind
     dropped_part(kind)
     os.makedirs(archive_dir(), exist_ok=True)
     name, n = kind, 1
@@ -488,9 +543,11 @@ def archived_parts():
     """The archive, newest first: its name there, the part's own name,
     when it was deleted (seconds since 1970) and size in bytes."""
     folder = archive_dir()
+    parts = [{"name": kind, "part": kind, "label": BUILT_IN[kind].label,
+              "deleted": when, "bytes": 0, "builtin": True}
+             for kind, when in builtin_state()["deleted"].items()]
     if not os.path.isdir(folder):
-        return []
-    parts = []
+        return sorted(parts, key=lambda p: -p["deleted"])
     for file in os.listdir(folder):
         match = ARCHIVED.match(file[:-4])
         if file.lower().endswith(".stl") and match:
@@ -505,6 +562,13 @@ def archived_parts():
 def restore_part(archived, name=None):
     """Bring a part back from the archive, as NAME or the name it had.
     Returns its type."""
+    state = builtin_state()
+    if archived in state["deleted"]:
+        del state["deleted"][archived]
+        save_builtin_state(state)
+        if name:
+            rename_part(archived, name)
+        return archived
     match = ARCHIVED.match(archived or "")
     path = os.path.join(archive_dir(), f"{archived}.stl")
     if not match or not os.path.isfile(path):
@@ -718,10 +782,15 @@ def modules_info():
     """The modules for the editor: label, footprint and height, in metres."""
     info = {}
     refresh_parts()
+    deleted = builtin_state()["deleted"]
 
     for kind, part in PARTS.items():
         lo, hi = mesh_bounds(part.mesh)
         info[kind] = {"label": part.label, "turns": part.turns,
+                      "builtin": kind in BUILT_IN,
+                      "deleted": kind in deleted,
+                      "renamed": part.label != CAD_LABELS.get(kind,
+                                                              part.label),
                       "mount": part.mount,
                       "width": float(hi[1] - lo[1] if part.mount == "side"
                                      else hi[0] - lo[0]),
