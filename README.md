@@ -623,6 +623,31 @@ ROS was not installed where this was checked, and neither was Gazebo, so
 spawning and removing in a real sim is not yet checked). The page's
 script was checked to parse.
 
+### Pairing
+
+The Pairing panel, under Controllers, shows what Bluetooth makes of each
+game controller on this computer, and what is wrong with it. It reads
+`bluetoothctl` and the `/dev/input/jsN` devices every 2 s (`pairing.py`):
+
+- Connected but not bonded: Linux drops its input (the `!bonded` line in
+  the system log), though bluetoothctl says it is connected. Pair.
+- Connected but no joystick device: no js node was made for it. Load the
+  driver (`sudo modprobe joydev`) or Pair.
+- Not trusted: it works, but will not reconnect by itself. Pair.
+- Paired but off: press its PS button, or Connect.
+- Ready on /dev/input/jsN: nothing to do.
+
+Pair forgets the controller, waits up to 20 s to see it again (hold Create
+and PS until the light flashes fast first), then pairs, trusts and
+connects it. Find controllers scans for 15 s for new ones. Steps and
+errors go to the Console tab. Devices that are not controllers, like
+keyd's virtual pointer or a mouse, are left out here and in
+`controller_robots`. Without bluetoothctl only wired and virtual pads are
+listed.
+
+Checked on 2026-11-04 with `test_pairing.py` (10 tests, bluetoothctl
+faked; the full suite passes, 177). Not yet tried on a real controller.
+
 ## Arena layouts
 
 The arena is a 12 x 12 grid of 4 inch (10.16 cm) squares, 48 inches

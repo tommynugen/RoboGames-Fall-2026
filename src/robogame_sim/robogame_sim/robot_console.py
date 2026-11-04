@@ -45,7 +45,7 @@ from rclpy.time import Time
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
-from robogame_sim import arena_layout, autopilot
+from robogame_sim import arena_layout, autopilot, pairing
 from robogame_sim.active_arena import LATCHED, TOPIC as ARENA_TOPIC
 from robogame_sim.autopilot import Autopilot
 from robogame_sim.chase import yaw_from_quaternion
@@ -631,6 +631,8 @@ class RobotConsole(Node):
 def get(console, path):
     """The console's GET routes: (status, body), or None for a path that is
     not the console's."""
+    if path.startswith("/api/pairing"):
+        return pairing.get(console, path)
     if path == "/api/state":
         return 200, console.state()
     if path == "/api/arena":
@@ -643,6 +645,8 @@ def get(console, path):
 
 def post(console, path, read_body):
     """The console's POST routes. read_body gives the request's JSON."""
+    if path.startswith("/api/pairing/"):
+        return pairing.post(console, path, read_body)
     if path == "/api/robots/add":
         ok, result = console.call(console.add_robot_to_world)
         return (200, {"ok": True}) if ok else (400, {"error": result})
