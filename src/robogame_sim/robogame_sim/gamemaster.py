@@ -67,7 +67,8 @@ LOGS_PAGE = os.path.join(HERE, "app_log.html")
 VISION_PAGE = os.path.join(HERE, vision_tab.PAGE_NAME)
 UPKEEP_PAGE = os.path.join(HERE, "upkeep.html")
 CHASE_PAGE = os.path.join(HERE, "chase.html")
-TABS = ("editor", "console", "vision", "chase", "logs", "upkeep")
+SETUP_PAGE = os.path.join(HERE, "setup.html")
+TABS = ("setup", "editor", "console", "vision", "chase", "logs", "upkeep")
 # Changes the editor makes as it is used, not worth a log line each.
 QUIET = ("/api/check",)
 PORT = 8766
@@ -179,11 +180,15 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
                 return self.file(UPKEEP_PAGE, HTML)
             if path == "/chase":
                 return self.file(CHASE_PAGE, HTML)
+            if path == "/setup":
+                return self.file(SETUP_PAGE, HTML)
             if path == "/vision/stream.mjpg":
                 return self.stream()
             if path == "/api/app":
                 return self.reply(200, status(console, sim, book, bridge,
-                                              upkeep, chase))
+                                              upkeep, chase, vision))
+            if path == "/api/setup":
+                return self.reply(200, self.setup_state())
             source = self.answer(
                 ("app", lambda: book.get(self.path)),
                 ("sim", lambda: sim and sim.get(path)),
@@ -197,6 +202,22 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
                 ("editor", lambda: arena_editor.get(path)))
             if self.status >= 400:
                 self.note(source, path)
+
+        def setup_state(self):
+            """All the Setup tab checks, in one reply: None for a part
+            this app does not have, such as the console without ROS."""
+            console_get = (lambda p: (self.console_route("get", p)
+                                      or (0, None))[1])
+            state = console_get("/api/state") if console else None
+            return {
+                "upkeep": upkeep.status() if upkeep else None,
+                "bridge": bridge.status() if bridge else None,
+                "pairing": console_get("/api/pairing") if console else None,
+                "vision": vision.state(),
+                "tags": tags.state(),
+                "perception": nodes.status(),
+                "robots": (state or {}).get("robots", [])
+                if console else None}
 
         def stream(self):
             """The Vision tab's picture, live, as MJPEG."""
@@ -253,13 +274,18 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
     return Handler
 
 
-def status(console, sim, book, bridge=None, upkeep=None, chase=None):
+def status(console, sim, book, bridge=None, upkeep=None, chase=None,
+           vision=None):
     """What the shell's status bar shows: whether ROS is on, the sim's
-    state, the robots and arena the console sees, the upkeep job's and
-    the newest error line."""
+    state, the robots and arena the console sees, the upkeep job's, the
+    arena camera's and the newest error line."""
     reply = {"console": console is not None, "sim": None, "robots": None,
-             "arena": None, "bridge": None, "upkeep": None,
+             "arena": None, "bridge": None, "upkeep": None, "camera": None,
              "logs": book.summary()}
+    if vision is not None:
+        state = vision.state()
+        reply["camera"] = {key: state[key] for key in
+                           ("running", "arena_found", "error", "tags_from")}
     if upkeep is not None and upkeep.job:
         reply["upkeep"] = {"job": upkeep.job, "running": upkeep.running(),
                            "stopped": upkeep.stopped,

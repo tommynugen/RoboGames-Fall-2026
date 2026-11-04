@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setup</title>
+<style>
+  /* The colours of the other tabs. */
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2433; --muted: #5d6677;
+    --line: #d9dde4; --accent: #2f5fb4; --accent-ink: #ffffff;
+    --bad: #d23c3c; --good: #2e8b57; --warn: #a86a00; --feed: #0d1117;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+      --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+      --bad: #f06b6b; --good: #5cc28a; --warn: #e0a640; --feed: #000;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+    --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+    --bad: #f06b6b; --good: #5cc28a; --warn: #e0a640; --feed: #000;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  button, input {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); font-weight: 600;
+  }
+  input[type=number] { width: 90px; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px; }
+  .intro { color: var(--muted); margin: 0 0 16px; }
+  ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+  li {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px;
+    display: grid; grid-template-columns: 28px 1fr; gap: 4px 12px;
+  }
+  li.now { border-color: var(--accent);
+           box-shadow: inset 0 0 0 1px var(--accent); }
+  .n {
+    width: 28px; height: 28px; border-radius: 50%; display: grid;
+    place-items: center; font-weight: 600; font-size: 13px;
+    border: 1px solid var(--line); color: var(--muted);
+  }
+  li.done .n { background: var(--good); border-color: var(--good);
+               color: #fff; }
+  li.now .n { background: var(--accent); border-color: var(--accent);
+              color: var(--accent-ink); }
+  .head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  h2 { font-size: 15px; margin: 0; }
+  .state { font-size: 13px; color: var(--muted); }
+  .state.good { color: var(--good); }
+  .state.warn { color: var(--warn); }
+  .state.bad { color: var(--bad); }
+  .body { grid-column: 2; display: flex; flex-direction: column; gap: 8px; }
+  .body p { margin: 0; color: var(--muted); font-size: 13px; }
+  li.done:not(.open) .body { display: none; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .bar label { display: flex; gap: 6px; align-items: center;
+               font-size: 13px; color: var(--muted); }
+  .bar a { margin-left: auto; font-size: 13px; color: var(--accent); }
+  .toggle { margin-left: auto; font-size: 12px; padding: 2px 8px; }
+  .rows { display: grid; gap: 4px; font-size: 13px; }
+  .rows div { display: flex; gap: 8px; align-items: center; }
+  .rows span:not(.dot) { flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none;
+         background: var(--muted); }
+  .dot.good { background: var(--good); }
+  .dot.warn { background: var(--warn); }
+  .dot.bad { background: var(--bad); }
+  #feed { max-width: 360px; border-radius: 6px; background: var(--feed); }
+  #feed[hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <p class="intro">Gets the real arena ready, step by step. Each step
+    checks itself every 2 s and turns green when done; the blue one is
+    next. Done steps fold away: click Show to open one again. The tab
+    named on the right of a step has the rest of its controls.</p>
+  <ol id="steps">
+    <li id="build">
+      <span class="n">1</span>
+      <div class="head"><h2>Build</h2><span class="state"></span>
+        <button class="toggle">Show</button></div>
+      <div class="body">
+        <p>Runs <code>colcon build --symlink-install</code>. Needed after a
+          pull or an arena_perception copy; skip it if nothing changed.</p>
+        <div class="bar">
+          <button class="primary" data-act="build">Build</button>
+          <button data-act="skip">Skip</button>
+          <a href="/#upkeep" target="_top">Upkeep tab</a></div>
+      </div>
+    </li>
+    <li id="bridge">
+      <span class="n">2</span>
+      <div class="head"><h2>Start the BLE bridge</h2><span class="state"></span>
+        <button class="toggle">Show</button></div>
+      <div class="body">
+        <p>Connects the real robots by Bluetooth. Switch them on first.</p>
+        <div class="bar">
+          <label>Robots <input type="number" id="expected" min="0" step="1"
+            value="2"></label>
+          <button class="primary" data-act="bridge">Start bridge</button>
+          <a href="/#console" target="_top">Robot console tab</a></div>
+        <div class="rows" id="bridge-rows"></div>
+      </div>
+    </li>
+    <li id="pair">
+      <span class="n">3</span>
+      <div class="head"><h2>Pair controllers</h2><span class="state"></span>
+        <button class="toggle">Show</button></div>
+      <div class="body">
+        <p>Hold Create and PS on each controller until its light flashes,
+          then Find controllers and Pair.</p>
+        <div class="bar">
+          <button class="primary" data-act="scan">Find controllers</button>
+          <a href="/#console" target="_top">Robot console tab</a></div>
+        <div class="rows" id="pair-rows"></div>
+      </div>
+    </li>
+    <li id="camera">
+      <span class="n">4</span>
+      <div class="head"><h2>Camera and arena size</h2><span class="state"></span>
+        <button class="toggle">Show</button></div>
+      <div class="body">
+        <p>Point the camera down at the arena so it sees the corner tags 1
+          to 4, and give the arena's side between them.</p>
+        <div class="bar">
+          <label>Camera <input id="source" placeholder="0, /dev/video0, URL"
+            size="14"></label>
+          <label>Side, cm <input type="number" id="arena_cm" step="0.5"></label>
+          <button class="primary" data-act="camera">Start camera</button>
+          <a href="/#vision" target="_top">Vision tab</a></div>
+        <img id="feed" alt="Arena camera" hidden>
+      </div>
+    </li>
+    <li id="tags">
+      <span class="n">5</span>
+      <div class="head"><h2>Map robot tags</h2><span class="state"></span>
+        <button class="toggle">Show</button></div>
+      <div class="body">
+        <p>Say which tag is on which robot. Tags the camera sees that are
+          not corners or mapped yet are listed with a Map button.</p>
+        <div class="bar">
+          <label>Tag <input type="number" id="map-tag" min="5" step="1"></label>
+          <label>Robot <input type="number" id="map-robot" min="0"
+            step="1"></label>
+          <button class="primary" data-act="map">Map</button>
+          <a href="/#vision" target="_top">Vision tab</a></div>
+        <div class="rows" id="tag-rows"></div>
+      </div>
+    </li>
+    <li id="assign">
+      <span class="n">6</span>
+      <div class="head"><h2>Assign controllers</h2><span class="state"></span>
+        <button class="toggle">Show</button></div>
+      <div class="body">
+        <p>Runs arena_perception's assign_controllers for these robots:
+          press a button on each controller in turn, as it asks on the Logs
+          tab under Teleop.</p>
+        <div class="bar">
+          <label>Robots <input id="assign-robots" placeholder="1 2"
+            size="10"></label>
+          <button class="primary" data-act="assign">Assign</button>
+          <a href="/#console" target="_top">Robot console tab</a></div>
+      </div>
+    </li>
+    <li id="go">
+      <span class="n">7</span>
+      <div class="head"><h2>Go</h2><span class="state"></span>
+        <button class="toggle">Show</button></div>
+      <div class="body">
+        <p>Robots the console sees. Drive them with their controllers, or
+          make them autonomous and send them places on the Robot
+          console.</p>
+        <div class="rows" id="go-rows"></div>
+        <div class="bar">
+          <a href="/#console" target="_top">Robot console tab</a></div>
+      </div>
+    </li>
+  </ol>
+</main>
+<script src="dialogs.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const SKIP = "setup.skipBuild";
+const opened = new Set();  // done steps opened again by hand
+
+async function api(path, body) {
+  try {
+    const reply = await fetch(path, body === undefined ? { cache: "no-store" }
+      : { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body) });
+    const data = await reply.json().catch(() => ({}));
+    return reply.ok ? data : { error: data.error || reply.statusText,
+                               status: reply.status };
+  } catch (error) {
+    return { error: String(error) };
+  }
+}
+
+function row(look, text, button) {
+  const div = document.createElement("div");
+  const dot = document.createElement("span");
+  dot.className = `dot ${look || ""}`;
+  const span = document.createElement("span");
+  span.textContent = text;
+  div.append(dot, span);
+  if (button) div.append(button);
+  return div;
+}
+
+function button(text, act) {
+  const node = document.createElement("button");
+  node.textContent = text;
+  node.addEventListener("click", act);
+  return node;
+}
+
+function fill(id, rows, empty) {
+  $(id).replaceChildren(...(rows.length ? rows
+    : [row("", empty)]));
+}
+
+// Each check gives [look, text]: look "good" marks the step done.
+const said = {};  // the last error a button gave, by step
+function mark(step, look, text) {
+  const li = $(step);
+  const state = li.querySelector(".state");
+  const error = said[step];
+  state.textContent = error ? error : text;
+  state.className = `state ${error ? "bad" : look || ""}`;
+  li.classList.toggle("done", look === "good");
+}
+
+let filled = false;  // the camera fields, once from the app
+
+async function poll() {
+  const all = await api("/api/setup");
+  if (all.error) return;  // the shell's red bar says the app is gone
+  const none = { missing: true };
+  const upkeep = all.upkeep || none, bridge = all.bridge || none;
+  const pairing = all.pairing || none, vision = all.vision;
+  const tags = all.tags, nodes = all.perception;
+
+  // 1. Build
+  let skipped = false;
+  try { skipped = localStorage.getItem(SKIP) === "1"; } catch (e) { }
+  if (upkeep.missing || !upkeep.root) {
+    mark("build", "", "No checkout of the repo here.");
+  }
+  else if (upkeep.job === "build" && upkeep.running) {
+    mark("build", "warn", "Building…");
+  } else if (upkeep.job === "build" && upkeep.exit === 0) {
+    mark("build", "good", "Built.");
+  } else if (upkeep.job === "build" && upkeep.exit) {
+    mark("build", "bad", `Failed (exit ${upkeep.exit}): see Upkeep.`);
+  } else if (skipped) mark("build", "good", "Skipped.");
+  else mark("build", "", "Not built since the app started.");
+
+  // 2. Bridge
+  const links = bridge.robots ? Object.entries(bridge.robots) : [];
+  fill("bridge-rows", links.map(([robot, state]) => row(
+    { connected: "good", lost: "bad" }[state] || "warn",
+    `Robot ${robot}: ${state}`)), "No robots seen yet.");
+  if (bridge.missing) {
+    mark("bridge", "", "Not in this app.");
+  } else if (bridge.state === "found") {
+    mark("bridge", "good", `${links.length} robot${links.length === 1
+      ? "" : "s"} connected.`);
+  } else if (bridge.running) mark("bridge", "warn", `Bridge ${bridge.state}…`);
+  else mark("bridge", bridge.error ? "bad" : "",
+            bridge.error || (bridge.exit ? `Stopped (exit ${bridge.exit}).`
+              : "Not started."));
+  document.querySelector('[data-act="bridge"]').textContent =
+    bridge.running ? "Stop bridge" : "Start bridge";
+
+  // 3. Pairing
+  const pads = pairing.controllers || [];
+  fill("pair-rows", pads.map(pad => row(
+    { ok: "good", bad: "bad" }[pad.state] || "warn",
+    `${pad.name} (${pad.address}): ${pad.problem}`,
+    pad.action && button(pad.action === "pair" ? "Pair" : "Connect",
+      () => act("pair", `/api/pairing/${pad.action === "pair" ? "pair"
+        : "connect"}`, { address: pad.address })))),
+    pairing.missing ? "Needs ROS sourced."
+      : "No controllers seen.");
+  const ready = pads.filter(pad => pad.state === "ok").length;
+  if (pairing.missing) mark("pair", "", "Needs ROS sourced.");
+  else if (ready) mark("pair", "good", `${ready} controller${ready === 1
+    ? "" : "s"} ready.`);
+  else if (pairing.scanning) mark("pair", "warn", "Looking…");
+  else mark("pair", pairing.error ? "bad" : "", pairing.error
+    || (pairing.available === false ? "No bluetoothctl here."
+      : "No controller ready."));
+
+  // 4. Camera
+  {
+    if (!filled) {
+      $("source").value = vision.settings.source;
+      $("arena_cm").value = vision.settings.arena_cm;
+      filled = true;
+    }
+    const feed = $("feed");
+    if (vision.running && feed.hidden) {
+      feed.src = `/vision/stream.mjpg?${Date.now()}`;
+    } else if (!vision.running && !feed.hidden) feed.removeAttribute("src");
+    feed.hidden = !vision.running;
+    document.querySelector('[data-act="camera"]').textContent =
+      vision.running ? "Save" : "Start camera";
+    if (vision.arena_found) {
+      mark("camera", "good", `Corners found, ${vision.settings.arena_cm} cm.`);
+    } else if (vision.error) mark("camera", "bad", vision.error);
+    else if (vision.running || vision.tags_from) {
+      mark("camera", "warn", "Corner tags 1 to 4 not all seen.");
+    } else mark("camera", "", "Camera off.");
+  }
+
+  // 5. Robot tags
+  const map = tags.map || {};
+  const seen = new Set(Object.keys(map).map(Number));
+  const free = (vision.tags || []).filter(tag =>
+    tag.id > 4 && !seen.has(tag.id));
+  const tagRows = Object.entries(tags.robots || {}).map(([robot, entry]) =>
+    row(entry.state === "seen" ? "good" : "warn",
+        `Tag ${entry.tag} is robot ${robot}: ${entry.state}`));
+  for (const tag of free) {
+    tagRows.push(row("", `Tag ${tag.id} seen, not mapped`,
+      button("Map", () => {
+        $("map-tag").value = tag.id;
+        $("map-robot").focus();
+      })));
+  }
+  fill("tag-rows", tagRows, "No tags mapped or seen.");
+  const mapped = Object.values(tags.robots || {});
+  if (!mapped.length) mark("tags", "", "No tags mapped.");
+  else if (mapped.every(entry => entry.state !== "not seen")) {
+    mark("tags", "good", `${mapped.length} robot${mapped.length === 1 ? ""
+      : "s"} placed by their tags.`);
+  } else mark("tags", "warn", "A mapped robot is not seen.");
+  if (!$("assign-robots").value && mapped.length) {
+    $("assign-robots").placeholder = Object.keys(tags.robots).join(" ");
+  }
+
+  // 6. Assign controllers
+  const runner = nodes.nodes && nodes.nodes.assign_controllers;
+  const file = nodes.controllers || {};
+  const count = Object.keys(file.robots || {}).length;
+  if (all.robots === null) mark("assign", "", "Needs ROS sourced.");
+  else if (runner.running) mark("assign", "warn",
+    "Assigning: press a button on each controller.");
+  else if (runner.exit === 0) mark("assign", "good", "Assigned.");
+  else if (runner.exit) mark("assign", "bad",
+    `Failed (exit ${runner.exit}): see Logs.`);
+  else mark("assign", "", count ? `${count} in controllers.yaml.`
+    : "Not run.");
+
+  // 7. Go
+  const list = all.robots || [];
+  fill("go-rows", list.map(robot => row(
+    robot.autonomous ? "good" : "",
+    `Robot ${robot.id}${robot.autonomous ? ", autonomous" : ""}`,
+    button(robot.autonomous ? "Hand back" : "Autonomous", () =>
+      act("go", `/api/robots/${robot.id}`,
+          { autonomous: !robot.autonomous })))),
+    all.robots === null ? "Needs ROS sourced." : "No robots yet.");
+  mark("go", list.length ? "good" : "", list.length
+    ? `${list.length} robot${list.length === 1 ? "" : "s"} ready.`
+    : "No robots yet.");
+
+  // The first step not done is next.
+  let next = null;
+  for (const li of document.querySelectorAll("#steps > li")) {
+    li.classList.toggle("open", opened.has(li.id));
+    li.querySelector(".toggle").hidden = !li.classList.contains("done");
+    li.querySelector(".toggle").textContent =
+      opened.has(li.id) ? "Hide" : "Show";
+    if (!next && !li.classList.contains("done")) next = li;
+    li.classList.toggle("now", li === next);
+  }
+}
+
+// A button's call: its error shows on the step until the next one.
+async function act(step, path, body) {
+  const reply = await api(path, body);
+  said[step] = reply.error || null;
+  await poll();
+  return reply;
+}
+
+const ACTS = {
+  build: () => act("build", "/api/upkeep", { job: "build" }),
+  skip: () => {
+    try { localStorage.setItem(SKIP, "1"); } catch (e) { }
+    poll();
+  },
+  bridge: () => document.querySelector('[data-act="bridge"]').textContent
+    .startsWith("Stop") ? act("bridge", "/api/bridge/stop", {})
+    : act("bridge", "/api/bridge",
+          { expected_robots: Number($("expected").value) || 0 }),
+  scan: () => act("pair", "/api/pairing/scan", {}),
+  camera: async () => {
+    const reply = await act("camera", "/api/vision", {
+      source: $("source").value.trim() || "0",
+      arena_cm: Number($("arena_cm").value) });
+    if (!reply.error && !reply.running) {
+      await act("camera", "/api/vision/start", {});
+    }
+  },
+  map: () => act("tags", "/api/tag_robots", {
+    tag: Number($("map-tag").value), robot: Number($("map-robot").value) }),
+  assign: () => {
+    const text = $("assign-robots").value.trim()
+      || $("assign-robots").placeholder;
+    return act("assign", "/api/perception/assign", {
+      robots: text.split(/[\s,]+/).filter(Boolean).map(Number) });
+  },
+};
+
+for (const node of document.querySelectorAll("[data-act]")) {
+  node.addEventListener("click", ACTS[node.dataset.act]);
+}
+for (const li of document.querySelectorAll("#steps > li")) {
+  li.querySelector(".toggle").addEventListener("click", () => {
+    if (opened.has(li.id)) opened.delete(li.id);
+    else opened.add(li.id);
+    poll();
+  });
+}
+
+(async function loop() {
+  await poll();
+  setTimeout(loop, 2000);
+})();
+</script>
+</body>
+</html>

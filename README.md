@@ -292,14 +292,50 @@ buttons, or Logs after a failed run. The Logs tab shows in red how many
 errors came since it was last looked at, and a new error pops up in the
 bottom corner for 15 s while another tab shows, with Show to open Logs.
 If the app stops answering, a red bar says how to start it again, and
-the page reconnects by itself. Alt+1 to Alt+6 switch tabs, and
-opening http://localhost:8766 with no tab named opens the one shown last.
+the page reconnects by itself. Alt+1 to Alt+7 switch tabs, in the
+order Setup, Arena editor, Robot console, Vision, Chase, Logs, Upkeep,
+and opening http://localhost:8766 with no tab named opens the one shown
+last (Setup the first time). Once the arena camera is on, a Camera chip
+says whether it sees the four corner tags; it opens the Vision tab. Each
+tab's page title is its tab's name.
 GET `/api/app` gives what the bar shows.
 
 Checked 2026-11-04: tests (`test_app_log.py`, `test_sim_runner.py`) and
 the page in Chromium (Playwright) without ROS: the badge and pop-up for a
 404, Alt+3, the tab kept for a bare URL and the red bar once the app was
 stopped. Not yet run with ROS or a sim.
+
+## The app's Setup tab
+
+The Setup tab, first of the Gamemaster's tabs, walks through getting the
+real arena going, one card a step, each checked every 2 s:
+
+1. Build: `colcon build --symlink-install`, as the Upkeep tab runs it, or
+   Skip when nothing changed.
+2. Start the BLE bridge, for the number of robots switched on. Done once
+   one is connected.
+3. Pair controllers: Find controllers, then Pair or Connect on each.
+   Done once one is ready.
+4. Camera and arena size: the camera (0, /dev/video0 or a URL) and the
+   arena's side in cm between the corner tags, then Start camera. Done
+   once tags 1 to 4 are all seen; the picture shows under it.
+5. Map robot tags: which tag is on which robot. Tags seen and not mapped
+   are listed with a Map button. Done once each mapped robot is seen.
+6. Assign controllers: runs arena_perception's assign_controllers for the
+   robots given (the mapped ones when blank).
+7. Go: the robots the console sees, each with Autonomous and Hand back.
+
+Done steps turn green and fold away, and the next one is outlined in
+blue. Each card links the tab with the rest of its controls, and a
+button's error shows on its card. GET `/api/setup` gives all the checks
+in one reply, with null for a part the app has not got (the console's
+without ROS).
+
+Checked 2026-11-04: tests (`test_setup.py`) and the tab in Chromium
+(Playwright) without ROS or OpenCV: Skip folded Build and moved blue to
+the bridge, Map mapped tag 7 to robot 1, Start camera showed OpenCV's
+error on its card, and Alt+4 opened Vision. Not yet run with ROS, a
+camera, the bridge or controllers.
 
 ## The app's Logs tab
 
