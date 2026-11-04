@@ -204,6 +204,9 @@ class RobotConsole(Node):
         self.override = p["layout"] or None
         # The BridgeRunner the app starts the bridge with, if any.
         self.bridge = None
+        # The camera's robot tags (perception.TagRobots), to show which
+        # tag gives each robot its place.
+        self.tag_robots = None
 
         # The arena in use, and the one loading.
         self.arena_key = None
@@ -557,6 +560,8 @@ class RobotConsole(Node):
                 "drivers": robot.drivers,
                 "controller": self.controller_of(robot.id),
                 "link": robot.link,
+                "tag": (self.tag_robots.tag_of(robot.id)
+                        if self.tag_robots is not None else None),
             })
 
         snapshot = {

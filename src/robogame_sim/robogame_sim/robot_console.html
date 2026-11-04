@@ -198,6 +198,23 @@
   .health.bad { color: var(--bad); }
   #pairing-head { display: flex; align-items: center; gap: 8px; }
   #pairing-head h2 { flex: 1; }
+  .node-row { display: flex; align-items: center; gap: 6px;
+              margin-top: 6px; font-size: 13px; }
+  .node-row span:not(.dot) { flex: 1; }
+  .node-row small, h3.sub small { color: var(--muted); }
+  form.inline { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+                margin-top: 6px; font-size: 13px; }
+  form.inline input[type=number] { width: 56px; }
+  #yaml-address, #assign-robots { flex: 1; min-width: 0; }
+  h3.sub { font-size: 12px; color: var(--muted); text-transform: uppercase;
+           letter-spacing: .04em; margin: 14px 0 4px; }
+  .yaml-row { display: flex; gap: 6px; align-items: center; font-size: 13px;
+              font-variant-numeric: tabular-nums; }
+  .yaml-row code { flex: 1; }
+  .yaml-row button { padding: 1px 8px; }
+  #assign-out { font-size: 11.5px; max-height: 120px; overflow: auto;
+                background: var(--bg); padding: 6px; border-radius: 6px;
+                white-space: pre-wrap; margin: 6px 0 0; }
   #bridge-row { display: flex; align-items: center; gap: 6px; }
   #bridge-row #bridge-state { flex: 1; font-size: 13px; }
 
@@ -288,6 +305,37 @@
         <button id="scan" title="Look for controllers in pairing mode">
           Find controllers</button></div>
       <div id="pairing"><p class="empty">Checking Bluetooth…</p></div>
+    </section>
+    <section class="panel" id="perception">
+      <h2>Perception nodes</h2>
+      <div class="node-row"><span class="dot" id="autonomy_node-dot"></span>
+        <span>autonomy_node <small>drives robot 1 to a goal</small></span>
+        <button data-node="autonomy_node">Start</button></div>
+      <form id="goal-form" class="inline">
+        Goal x <input type="number" id="goal-x" step="0.05" value="0">
+        y <input type="number" id="goal-y" step="0.05" value="0"> m
+        <button>Send</button></form>
+      <div class="node-row"><span class="dot" id="gazebo_viz_node-dot"></span>
+        <span>gazebo_viz_node <small>tags as markers</small></span>
+        <button data-node="gazebo_viz_node">Start</button></div>
+      <h3 class="sub">Controllers file</h3>
+      <div id="yaml-rows"></div>
+      <form id="yaml-add" class="inline">
+        Robot <input type="number" id="yaml-robot" min="0" step="1" required>
+        <input id="yaml-address" placeholder="A0:5A:5E:EE:F8:FA" required
+               pattern="[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}">
+        <button>Set</button></form>
+      <form id="assign-form" class="inline">
+        <input id="assign-robots" placeholder="robots, as 1 2 3">
+        <button id="assign-button"
+          title="Press a button on each robot's controller in turn">
+          Assign by button</button></form>
+      <pre id="assign-out" hidden></pre>
+      <p class="note">controllers.yaml says which PS4 controller drives
+        each real robot when the bridge's robot_control.launch.py starts.
+        Assign by button runs assign_controllers: press a button on each
+        robot's controller in the order given. autonomy_node reads robot
+        1's place from the camera (map its tag on the Vision tab).</p>
     </section>
   </div>
 
@@ -741,7 +789,8 @@ function select(id) {
 
 function robotSummary(robot) {
   if (!robot.pose && robot.link) {
-    return `${LINKS[robot.link] || robot.link}, no position`;
+    return `${LINKS[robot.link] || robot.link}, no position` +
+      (robot.tag == null ? " (map its tag on Vision)" : "");
   }
   if (!robot.pose) return "no pose yet";
   if (!robot.fresh) return "pose lost";
@@ -893,7 +942,8 @@ function renderDetail() {
     `x ${fmt(robot.pose[0])} m  y ${fmt(robot.pose[1])} m  ` +
     `heading ${degrees(robot.pose[2])}°` + (robot.fresh ? "" : "  (stale)") :
     robot.link ? `BLE ${LINKS[robot.link] || robot.link}, no position ` +
-    "from the arena camera" : "no pose yet";
+    "from the arena camera" + (robot.tag == null ? "" :
+      ` (tag ${robot.tag} not seen)`) : "no pose yet";
   if (!pilot) return;
   document.getElementById("pilot-status").textContent = pilot.status;
   document.getElementById("pilot-last").textContent =
@@ -944,7 +994,8 @@ function buildDetail(robot) {
       state.controllers.find(c => c.address === robot.controller);
     parts.push(h("p", { class: "note" },
       !robot.pose ? "With no position from the arena camera it can only " +
-            "be driven by hand." :
+            "be driven by hand. Map its tag on the Vision tab to give it " +
+            "one." :
       pad ? `${pad.name || "A controller"} drives it. Making it ` +
             "autonomous takes the controller off it until it is manual " +
             "again." :
@@ -1156,6 +1207,97 @@ async function sendPairing(path, body) {
 document.getElementById("scan").onclick =
   () => sendPairing("/api/pairing/scan", {});
 
+// -- arena_perception ---------------------------------------------------------
+
+let perception = null;
+let builtYaml = "";
+
+function renderPerception() {
+  if (!perception) return;
+  for (const [name, node] of Object.entries(perception.nodes)) {
+    const button = document.querySelector(`button[data-node="${name}"]`);
+    if (button) {
+      button.textContent = node.running ? "Stop" : "Start";
+      document.getElementById(`${name}-dot`).className = "dot" +
+        (node.running ? " on" : node.exit ? " bad" : "");
+    }
+  }
+  const assign = perception.nodes.assign_controllers;
+  document.getElementById("assign-button").textContent =
+    assign.running ? "Stop assigning" : "Assign by button";
+  const out = document.getElementById("assign-out");
+  out.hidden = !assign.lines.length;
+  out.textContent = assign.lines.join("\n");
+
+  const yaml = perception.controllers;
+  const sign = JSON.stringify(yaml);
+  if (sign === builtYaml) return;
+  builtYaml = sign;
+  const box = document.getElementById("yaml-rows");
+  const rows = Object.entries(yaml.robots).map(([robot, address]) =>
+    h("div", { class: "yaml-row" }, `Robot ${robot}`, h("code", {}, address),
+      h("button", { title: `Take robot ${robot}'s controller out of the file`,
+        onclick: () => saveYaml(robot, null) }, "×")));
+  if (!rows.length) rows.push(h("p", { class: "empty" },
+    yaml.error || (yaml.path ? "No controllers in the file." : "")));
+  else if (yaml.error) rows.push(h("p", { class: "warn" }, yaml.error));
+  box.replaceChildren(...rows);
+  box.title = yaml.path || "";
+}
+
+async function pollPerception() {
+  try {
+    perception = await api("/api/perception");
+  } catch { return; }
+  renderPerception();
+}
+
+async function sendPerception(path, body) {
+  try {
+    perception = await api(path, body);
+    renderPerception();
+  } catch (error) {
+    setStatus(error.message, true, 4000);
+  }
+}
+
+function saveYaml(robot, address) {
+  const robots = { ...perception.controllers.robots };
+  for (const [r, a] of Object.entries(robots)) {
+    if (address && a.toUpperCase() === address.toUpperCase()) delete robots[r];
+  }
+  if (address) robots[robot] = address; else delete robots[robot];
+  sendPerception("/api/perception/controllers", { robots });
+}
+
+document.querySelectorAll("button[data-node]").forEach(button =>
+  button.addEventListener("click", () => {
+    const name = button.dataset.node;
+    const on = perception && perception.nodes[name].running;
+    sendPerception(`/api/perception/${name}/${on ? "stop" : "start"}`, {});
+  }));
+document.getElementById("goal-form").addEventListener("submit", event => {
+  event.preventDefault();
+  sendPerception("/api/perception/goal", {
+    x: +document.getElementById("goal-x").value,
+    y: +document.getElementById("goal-y").value });
+});
+document.getElementById("yaml-add").addEventListener("submit", event => {
+  event.preventDefault();
+  saveYaml(document.getElementById("yaml-robot").value,
+           document.getElementById("yaml-address").value.trim());
+});
+document.getElementById("assign-form").addEventListener("submit", event => {
+  event.preventDefault();
+  if (perception && perception.nodes.assign_controllers.running) {
+    sendPerception("/api/perception/assign_controllers/stop", {});
+    return;
+  }
+  const robots = document.getElementById("assign-robots").value
+    .split(/[\s,]+/).filter(Boolean).map(Number);
+  sendPerception("/api/perception/assign", { robots });
+});
+
 // -- polling -------------------------------------------------------------------
 
 let layouts = [];
@@ -1224,6 +1366,8 @@ document.addEventListener("keydown", event => {
   setInterval(poll, 150);
   pollPairing();
   setInterval(pollPairing, 2000);
+  pollPerception();
+  setInterval(pollPerception, 1000);
 })();
 </script>
 </body>

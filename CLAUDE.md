@@ -47,6 +47,7 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `vision.py` + `vision.html` | the app's Vision tab (`#vision`, page at `/vision`): arena camera, AprilTags, robot places, `/arena/tags` |
 | `chase_runs.py` + `chase.html` | the app's Chase tab (`#chase`, page at `/chase`): runs `chase_sim --json` and the Gazebo chase suite, scores them, `/api/chase` |
 | `app_log.py` + `app_log.html` | the app's Logs tab (`#logs`, page at `/logs`): log lines by source (editor, console, teleop, vision, sim, bridge, app) and `/api/logs` |
+| `perception.py` | real robots' places from their camera tags (`/model/robot_N/odometry`), arena_perception's autonomy_node, gazebo_viz_node, assign_controllers and controllers.yaml from the console |
 | `sim_runner.py`, `sim_camera.py` | the editor's Launch in Gazebo with every launch option, and its Gazebo camera panel (talks to `fpv_toggle`) |
 | `active_arena.py` | publishes the arena in use on `/arena/layout`, latched; the sim launch starts one |
 | `robot_sdf.py`, `spawning.py`, `fpv_toggle.py` | robot model, spawn placement, FPV camera and the 1 to 4 views |

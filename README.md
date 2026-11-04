@@ -393,6 +393,46 @@ test camera end to end, the routes and stream over HTTP) and the tab in
 Chromium, light and dark, on the `test` camera without ROS, at 20 fps.
 Not yet run on the real arena camera or with ROS.
 
+## Real robots placed by the camera
+
+To make a real robot autonomous, the console needs its place. Each real
+robot carries an AprilTag; say which on the Vision tab's Robot tags box
+(tag, robot number, and a turn in degrees if the tag is stuck on facing
+another way than the robot). From then on, every time the tag is seen on
+`/arena/tags` (from the Vision tab's camera or from `apriltag_node`), the
+app publishes that robot's place on `/model/robot_N/odometry`, as the sim
+does, so the Robot console shows it on the arena and its Autonomous button
+works for a robot the BLE bridge has found. The map is kept in
+`~/.local/share/robogame_sim/tag_robots.json`.
+
+The camera's cm, from the top left corner (tag 3) with y down the picture,
+become m on the arena with its middle at 0, 0 and y up the picture:
+`x = (x_cm - side/2) / 100`, `y = (side/2 - y_cm) / 100`, side being the
+Vision tab's arena side, so set that to the real arena's. A robot faces
+the way its tag's top points. A robot whose odometry another node
+publishes, such as the sim's, is left to it and shows as such.
+
+The console's Perception nodes box runs arena_perception's programs as a
+terminal would: `autonomy_node` (drives robot 1 to the goal typed there,
+sent on `/robot_1/goal`, from robot 1's odometry, so from the camera
+once its tag is mapped) and `gazebo_viz_node` (the tags as markers), each
+with Start and Stop. It also shows `controllers.yaml`, which PS4
+controller drives each real robot under `robot_control.launch.py`: set or
+remove a robot's address there, or press Assign by button, which runs
+`assign_controllers` with the robots given; its prompts show in the box.
+The file is the package's own (the source copy with a symlink install),
+read again each second. `perception.py` does both: GET and POST
+`/api/tag_robots`, GET `/api/perception`, POST
+`/api/perception/<node>/start|stop`, `/api/perception/goal`,
+`/api/perception/controllers` and `/api/perception/assign`.
+
+Checked 2026-11-04: tests (`test_perception.py`: cm to arena poses and
+headings, the tag map, odometry out with a stand-in node, left alone when
+the sim has the topic, controllers.yaml read, checked and written, the
+nodes run with a stand-in `ros2`, the routes over HTTP) and both boxes in
+Chromium with the app's answers stood in. Not yet run with ROS, the real
+camera or real robots.
+
 ## The app's Chase tab
 
 The Chase tab (`#chase`) runs the chase tests and shows their scores, so

@@ -91,6 +91,15 @@
             margin: 8px 0 0; font-weight: 600; text-transform: uppercase;
             letter-spacing: .04em; }
   form .bar { grid-column: 1 / -1; margin-top: 6px; }
+  form.map { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  form.map label { display: flex; gap: 4px; align-items: center; }
+  form.map input[type=number] { width: 64px; }
+  .maps { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+  .maps li { display: flex; gap: 8px; align-items: center; padding: 3px 0;
+             border-bottom: 1px solid var(--line); }
+  .maps li span { flex: 1; }
+  .maps .off { color: var(--muted); }
+  .maps .bad { color: var(--bad); }
   .hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
 </style>
 </head>
@@ -132,6 +141,23 @@
     <section>
       <h2>Tags</h2>
       <div id="tags"></div>
+    </section>
+    <section>
+      <h2>Robot tags</h2>
+      <div id="tag-robots"><p class="empty">No tags mapped.</p></div>
+      <form id="tag-form" class="map">
+        <label>Tag <input type="number" id="map-tag" min="5" step="1"
+          required></label>
+        <label>Robot <input type="number" id="map-robot" min="0" step="1"
+          required></label>
+        <label>Turn ° <input type="number" id="map-turn" step="any"
+          value="0"></label>
+        <button class="primary">Map</button>
+      </form>
+      <p class="hint">Says which tag is on which real robot. Each mapped
+        robot's place goes out on <code>/model/robot_N/odometry</code>, so
+        the Robot console can make it autonomous. Turn is for a tag stuck
+        on facing another way than the robot.</p>
     </section>
     <section>
       <h2>Settings</h2>
@@ -185,6 +211,8 @@ const DEFAULTS = {
   jpeg_quality: 75, draw_tags: true, draw_arena: true, draw_grid: false,
 };
 let state = null;
+let tagRobots = null;
+let builtMaps = "";
 let formFilled = false;
 let streaming = false;
 
@@ -260,12 +288,57 @@ function table() {
     return;
   }
   const cell = (v, digits = 0) => v === undefined ? "–" : v.toFixed(digits);
+  const mapped = (tagRobots && tagRobots.map) || {};
   const rows = tags.map((t) => `<tr><td>${t.id}${CORNERS.includes(t.id)
-    ? " corner" : " robot"}</td><td>${t.x}, ${t.y}</td>`
+    ? " corner" : mapped[t.id] ? ` robot ${mapped[t.id].robot}`
+    : " robot"}</td><td>${t.x}, ${t.y}</td>`
     + `<td>${cell(t.x_cm, 1)}</td><td>${cell(t.y_cm, 1)}</td>`
     + `<td>${cell(t.yaw)}</td></tr>`).join("");
   $("tags").innerHTML = `<table><tr><th>Tag</th><th>px</th><th>x cm</th>`
     + `<th>y cm</th><th>yaw °</th></tr>${rows}</table>`;
+}
+
+function maps() {
+  if (!tagRobots) return;
+  const entries = Object.entries(tagRobots.map);
+  const sign = JSON.stringify(tagRobots.robots);
+  if (sign === builtMaps) return;
+  builtMaps = sign;
+  if (!entries.length) {
+    $("tag-robots").innerHTML = '<p class="empty">No tags mapped.</p>';
+    return;
+  }
+  const list = document.createElement("ul");
+  list.className = "maps";
+  for (const [tag, entry] of entries) {
+    const robot = tagRobots.robots[entry.robot] || {};
+    const li = document.createElement("li");
+    const text = document.createElement("span");
+    let where = "not seen";
+    if (robot.state === "sim") where = "the sim has its odometry";
+    else if (robot.state === "seen" && robot.pose) where =
+      `at ${robot.pose[0].toFixed(2)}, ${robot.pose[1].toFixed(2)} m`;
+    text.textContent = `Tag ${tag} → robot ${entry.robot}`
+      + (entry.turn ? `, turned ${entry.turn}°` : "") + ` · ${where}`;
+    text.className = robot.state === "seen" ? "" :
+      robot.state === "sim" ? "bad" : "off";
+    const remove = document.createElement("button");
+    remove.textContent = "Remove";
+    remove.title = `Take tag ${tag} off robot ${entry.robot}`;
+    remove.addEventListener("click", () => mapTag(Number(tag), null, 0));
+    li.append(text, remove);
+    list.append(li);
+  }
+  $("tag-robots").replaceChildren(list);
+}
+
+async function mapTag(tag, robot, turn) {
+  try {
+    tagRobots = await call("/api/tag_robots", {tag, robot, turn});
+    maps();
+  } catch (error) {
+    say(error.message, true);
+  }
 }
 
 function plan() {
@@ -319,8 +392,9 @@ function plan() {
 async function poll() {
   try {
     state = await call("/api/vision");
+    try { tagRobots = await call("/api/tag_robots"); } catch (e) {}
     if (!formFilled) fillForm(state.settings);
-    showFeed(); chips(); table(); plan();
+    showFeed(); chips(); table(); maps(); plan();
     if (state.error) say(`Camera stopped: ${state.error}`, true);
     else if (state.running) say(`${state.tags.length} tags`);
     else if (state.tags_from === "topic") say("From apriltag_node");
@@ -355,6 +429,11 @@ $("settings").addEventListener("submit", (event) => {
   for (const key of NUMBERS) body[key] = Number($(key).value);
   for (const key of CHECKS) body[key] = $(key).checked;
   act("/api/vision", body);
+});
+$("tag-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  mapTag(Number($("map-tag").value), Number($("map-robot").value),
+         Number($("map-turn").value) || 0);
 });
 $("reset").addEventListener("click", () => act("/api/vision", DEFAULTS));
 poll();
