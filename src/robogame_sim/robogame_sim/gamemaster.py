@@ -3,7 +3,7 @@
     ros2 run robogame_sim robogame_gamemaster
     ros2 run robogame_sim robogame_gamemaster --port 8768 --tab console
 
-Serves http://localhost:8766 with five tabs:
+Serves http://localhost:8766 with six tabs:
 
 - Arena editor (#editor, or #editor/NAME to open a saved layout): maps the
   modules as they are set up on the table. arena_editor.py and
@@ -12,6 +12,9 @@ Serves http://localhost:8766 with five tabs:
   where it goes. robot_console.py and robot_console.html.
 - Vision (#vision): the arena camera live, the AprilTags it finds, where
   each robot is and the detector's settings. vision.py and vision.html.
+- Chase (#chase): the chase tests run from the app, the 2D chase_sim and
+  the Gazebo chase suite, with their scores. chase_runs.py and
+  chase.html.
 - Logs (#logs): the log lines of the editor, the robot console, the
   controller nodes, the sim and the app, each on its own tab and all
   together on All. app_log.py and app_log.html.
@@ -23,7 +26,7 @@ Right of the tabs a status bar shows, every 2 s from GET /api/app,
 whether ROS is on, the sim's state, the BLE bridge's, how many robots
 the console sees and the arena in use; each opens the tab that deals with it. The Logs tab
 counts the errors not yet looked at, and a new one pops up in a corner
-while another tab shows. Alt+1 to Alt+5 switch tabs, and a bare URL
+while another tab shows. Alt+1 to Alt+6 switch tabs, and a bare URL
 opens the tab shown last.
 
 Both tabs are live at once, so a layout saved in the editor is the one the
@@ -49,6 +52,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
 from robogame_sim import app_log, arena_editor, vision as vision_tab
+from robogame_sim.chase_runs import ChaseRunner
 from robogame_sim.ble_bridge import BridgeRunner
 from robogame_sim.sim_runner import SimRunner
 from robogame_sim.upkeep import UpkeepRunner
@@ -61,7 +65,8 @@ DIALOGS = os.path.join(HERE, "dialogs.js")
 LOGS_PAGE = os.path.join(HERE, "app_log.html")
 VISION_PAGE = os.path.join(HERE, vision_tab.PAGE_NAME)
 UPKEEP_PAGE = os.path.join(HERE, "upkeep.html")
-TABS = ("editor", "console", "vision", "logs", "upkeep")
+CHASE_PAGE = os.path.join(HERE, "chase.html")
+TABS = ("editor", "console", "vision", "chase", "logs", "upkeep")
 # Changes the editor makes as it is used, not worth a log line each.
 QUIET = ("/api/check",)
 PORT = 8766
@@ -76,14 +81,15 @@ the app again. The arena editor works without it.</p>"""
 
 
 def handler(console=None, sim=None, book=None, bridge=None, vision=None,
-            upkeep=None):
+            upkeep=None, chase=None):
     """A request handler for the app. console is the RobotConsole node, or
     None to serve the editor alone. sim is the SimRunner behind the
     editor's Launch buttons, or None for none. book is the LogBook the
     Logs tab shows, which gets a line for each change asked. bridge
     is the BridgeRunner behind the console's Bridge buttons, or None.
     vision is the Vision tab's camera and tags. upkeep is the
-    UpkeepRunner behind the Upkeep tab, or None."""
+    UpkeepRunner behind the Upkeep tab, or None. chase is the ChaseRunner
+    behind the Chase tab, or None."""
     book = book or app_log.LogBook()
     vision = vision or vision_tab.Vision(book)
     if console is not None:
@@ -165,17 +171,20 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
                 return self.file(VISION_PAGE, HTML)
             if path == "/upkeep":
                 return self.file(UPKEEP_PAGE, HTML)
+            if path == "/chase":
+                return self.file(CHASE_PAGE, HTML)
             if path == "/vision/stream.mjpg":
                 return self.stream()
             if path == "/api/app":
                 return self.reply(200, status(console, sim, book, bridge,
-                                              upkeep))
+                                              upkeep, chase))
             source = self.answer(
                 ("app", lambda: book.get(self.path)),
                 ("sim", lambda: sim and sim.get(path)),
                 ("bridge", lambda: bridge and bridge.get(path)),
                 ("upkeep", lambda: upkeep and upkeep.get(path)),
                 ("vision", lambda: vision.get(path)),
+                ("chase", lambda: chase and chase.get(path)),
                 ("console", lambda: self.console_route("get", path)),
                 ("editor", lambda: arena_editor.get(path)))
             if self.status >= 400:
@@ -216,6 +225,7 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
                 ("upkeep", lambda: upkeep and upkeep.post(
                     path, self.read_body)),
                 ("vision", lambda: vision.post(path, self.read_body)),
+                ("chase", lambda: chase and chase.post(path, self.read_body)),
                 ("console", lambda: self.console_route(
                     "post", path, self.read_body)),
                 ("editor", lambda: arena_editor.post(path, self.read_body))),
@@ -225,11 +235,15 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
                 book.follow("sim", sim.log, 0)
             if path == "/api/upkeep" and self.status == 200 and upkeep:
                 book.follow("upkeep", upkeep.log, 0)
+            if (chase and self.status == 200
+                    and path in ("/api/chase/2d", "/api/chase/gazebo")):
+                job = chase.flat if path.endswith("2d") else chase.gazebo
+                book.follow("chase", job.log, 0)
 
     return Handler
 
 
-def status(console, sim, book, bridge=None, upkeep=None):
+def status(console, sim, book, bridge=None, upkeep=None, chase=None):
     """What the shell's status bar shows: whether ROS is on, the sim's
     state, the robots and arena the console sees, the upkeep job's and
     the newest error line."""
@@ -240,6 +254,8 @@ def status(console, sim, book, bridge=None, upkeep=None):
         reply["upkeep"] = {"job": upkeep.job, "running": upkeep.running(),
                            "stopped": upkeep.stopped,
                            "exit": upkeep.process.poll()}
+    if chase is not None:
+        reply["chase"] = chase.brief()
     if bridge is not None:
         state = bridge.status()
         reply["bridge"] = {"state": state["state"],
@@ -312,8 +328,9 @@ def main(args=None):
     if console is not None:
         vision.attach(console)
     upkeep = UpkeepRunner()
+    chase = ChaseRunner()
     server.RequestHandlerClass = handler(console, sim, book, bridge, vision,
-                                         upkeep)
+                                         upkeep, chase)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     say(book, f"RoboGame Gamemaster on {url}, saving layouts to "
@@ -338,6 +355,7 @@ def main(args=None):
         server.shutdown()
         server.server_close()
         sim.stop()
+        chase.stop()
         bridge.stop()
         upkeep.stop()
         vision.stop()

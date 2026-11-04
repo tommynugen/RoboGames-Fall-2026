@@ -285,13 +285,14 @@ Right of the Gamemaster's tabs a status bar shows, every 2 s, whether ROS
 is sourced, the sim's state (No sim, Launching NAME, Sim: NAME, or Sim
 stopped in red when a run ended on its own with an error code), the
 BLE bridge's once it is started (searching, found or lost), how many
-robots the console sees and the arena in use. Click one to open the tab
+robots the console sees, the arena in use, and Chase N/M while chase
+tests run from the Chase tab. Click one to open the tab
 that deals with it: the sim's opens the Arena editor and its Launch
 buttons, or Logs after a failed run. The Logs tab shows in red how many
 errors came since it was last looked at, and a new error pops up in the
 bottom corner for 15 s while another tab shows, with Show to open Logs.
 If the app stops answering, a red bar says how to start it again, and
-the page reconnects by itself. Alt+1 to Alt+5 switch tabs, and
+the page reconnects by itself. Alt+1 to Alt+6 switch tabs, and
 opening http://localhost:8766 with no tab named opens the one shown last.
 GET `/api/app` gives what the bar shows.
 
@@ -302,7 +303,7 @@ stopped. Not yet run with ROS or a sim.
 
 ## The app's Logs tab
 
-The Logs tab, right of Arena editor, Robot console and Vision, shows the
+The Logs tab, right of Arena editor, Robot console, Vision and Chase, shows the
 app's log lines as they come, once a second. Its own tabs split them by
 where they came from, and All shows them together, each tagged:
 
@@ -315,6 +316,7 @@ where they came from, and All shows them together, each tagged:
   ROS log of arena_perception's `apriltag_node` and `gazebo_viz_node`.
 - Gazebo sim: the output of a sim started with Launch in Gazebo, read from
   `robogame_sim.log` as it grows. A new launch starts it again.
+- Chase: the output of chase tests run from the Chase tab.
 - App: the app's own lines (started, no ROS).
 
 Warnings show in amber and errors in red, and a tab with errors has its
@@ -390,6 +392,39 @@ Checked 2026-11-04: tests (`test_vision.py`: cm mapping and heading, the
 test camera end to end, the routes and stream over HTTP) and the tab in
 Chromium, light and dark, on the `test` camera without ROS, at 20 fps.
 Not yet run on the real arena camera or with ROS.
+
+## The app's Chase tab
+
+The Chase tab (`#chase`) runs the chase tests and shows their scores, so
+there is no need for a terminal to try a change to the hunter:
+
+- 2D chase runs `chase_sim` (see Chase another robot) on the layouts
+  picked, against the targets ticked, for so many seeds and seconds. A
+  table gives, for each target, how many runs reached it, how soon on
+  average, the share of time with it after, the longest it was stuck and
+  how often it was blocked; Every run has each run's line. It needs no
+  ROS or Gazebo, and a run takes a second or two.
+- Gazebo chase suite runs `scripts/gazebo_chase_suite.sh` on the
+  scenarios ticked, so many at once, each capped at so many seconds of
+  sim time. Each scenario's row fills in as its run ends, with
+  `gazebo_chase_score.py`'s numbers: when it reached robot 2, how high it
+  got, falls, worst tilt, longest stall, how often it freed itself, and
+  any notes on the tower's legs and the slots. It needs ROS sourced and a
+  `colcon build --symlink-install` (the scripts are found from the
+  package's real path), or `ROBOGAME_SCRIPTS` set to the scripts folder.
+  Results go to `robogame_chase_suite/` in the temp folder.
+
+Each has Stop, which for the suite ends the sims it started too (their
+launch ids are kept in `.launches` there), and quitting the app stops
+both. Their output shows under Output and on the Logs tab's Chase tab.
+`chase_runs.py` does this: GET `/api/chase`, POST `/api/chase/2d`,
+`/api/chase/gazebo` and `/api/chase/stop`. `chase_sim --json` prints one
+JSON line a run for it.
+
+Checked 2026-11-04: tests (`test_chase_runs.py`: real 2D runs, the suite
+and its scoring and Stop with stand-in scripts) and the tab in Chromium
+without ROS, 12 2D runs on default and mazetest. The Gazebo suite from
+the tab is not yet run with ROS.
 
 ## A robot for every controller
 
@@ -637,7 +672,7 @@ ros2 run robogame_sim robogame_gamemaster
 The console is the Robot console tab of the RoboGame Gamemaster, which has the
 arena editor (see Arena layouts) in its other tab. It opens
 http://localhost:8766 in the browser (only this computer can reach it;
-`--port`, `--no-browser` and `--tab editor|console|vision|logs` change
+`--port`, `--no-browser` and `--tab editor|console|vision|chase|logs|upkeep` change
 that);
 `#console` and `#editor` in the address pick the tab, and `#editor/NAME`
 opens a saved layout in the editor. If it is already running, starting it

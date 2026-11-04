@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chase tests</title>
+<style>
+  /* The colours of the other tabs. */
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2433; --muted: #5d6677;
+    --line: #d9dde4; --accent: #2f5fb4; --accent-ink: #ffffff;
+    --floor: #c9cbcf; --bad: #d23c3c; --good: #2e8b57; --corner: #d23c3c;
+    --robot: #e0a43a; --feed: #0d1117;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+      --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+      --floor: #4a4e57; --bad: #f06b6b; --good: #5cc28a; --corner: #f06b6b;
+      --robot: #e8ad45; --feed: #000;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+    --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+    --floor: #4a4e57; --bad: #f06b6b; --good: #5cc28a; --corner: #f06b6b;
+    --robot: #e8ad45; --feed: #000;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  button, input, select {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); font-weight: 600;
+  }
+  main {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px; padding: 20px; max-width: 1500px; margin: 0 auto;
+  }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  section {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; margin-bottom: 20px;
+  }
+  h2 { font-size: 14px; margin: 0 0 10px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #source { width: 220px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px;
+          font-variant-numeric: tabular-nums; margin-top: 10px; }
+  th, td { text-align: right; padding: 3px 6px;
+           border-bottom: 1px solid var(--line); vertical-align: top; }
+  th:first-child, td:first-child { text-align: left; }
+  td.notes { text-align: left; color: var(--muted); font-size: 12px; }
+  th { color: var(--muted); font-weight: 500; }
+  .good { color: var(--good); }
+  .bad { color: var(--bad); }
+  .muted, .empty { color: var(--muted); }
+  .empty { font-size: 13px; margin: 10px 0 0; }
+  p.lead { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  form { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+         font-size: 13px; }
+  form label { display: flex; gap: 6px; align-items: center; }
+  form input[type=number] { width: 70px; padding: 3px 6px; }
+  fieldset { border: 0; padding: 0; margin: 0; display: flex;
+             flex-wrap: wrap; gap: 4px 12px; flex-basis: 100%; }
+  legend { color: var(--muted); font-size: 12px; padding: 0;
+           margin-bottom: 4px; }
+  select[multiple] { min-width: 180px; height: 6.5em; }
+  .state { font-size: 13px; color: var(--muted); margin-left: auto; }
+  .state.bad { color: var(--bad); }
+  progress { width: 100%; height: 6px; margin-top: 10px; }
+  details { margin-top: 10px; font-size: 13px; }
+  summary { cursor: pointer; color: var(--muted); }
+  pre { background: var(--bg); border: 1px solid var(--line);
+        border-radius: 6px; padding: 8px; max-height: 260px; overflow: auto;
+        font-size: 12px; white-space: pre-wrap; margin: 6px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <section id="flat">
+    <div class="bar">
+      <h2>2D chase</h2>
+      <span class="state" id="flat-state"></span>
+    </div>
+    <p class="lead">The hunter against moving targets on a layout, with no
+      Gazebo (chase_sim). A run takes a second or two.</p>
+    <form id="flat-form">
+      <label>Layouts <select id="layouts" multiple></select></label>
+      <label>Seeds <input id="seeds" type="number" min="1" max="20"
+        value="4"></label>
+      <label>Seconds a run <input id="seconds" type="number" min="5"
+        max="120" value="40"></label>
+      <fieldset id="behaviours"><legend>Targets</legend></fieldset>
+      <div class="bar">
+        <button class="primary" id="flat-run">Run</button>
+        <button type="button" id="flat-stop">Stop</button>
+      </div>
+    </form>
+    <progress id="flat-progress" hidden></progress>
+    <div id="flat-summary"></div>
+    <details id="flat-runs-box" hidden><summary>Every run</summary>
+      <div id="flat-runs"></div></details>
+    <details><summary>Output</summary><pre id="flat-tail"></pre></details>
+  </section>
+  <section id="gazebo">
+    <div class="bar">
+      <h2>Gazebo chase suite</h2>
+      <span class="state" id="gazebo-state"></span>
+    </div>
+    <p class="lead">Climbing and slot scenarios on test4 in headless Gazebo,
+      a few at once (gazebo_chase_suite.sh). A few minutes for all 14.</p>
+    <form id="gazebo-form">
+      <fieldset id="scenarios"><legend>Scenarios
+        <button type="button" id="all">All</button>
+        <button type="button" id="none">None</button></legend></fieldset>
+      <label>Seconds a run <input id="run-seconds" type="number" min="10"
+        max="300" value="60"></label>
+      <label>At once <input id="parallel" type="number" min="1" max="8"
+        value="4"></label>
+      <div class="bar">
+        <button class="primary" id="gazebo-run">Run</button>
+        <button type="button" id="gazebo-stop">Stop</button>
+      </div>
+    </form>
+    <progress id="gazebo-progress" hidden></progress>
+    <div id="gazebo-results"></div>
+    <details><summary>Output</summary><pre id="gazebo-tail"></pre></details>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+let built = false;
+
+async function call(path, body) {
+  const response = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+
+const esc = (text) => String(text).replace(/[&<>"]/g,
+  (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"})[c]);
+const sec = (s) => s === null || s === undefined ? "never" : `${s.toFixed(1)} s`;
+const pct = (f) => `${Math.round(100 * f)}%`;
+
+function checks(box, names, checked) {
+  for (const name of names) {
+    const label = document.createElement("label");
+    label.innerHTML = `<input type="checkbox" value="${esc(name)}"`
+      + `${checked(name) ? " checked" : ""}> ${esc(name)}`;
+    box.appendChild(label);
+  }
+}
+const ticked = (box) =>
+  [...box.querySelectorAll("input:checked")].map((input) => input.value);
+
+async function build() {
+  const asked2 = state["2d"].asked || {};
+  checks($("behaviours"), state.behaviours,
+         (b) => !asked2.behaviours || asked2.behaviours.includes(b));
+  const askedG = state.gazebo.asked || {};
+  checks($("scenarios"), state.scenarios,
+         (s) => !askedG.scenarios || askedG.scenarios.includes(s));
+  if (asked2.seeds) $("seeds").value = asked2.seeds;
+  if (asked2.seconds) $("seconds").value = asked2.seconds;
+  if (askedG.seconds) $("run-seconds").value = askedG.seconds;
+  if (askedG.parallel) $("parallel").value = askedG.parallel;
+  if (!state.suite) {
+    $("gazebo-run").disabled = true;
+    $("gazebo-state").textContent = "Scripts not found: needs a "
+      + "colcon build --symlink-install";
+  }
+  try {
+    const {layouts} = await call("/api/layouts");
+    const want = asked2.layouts || ["default"];
+    for (const entry of layouts) {
+      const name = typeof entry === "string" ? entry : entry.name;
+      const option = new Option(name, name, false, want.includes(name));
+      $("layouts").add(option);
+    }
+  } catch (error) { /* the select stays empty: default is used */ }
+  built = true;
+}
+
+function job(kind, done, all) {
+  const run = state[kind];
+  const node = $(`${kind === "2d" ? "flat" : "gazebo"}-state`);
+  const bar = $(`${kind === "2d" ? "flat" : "gazebo"}-progress`);
+  let text = "", bad = false;
+  if (run.running) text = `Running, ${done} of ${all} done`;
+  else if (run.stopped) text = `Stopped at ${done} of ${all}`;
+  else if (run.exit) { text = `Ended with code ${run.exit}: see Output`; bad = true; }
+  else if (run.started) text = `Done ${new Date(run.started * 1000)
+    .toLocaleTimeString()}, ${done} of ${all}`;
+  if (kind === "gazebo" && !state.suite) return;
+  node.textContent = text;
+  node.classList.toggle("bad", bad);
+  bar.hidden = !run.running;
+  bar.max = all || 1;
+  bar.value = done;
+  $(`${kind === "2d" ? "flat" : "gazebo"}-run`).disabled = run.running;
+  $(`${kind === "2d" ? "flat" : "gazebo"}-stop`).disabled = !run.running;
+  const tail = $(`${kind === "2d" ? "flat" : "gazebo"}-tail`);
+  const end = tail.scrollTop + tail.clientHeight >= tail.scrollHeight - 4;
+  tail.textContent = run.tail || "Nothing run yet.";
+  if (end) tail.scrollTop = tail.scrollHeight;
+}
+
+function paintFlat() {
+  const run = state["2d"];
+  job("2d", run.runs.length, (run.asked || {}).total || 0);
+  $("flat-summary").innerHTML = run.summary.length
+    ? `<table><tr><th>Target</th><th>Reached</th><th>Mean time to reach</th>`
+      + `<th>With it after</th><th>Longest stuck</th><th>Blocked</th></tr>`
+      + run.summary.map((r) => `<tr><td>${esc(r.behaviour)}</td>`
+        + `<td class="${r.reached === r.runs ? "good" : "bad"}">`
+        + `${r.reached} of ${r.runs}</td><td>${sec(r.mean_reach)}</td>`
+        + `<td>${pct(r.with_target)}</td>`
+        + `<td class="${r.worst_still > 5 ? "bad" : ""}">`
+        + `${r.worst_still.toFixed(1)} s</td><td>${r.blocked}</td></tr>`)
+        .join("") + "</table>"
+    : `<p class="empty">${run.running ? "The first runs are coming."
+      : "No scores yet. Pick layouts and targets, then Run."}</p>`;
+  $("flat-runs-box").hidden = !run.runs.length;
+  $("flat-runs").innerHTML = run.runs.length
+    ? `<table><tr><th>Layout</th><th>Target</th><th>Seed</th><th>Reached</th>`
+      + `<th>With it</th><th>Stuck</th><th>Blocked</th><th>Plan ms</th></tr>`
+      + run.runs.map((r) => `<tr><td>${esc(r.layout)}</td>`
+        + `<td>${esc(r.behaviour)}</td><td>${r.seed}</td>`
+        + `<td class="${r.first_reach === null ? "bad" : ""}">`
+        + `${sec(r.first_reach)}${r.reachable ? "" : " *"}</td>`
+        + `<td>${pct(r.with_target)}</td><td>${r.worst_still.toFixed(1)} s</td>`
+        + `<td>${r.blocked}</td><td>${r.plan_ms.toFixed(1)} / `
+        + `${r.plan_worst_ms.toFixed(0)}</td></tr>`).join("")
+      + `</table><p class="empty">* the target ended out of reach.</p>`
+    : "";
+}
+
+function paintGazebo() {
+  const run = state.gazebo;
+  const rows = run.results;
+  job("gazebo", rows.filter((r) => r.state === "done").length, rows.length);
+  if (!rows.length) {
+    $("gazebo-results").innerHTML = `<p class="empty">No scores yet. `
+      + `The Gazebo suite needs ROS sourced and the workspace built.</p>`;
+    return;
+  }
+  $("gazebo-results").innerHTML = `<table><tr><th>Scenario</th>`
+    + `<th>Reached</th><th>Highest</th><th>Falls</th><th>Tilt</th>`
+    + `<th>Longest stall</th><th>Freed itself</th></tr>`
+    + rows.map((r) => {
+      const s = r.score;
+      const freed = r.freed === undefined ? "" : r.freed;
+      if (!s || s.error) {
+        return `<tr><td>${esc(r.scenario)}</td><td colspan="5" class="`
+          + `${r.state === "failed" ? "bad" : "muted"}">${esc(s && s.error
+            ? s.error : r.state === "done" ? "no rows" : r.state)}</td>`
+          + `<td>${freed}</td></tr>`;
+      }
+      return `<tr><td>${esc(r.scenario)}</td>`
+        + `<td class="${s.first === null ? "bad" : "good"}">${sec(s.first)}</td>`
+        + `<td>${(100 * s.top).toFixed(1)} cm</td>`
+        + `<td class="${s.falls.length ? "bad" : ""}">${s.falls.length}</td>`
+        + `<td>${Math.round(s.tilt)}°</td>`
+        + `<td class="${s.stall > 5 ? "bad" : ""}">${s.stall.toFixed(1)} s</td>`
+        + `<td>${freed}</td></tr>`
+        + (s.notes.length ? `<tr><td></td><td colspan="6" class="notes">`
+          + `${s.notes.map(esc).join("; ")}</td></tr>` : "");
+    }).join("") + "</table>";
+}
+
+async function poll() {
+  try {
+    state = await call("/api/chase");
+    if (!built) await build();
+    paintFlat();
+    paintGazebo();
+  } catch (error) {
+    $("flat-state").textContent = `No answer from the app: ${error.message}`;
+    $("flat-state").classList.add("bad");
+  }
+}
+
+async function act(path, body, kind) {
+  try {
+    state = await call(path, body);
+    paintFlat();
+    paintGazebo();
+  } catch (error) {
+    const node = $(`${kind}-state`);
+    node.textContent = error.message;
+    node.classList.add("bad");
+  }
+}
+
+$("flat-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const layouts = [...$("layouts").selectedOptions].map((o) => o.value);
+  act("/api/chase/2d", {layouts, behaviours: ticked($("behaviours")),
+    seeds: Number($("seeds").value), seconds: Number($("seconds").value)},
+    "flat");
+});
+$("flat-stop").addEventListener("click",
+  () => act("/api/chase/stop", {kind: "2d"}, "flat"));
+$("gazebo-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const scenarios = ticked($("scenarios"));
+  if (!scenarios.length) return;
+  act("/api/chase/gazebo", {scenarios,
+    seconds: Number($("run-seconds").value),
+    parallel: Number($("parallel").value)}, "gazebo");
+});
+$("gazebo-stop").addEventListener("click",
+  () => act("/api/chase/stop", {kind: "gazebo"}, "gazebo"));
+for (const [id, on] of [["all", true], ["none", false]]) {
+  $(id).addEventListener("click", () => {
+    for (const input of $("scenarios").querySelectorAll("input")) {
+      input.checked = on;
+    }
+  });
+}
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>
