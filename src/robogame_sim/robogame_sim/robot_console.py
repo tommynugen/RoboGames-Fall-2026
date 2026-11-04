@@ -18,6 +18,9 @@ On the page:
   this node drives it on /robot_N/cmd_vel, stowing its arm first on
   /robot_N/arm_command, as chase_node does. Its planned path is drawn on
   the arena.
+- List the real robots the BLE bridge has found, with or without the
+  arena camera: one with no position can be driven by hand but not made
+  autonomous. The bridge can be started here too (ble_bridge.py).
 - In command mode, send it to a spot, by clicking the arena or typing
   where, or to another robot, one command after another. In chase mode it
   chases a robot, as chase_node does.
@@ -56,6 +59,10 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 PAGE = os.path.join(HERE, "robot_console.html")
 
 ODOMETRY = re.compile(r"^/model/robot_(\d+)/odometry$")
+CMD_VEL = re.compile(r"^/robot_(\d+)/cmd_vel$")
+# The real robots' BLE bridge, which takes /robot_N/cmd_vel for each robot
+# it finds (ble_bridge.py).
+BRIDGE_NODE = "microcontroller_node"
 CONTROLLER_STATE = "/controller_robots/state"
 CONTROLLER_ASSIGN = "/controller_robots/assign"
 CONTROLLER_ROBOTS = "/controller_robots/robots"
@@ -83,6 +90,9 @@ class Robot:
         self.arm_publisher = None
         self.subscriptions = []
         self.lost = True
+        # Its BLE link, for a real robot the bridge has found: found,
+        # connected or lost, or "bridge" for a bridge run elsewhere.
+        self.link = None
         # Other nodes publishing its cmd_vel, such as racing_teleop or
         # chase_node, which would fight the autopilot.
         self.drivers = []
@@ -182,6 +192,8 @@ class RobotConsole(Node):
         # The robots controller_robots has in the world, when it runs.
         self.managed = None
         self.override = p["layout"] or None
+        # The BridgeRunner the app starts the bridge with, if any.
+        self.bridge = None
 
         # The arena in use, and the one loading.
         self.arena_key = None
@@ -211,16 +223,37 @@ class RobotConsole(Node):
 
     # -- robots ----------------------------------------------------------
 
+    def bridge_robots(self, topics):
+        """{robot number: link state} for the real robots the BLE bridge
+        has found: the one started here says how each one's link is, and
+        one run elsewhere shows by taking their cmd_vel."""
+        found = {}
+        for topic in topics:
+            match = CMD_VEL.match(topic)
+            if match and any(
+                    info.node_name == BRIDGE_NODE for info in
+                    self.get_subscriptions_info_by_topic(topic)):
+                found[int(match.group(1))] = "bridge"
+        if self.bridge is not None:
+            found.update(self.bridge.robots())
+        return found
+
     def discover(self):
-        for topic, _ in self.get_topic_names_and_types():
+        topics = [topic for topic, _ in self.get_topic_names_and_types()]
+        linked = self.bridge_robots(topics)
+        for topic in topics:
             match = ODOMETRY.match(topic)
             if (match and int(match.group(1)) not in self.robots
                     and self.is_managed(int(match.group(1)))):
                 self.add_robot(int(match.group(1)))
+        for robot_id in linked:
+            if robot_id not in self.robots:
+                self.add_robot(robot_id)
 
         now = time.monotonic()
         for robot in list(self.robots.values()):
-            if not self.is_managed(robot.id):
+            robot.link = linked.get(robot.id)
+            if robot.link is None and not self.is_managed(robot.id):
                 # Removed: a robot the launch started keeps its bridge, so
                 # its odometry topic stays.
                 self.set_autonomous(robot, False)
@@ -228,7 +261,7 @@ class RobotConsole(Node):
                 continue
             gone = self.count_publishers(
                 f"/model/robot_{robot.id}/odometry") == 0
-            if (gone and robot.autopilot is None
+            if (gone and robot.autopilot is None and robot.link is None
                     and (robot.seen is None
                          or now - robot.seen > FORGET_AFTER)):
                 self.forget(robot)
@@ -298,6 +331,10 @@ class RobotConsole(Node):
             return
 
         if on:
+            if robot.pose is None:
+                raise ValueError(
+                    f"robot {robot.id} has no position, so it can only be "
+                    "driven by hand: autonomy needs the arena camera")
             robot.autopilot = Autopilot(robot.id, self.terrain,
                                         **self.chaser_options)
             robot.autopilot.stow()
@@ -507,6 +544,7 @@ class RobotConsole(Node):
                               if robot.autopilot is not None else None),
                 "drivers": robot.drivers,
                 "controller": self.controller_of(robot.id),
+                "link": robot.link,
             })
 
         snapshot = {
@@ -516,6 +554,8 @@ class RobotConsole(Node):
             "controllers": self.controllers,
             # Robots can be added and removed, through controller_robots.
             "manager": self.controllers is not None,
+            "bridge": (self.bridge.status() if self.bridge is not None
+                       else None),
             "arena": {
                 "name": self.arena and self.arena["name"],
                 "source": self.arena and self.arena["source"],

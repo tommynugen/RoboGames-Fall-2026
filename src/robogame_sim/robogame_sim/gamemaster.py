@@ -35,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
 from robogame_sim import app_log, arena_editor
+from robogame_sim.ble_bridge import BridgeRunner
 from robogame_sim.sim_runner import SimRunner
 
 HERE = os.path.dirname(os.path.realpath(__file__))
@@ -57,11 +58,12 @@ NO_ROS = b"""<!doctype html><meta charset="utf-8">
 the app again. The arena editor works without it.</p>"""
 
 
-def handler(console=None, sim=None, book=None):
+def handler(console=None, sim=None, book=None, bridge=None):
     """A request handler for the app. console is the RobotConsole node, or
     None to serve the editor alone. sim is the SimRunner behind the
     editor's Launch buttons, or None for none. book is the LogBook the
-    Console tab shows, which gets a line for each change asked."""
+    Console tab shows, which gets a line for each change asked. bridge
+    is the BridgeRunner behind the console's Bridge buttons, or None."""
     book = book or app_log.LogBook()
     if console is not None:
         from robogame_sim import robot_console
@@ -143,6 +145,7 @@ def handler(console=None, sim=None, book=None):
             source = self.answer(
                 ("app", lambda: book.get(self.path)),
                 ("sim", lambda: sim and sim.get(path)),
+                ("bridge", lambda: bridge and bridge.get(path)),
                 ("console", lambda: self.console_route("get", path)),
                 ("editor", lambda: arena_editor.get(path)))
             if self.status >= 400:
@@ -164,6 +167,8 @@ def handler(console=None, sim=None, book=None):
             path = unquote(self.path)
             self.note(self.answer(
                 ("sim", lambda: sim and sim.post(path, self.read_body)),
+                ("bridge", lambda: bridge and bridge.post(
+                    path, self.read_body)),
                 ("console", lambda: self.console_route(
                     "post", path, self.read_body)),
                 ("editor", lambda: arena_editor.post(path, self.read_body))),
@@ -224,7 +229,10 @@ def main(args=None):
     console = start_console(args, book)
     sim = SimRunner()
     book.follow("sim", sim.log)
-    server.RequestHandlerClass = handler(console, sim, book)
+    bridge = BridgeRunner(book=book)
+    if console is not None:
+        console.bridge = bridge
+    server.RequestHandlerClass = handler(console, sim, book, bridge)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     say(book, f"RoboGame Gamemaster on {url}, saving layouts to "
@@ -249,6 +257,7 @@ def main(args=None):
         server.shutdown()
         server.server_close()
         sim.stop()
+        bridge.stop()
         if console is not None:
             import rclpy
             if rclpy.ok():
