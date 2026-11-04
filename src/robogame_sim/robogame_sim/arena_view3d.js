@@ -82,9 +82,14 @@ export function create(container) {
 
   function resize() {
     const width = container.clientWidth;
+    const height = container.clientHeight || width;
     if (!width) return;
-    renderer.setSize(width, width, false);
-    camera.aspect = 1;
+    renderer.setSize(width, height, false);
+    camera.aspect = width / height;
+    // Taller than wide (a phone): widen the view so the arena's sides stay
+    // in frame, as they do in the square view at 40 degrees.
+    camera.fov = camera.aspect >= 1 ? 40 : 2 * Math.atan(
+      Math.tan(20 * Math.PI / 180) / camera.aspect) * 180 / Math.PI;
     camera.updateProjectionMatrix();
     draw();
   }

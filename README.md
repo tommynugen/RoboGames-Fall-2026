@@ -1043,6 +1043,15 @@ wheel zooms. Modules the checks find a problem with glow red. The 3D view
 loads three.js 0.160 from unpkg.com, so it needs the internet when the
 page opens; without it the page says so and the top view works as before.
 
+The 3D view fills its column at any window size: square beside the top
+view (never taller than the window), and the window's full height when
+shown alone. Checked on 2026-11-04 in headless Chromium at 1920 x 1080,
+1280 x 800, 1000 x 700 and 390 x 844 (a phone, where Both stacks the two
+views): the 3D canvas matched its box each time, and Place cards with
+long CAD names such as HIGH-PLATFORM-idk-what-to-call-this stayed inside
+the panel, the names breaking at - and _. The view used to shrink to a
+300 pixel box because the Gazebo camera panel's buttons shared its id.
+
 The tool buttons and the STL parts list show a picture of each module
 made from its mesh: seen from straight above with Top or Both picked, and
 from the side and above (isometric) with 3D picked. Modules that turn are
