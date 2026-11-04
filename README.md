@@ -279,6 +279,20 @@ Chromium (Playwright): commands follow the fields and a chase robot not in
 robots comes back as a 400 naming it. No ROS or gz-transport here, so the
 camera panel is not yet checked against a running Gazebo window.
 
+The panel's first look at a sim waits up to 1.5 s for `fpv_toggle`'s
+state, which comes once a second, before saying there is no window, and a
+click answers with the view the window moved to, not the one before it.
+
+Checked 2026-11-04 against Gazebo Jetty (gz-sim 10.6 from conda-forge,
+with its Python bindings; ROS 2 could not be installed in that machine):
+every layout's world loads in `gz sim -s`, a spawned robot drives about
+0.5 m for 3 s at 0.2 m/s on `/robot_1/sim/cmd_vel`, and with the Gazebo
+window up under Xvfb the panel's Top, FPV and Corner buttons move it
+through `fpv_toggle` (screenshots). `test_sim_camera.py` drives the panel
+against a stand-in `fpv_toggle` over real gz-transport; it skips without
+the bindings. The rclpy parts (console, Launch in Gazebo, bridge) say
+"no ros2 on the PATH" and were not run.
+
 ## The app's status bar and tabs
 
 Right of the Gamemaster's tabs a status bar shows, every 2 s, whether ROS
