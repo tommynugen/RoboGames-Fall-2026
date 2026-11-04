@@ -76,7 +76,8 @@ scripts/sync_arena_perception.sh PATH/TO/ROBOGAME-2.0
 colcon build --symlink-install
 ```
 
-Run the same two lines again to pick up changes from the repo.
+Run the same two lines again to pick up changes from the repo. The
+Gamemaster's Upkeep tab runs both, and the Onshape export, with buttons.
 
 ## Run
 
@@ -264,7 +265,7 @@ buttons, or Logs after a failed run. The Logs tab shows in red how many
 errors came since it was last looked at, and a new error pops up in the
 bottom corner for 15 s while another tab shows, with Show to open Logs.
 If the app stops answering, a red bar says how to start it again, and
-the page reconnects by itself. Alt+1 to Alt+4 switch tabs, and
+the page reconnects by itself. Alt+1 to Alt+5 switch tabs, and
 opening http://localhost:8766 with no tab named opens the one shown last.
 GET `/api/app` gives what the bar shows.
 
@@ -297,6 +298,36 @@ GET `/api/logs?after=N` gives the lines after line N.
 
 Checked 2026-11-03: tests (`test_app_log.py`, with the app's routes over
 HTTP) and the tab in Chromium without ROS. Not yet run with ROS or a sim.
+
+## The app's Upkeep tab
+
+The Upkeep tab, last of the Gamemaster's tabs, runs the repo's upkeep
+jobs with a button each, one at a time, and shows their output as they
+run:
+
+- Export from Onshape: `scripts/export_onshape_arena.py`, after a yes. It
+  is greyed out until the Onshape keys are in
+  `~/.config/onshape/keys.env`, and the card says when the CAD model was
+  last written.
+- Copy arena_perception: `scripts/sync_arena_perception.sh`, from the
+  ROBOGAME-2.0 folder typed in (kept for next time), or the script's own
+  default when it is blank. The card says when it was last copied.
+- Build: `colcon build --symlink-install` in the workspace, which both
+  of the others need after them. Start the app and the sim again to use
+  what changed.
+
+Stop sends Ctrl-C, then kills the job 5 s later. While a job runs, and
+after one fails, a chip in the status bar says so and opens the tab. The
+output also goes to the Logs tab's Upkeep source. The jobs run from the
+checkout the app is in, found from `upkeep.py`'s own place, so the app
+must come from a `--symlink-install` build. `upkeep.py` does this: GET
+`/api/upkeep`, POST `/api/upkeep {"job": "onshape" | "perception" |
+"build", "path": ...}` and POST `/api/upkeep/stop`.
+
+Checked 2026-11-04: tests (`test_upkeep.py`, with stand-in scripts and
+the app's routes over HTTP) and the tab in Chromium without ROS: the
+missing keys, a failed copy with no checkout and its chip. Not yet run
+against Onshape or a real build.
 
 ## The app's Vision tab
 
