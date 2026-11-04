@@ -46,6 +46,8 @@ class FakeArena(Node):
         self.assigned = []
         self.robot_asks = []
         self.in_world = [1, 2]
+        # More of controller_robots' state, as on the real arena.
+        self.extra = {}
         self.controllers = [{"address": "AA:BB", "name": "DualSense",
                              "robot": 1, "connected": True,
                              "virtual": False}]
@@ -75,7 +77,8 @@ class FakeArena(Node):
 
     def publish_controllers(self):
         self.state.publish(String(data=json.dumps(
-            {"controllers": self.controllers, "robots": self.in_world})))
+            {"controllers": self.controllers, "robots": self.in_world,
+             **self.extra})))
 
     def on_assign(self, message):
         asked = json.loads(message.data)
@@ -278,6 +281,41 @@ def test_robots_can_be_removed_and_added(console):
     assert call(url + "/api/robots/add", "POST", {})[0] == 200
     wait_for(lambda: robot_state(url, 2))
     assert fake.robot_asks[-1] == {"add": True}
+
+
+def test_a_real_robot_with_no_pose_takes_a_controller_and_controls(
+        console):
+    url, _, fake = console
+    # controller_robots on the real arena: robot 3 is known by its cmd_vel
+    # only, as before the camera sees it.
+    fake.in_world = [1, 2, 3]
+    fake.extra = {"real": True, "options": ["classic", "racing"],
+                  "controls": {"1": "classic", "2": "classic",
+                               "3": "classic"}}
+    fake.publish_controllers()
+    state = wait_for(lambda: (lambda s: s["real"] and s)(
+        call(url + "/api/state")[1]))
+    assert state["managed"] == [1, 2, 3] and robot_state(url, 3) is None
+
+    assert call(url + "/api/controllers", "POST",
+                {"address": "AA:BB", "robot": 3})[0] == 200
+    wait_for(lambda: fake.assigned[-1] == {"address": "AA:BB", "robot": 3})
+
+    assert call(url + "/api/controls", "POST",
+                {"robot": 3, "controls": "racing"})[0] == 200
+    wait_for(lambda: fake.robot_asks[-1] == {"robot": 3,
+                                             "controls": "racing"})
+    assert call(url + "/api/controls", "POST",
+                {"robot": 3, "controls": "fast"})[0] == 400
+    assert call(url + "/api/controls", "POST",
+                {"robot": 9, "controls": "racing"})[0] == 400
+
+    # Already running, so it is not started again.
+    assert call(url + "/api/controllers/start", "POST", {})[0] == 400
+
+    fake.in_world, fake.extra = [1, 2], {}
+    fake.publish_controllers()
+    wait_for(lambda: not call(url + "/api/state")[1]["real"])
 
 
 def test_newest_layout_is_the_one_saved_last(tmp_path, monkeypatch):

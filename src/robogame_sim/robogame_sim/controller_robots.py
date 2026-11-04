@@ -29,20 +29,33 @@ left on no robot. With spawn_for_controllers false, as sim.launch.py runs
 it when no controller is asked for, a controller that connects drives no
 robot until it is given one in the console.
 
-For the sim only. On the real arena robot_control.launch.py binds each
-controller to the robot controllers.yaml gives it, and this would bind them
-in the order they connect instead.
+On the real arena, run it with real:=true, or press Start under
+Controllers in the robot console, which does that:
+
+    ros2 run robogame_sim controller_robots --ros-args -p real:=true
+
+It then spawns nothing and adds no robots. It finds each real robot by its
+/robot_N/cmd_vel, which the robot's bridge listens on, and controllers are
+given robots in the console, as in the sim, in place of controllers.yaml.
+
+Each robot has its controls: "classic", arena_perception's
+controller_input, as robot_control.launch.py runs it, or "racing",
+racing_teleop. Real robots start on classic and sim robots on racing, so
+a robot drives as it did until its controls are changed in the console,
+with {"robot": 2, "controls": "racing"} on /controller_robots/robots.
 """
 
 import ctypes
 import json
 import math
 import os
+import re
 import signal
 import subprocess
 
 import rclpy
 from ament_index_python.packages import (
+    PackageNotFoundError,
     get_package_prefix,
     get_package_share_directory,
 )
@@ -66,6 +79,15 @@ from robogame_sim.terrain import Terrain
 
 PR_SET_PDEATHSIG = 1
 
+# A real robot's bridge listens on its cmd_vel.
+ROBOT_TOPIC = re.compile(r"^/robot_(\d+)/cmd_vel$")
+# Each robot's controls, by name: the package and program that turn its
+# /robot_N/joy into /robot_N/cmd_vel.
+CONTROLS = {
+    "classic": ("arena_perception", "controller_input"),
+    "racing": ("robogame_sim", "racing_teleop"),
+}
+
 # Kept for anyone subscribing later, as the robot console does.
 LATCHED = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
 
@@ -78,6 +100,31 @@ def die_with_parent():
 
 def executable(package, name):
     return os.path.join(get_package_prefix(package), "lib", package, name)
+
+
+def installed(package):
+    try:
+        get_package_prefix(package)
+        return True
+    except PackageNotFoundError:
+        return False
+
+
+def teleop_command(controls, robot_id, address):
+    """The command that runs a robot's controls for a controller."""
+    package, name = CONTROLS[controls]
+    command = [executable(package, name),
+               "--ros-args", "-r", f"__ns:=/robot_{robot_id}",
+               "-p", f"robot_id:={robot_id}"]
+    if controls == "racing":
+        command += ["-p", f"controller_address:={address}"]
+    return command
+
+
+def robots_on(topics):
+    """Robot numbers with a cmd_vel among (topic, listeners) pairs."""
+    return {int(m.group(1)) for topic, listeners in topics
+            if listeners and (m := ROBOT_TOPIC.match(topic))}
 
 
 class Binding:
@@ -110,6 +157,11 @@ class ControllerRobots(Node):
         self.declare_parameter("autorepeat_rate", 20.0)
         self.declare_parameter("scan_period", 1.0)
         self.declare_parameter("spawn_for_controllers", True)
+        # The real arena: spawn nothing, find robots by their cmd_vel.
+        self.declare_parameter("real", False)
+        # Controls a robot starts on, classic on the real arena and racing
+        # in the sim when empty.
+        self.declare_parameter("controls", "")
 
         def param(name):
             return self.get_parameter(name).value
@@ -120,9 +172,20 @@ class ControllerRobots(Node):
         self.fpv = param("fpv")
         self.deadzone = param("deadzone")
         self.repeat = 1.0 / param("autorepeat_rate")
-        self.spawn_for_controllers = param("spawn_for_controllers")
+        self.real = param("real")
+        self.spawn_for_controllers = (param("spawn_for_controllers")
+                                      and not self.real)
+        self.options = [c for c in CONTROLS
+                        if installed(CONTROLS[c][0])]
+        self.default_controls = param("controls") or (
+            "classic" if self.real else "racing")
+        if self.default_controls not in self.options:
+            self.get_logger().warning(
+                f"No {self.default_controls} controls here, using racing")
+            self.default_controls = "racing"
+        self.controls = {}
 
-        self.ground = self.load_ground(param("layout"))
+        self.ground = None if self.real else self.load_ground(param("layout"))
         self.bindings = {}
         self.standing_aside = set()
         self.processes = []
@@ -141,7 +204,8 @@ class ControllerRobots(Node):
         self.create_subscription(
             String, "/controller_robots/robots", self.on_robots, 10)
 
-        for robot_id in param("robots"):
+        # Real robots are found as they come, by find_real_robots.
+        for robot_id in [] if self.real else param("robots"):
             self.track(robot_id)
 
         self.create_timer(param("scan_period"), self.scan)
@@ -151,7 +215,8 @@ class ControllerRobots(Node):
             f"The first controller drives robot {self.first_robot}, and "
             f"each one connected after it gets a robot of its own"
             if self.spawn_for_controllers else
-            "Controllers drive no robot until given one in the console")
+            "Controllers drive no robot until given one in the console"
+            + (", on the real arena" if self.real else ""))
         self.publish_state()
         self.scan()
 
@@ -167,6 +232,8 @@ class ControllerRobots(Node):
         """Follows where a robot is, so new ones spawn away from it."""
         self.robots.add(robot_id)
         self.used.add(robot_id)
+        if self.real:
+            return
 
         def remember(message, robot_id=robot_id):
             p = message.pose.pose.position
@@ -178,6 +245,9 @@ class ControllerRobots(Node):
     # -- controllers -----------------------------------------------------
 
     def scan(self):
+        if self.real:
+            self.find_real_robots()
+
         pads = find_gamepads()
         real = (any(not virtual for *_, virtual in pads)
                 or any(not b.virtual for b in self.bindings.values()))
@@ -213,17 +283,28 @@ class ControllerRobots(Node):
                    if binding.robot_id is not None else "no robot"))
             self.publish_state()
 
+    def find_real_robots(self):
+        topics = [(topic, self.count_subscribers(topic))
+                  for topic, _ in self.get_topic_names_and_types()]
+        found = robots_on(topics) - self.robots
+        for robot_id in sorted(found):
+            self.track(robot_id)
+            self.get_logger().info(f"Found real robot {robot_id}")
+        if found:
+            self.publish_state()
+
+    def controls_of(self, robot_id):
+        return self.controls.get(robot_id, self.default_controls)
+
     def drive(self, binding):
-        """Starts racing_teleop for a connected controller's robot."""
+        """Starts a connected controller's robot's controls."""
         if binding.pad is None or binding.robot_id is None:
             return
 
+        controls = self.controls_of(binding.robot_id)
         binding.teleop = self.start(
-            "racing_teleop", binding.robot_id,
-            executable("robogame_sim", "racing_teleop"),
-            "--ros-args", "-r", f"__ns:=/robot_{binding.robot_id}",
-            "-p", f"robot_id:={binding.robot_id}",
-            "-p", f"controller_address:={binding.address}")
+            controls, binding.robot_id,
+            *teleop_command(controls, binding.robot_id, binding.address))
 
     def bind(self, address, virtual, name):
         stand_in = next(
@@ -372,11 +453,39 @@ class ControllerRobots(Node):
                 f"Bad robots message {message.data!r}: {error}")
             return
 
-        if asked.get("add"):
-            self.spawn(self.next_robot())
-        if remove is not None:
-            self.remove(remove)
+        if "controls" in asked:
+            self.set_controls(asked.get("robot"), asked["controls"])
+        elif self.real and (asked.get("add") or remove is not None):
+            self.get_logger().warning(
+                "Real robots cannot be added or removed here")
+        else:
+            if asked.get("add"):
+                self.spawn(self.next_robot())
+            if remove is not None:
+                self.remove(remove)
         self.publish_state()
+
+    def set_controls(self, robot_id, controls):
+        try:
+            robot_id = int(robot_id)
+        except (TypeError, ValueError):
+            robot_id = None
+        if robot_id not in self.robots or controls not in self.options:
+            self.get_logger().warning(
+                f"Cannot give robot {robot_id} {controls} controls")
+            return
+        if controls == self.controls_of(robot_id):
+            return
+
+        self.controls[robot_id] = controls
+        # Its controller's old controls stop before the new ones start, so
+        # the two never both drive it.
+        for binding in self.bindings.values():
+            if binding.robot_id == robot_id:
+                self.stop(binding.teleop)
+                binding.teleop = None
+                self.drive(binding)
+        self.get_logger().info(f"Robot {robot_id} has {controls} controls")
 
     def next_robot(self):
         return max(self.used | {self.first_robot - 1}) + 1
@@ -411,6 +520,7 @@ class ControllerRobots(Node):
         for process in self.robot_processes.pop(robot_id, []):
             self.stop(process)
         self.destroy_subscription(self.odometry.pop(robot_id))
+        self.controls.pop(robot_id, None)
         self.robots.discard(robot_id)
         self.poses.pop(robot_id, None)
         self.get_logger().info(f"Removed {robot}")
@@ -423,6 +533,9 @@ class ControllerRobots(Node):
         self.state_publisher.publish(String(data=json.dumps({
             "controllers": controllers,
             "robots": sorted(self.robots),
+            "real": self.real,
+            "controls": {str(r): self.controls_of(r) for r in self.robots},
+            "options": self.options,
         })))
 
     # -- robots ----------------------------------------------------------
