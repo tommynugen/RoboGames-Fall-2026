@@ -43,7 +43,8 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
-from robogame_sim import app_log, arena_editor, vision as vision_tab
+from robogame_sim import (app_log, arena_editor, perception,
+                          vision as vision_tab)
 from robogame_sim.ble_bridge import BridgeRunner
 from robogame_sim.sim_runner import SimRunner
 
@@ -68,15 +69,21 @@ NO_ROS = b"""<!doctype html><meta charset="utf-8">
 the app again. The arena editor works without it.</p>"""
 
 
-def handler(console=None, sim=None, book=None, bridge=None, vision=None):
+def handler(console=None, sim=None, book=None, bridge=None, vision=None,
+            tags=None, nodes=None):
     """A request handler for the app. console is the RobotConsole node, or
     None to serve the editor alone. sim is the SimRunner behind the
     editor's Launch buttons, or None for none. book is the LogBook the
     Logs tab shows, which gets a line for each change asked. bridge
     is the BridgeRunner behind the console's Bridge buttons, or None.
-    vision is the Vision tab's camera and tags."""
+    vision is the Vision tab's camera and tags. tags is the robot tag map
+    (perception.TagRobots) and nodes arena_perception's nodes
+    (perception.Perception)."""
     book = book or app_log.LogBook()
     vision = vision or vision_tab.Vision(book)
+    tags = tags or perception.TagRobots(
+        side=lambda: vision.settings["arena_cm"], book=book)
+    nodes = nodes or perception.Perception(book=book)
     if console is not None:
         from robogame_sim import robot_console
         console_page = robot_console.PAGE
@@ -163,6 +170,8 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None):
                 ("sim", lambda: sim and sim.get(path)),
                 ("bridge", lambda: bridge and bridge.get(path)),
                 ("vision", lambda: vision.get(path)),
+                ("vision", lambda: tags.get(path)),
+                ("console", lambda: nodes.get(path)),
                 ("console", lambda: self.console_route("get", path)),
                 ("editor", lambda: arena_editor.get(path)))
             if self.status >= 400:
@@ -201,6 +210,8 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None):
                 ("bridge", lambda: bridge and bridge.post(
                     path, self.read_body)),
                 ("vision", lambda: vision.post(path, self.read_body)),
+                ("vision", lambda: tags.post(path, self.read_body)),
+                ("console", lambda: nodes.post(path, self.read_body)),
                 ("console", lambda: self.console_route(
                     "post", path, self.read_body)),
                 ("editor", lambda: arena_editor.post(path, self.read_body))),
@@ -287,9 +298,16 @@ def main(args=None):
     if console is not None:
         console.bridge = bridge
     vision = vision_tab.Vision(book)
+    tags = perception.TagRobots(
+        side=lambda: vision.settings["arena_cm"], book=book)
+    nodes = perception.Perception(book=book)
     if console is not None:
         vision.attach(console)
-    server.RequestHandlerClass = handler(console, sim, book, bridge, vision)
+        tags.attach(console)
+        nodes.attach(console)
+        console.tag_robots = tags
+    server.RequestHandlerClass = handler(console, sim, book, bridge, vision,
+                                         tags, nodes)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     say(book, f"RoboGame Gamemaster on {url}, saving layouts to "
@@ -316,6 +334,7 @@ def main(args=None):
         sim.stop()
         bridge.stop()
         vision.stop()
+        nodes.stop()
         if console is not None:
             import rclpy
             if rclpy.ok():

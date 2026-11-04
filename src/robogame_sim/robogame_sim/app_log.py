@@ -35,7 +35,9 @@ READ = 1 << 20  # bytes of sim log read at most per poll
 # ROS node names whose log goes to the teleop tab.
 TELEOP_NODES = ("controller_robots", "racing_teleop")
 # And to the vision tab.
-VISION_NODES = ("apriltag_node", "gazebo_viz_node")
+VISION_NODES = ("apriltag_node", "gazebo_viz_node", "tag_visualizer")
+# arena_perception's autonomy_node, started from the console.
+CONSOLE_NODES = ("autonomy_node",)
 # rcl_interfaces/msg/Log levels.
 ROS_LEVELS = {10: "debug", 20: "info", 30: "warn", 40: "error",
               50: "error"}
@@ -139,7 +141,7 @@ def rosout_source(name, own):
     """The tab a /rosout line from node name goes to: own is the console
     node's name. None for other nodes, whose output the sim tab has."""
     name = name.lstrip("/").split(".")[0]
-    if name == own:
+    if name == own or name in CONSOLE_NODES:
         return "console"
     if name in TELEOP_NODES:
         return "teleop"
