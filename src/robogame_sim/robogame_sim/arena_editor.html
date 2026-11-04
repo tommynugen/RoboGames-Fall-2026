@@ -179,6 +179,15 @@
   }
   .tool .name { max-width: 100%; font-size: 12px; line-height: 1.25;
                 text-align: center; overflow-wrap: anywhere; }
+  .tool { touch-action: none; }
+  .tools[hidden] { display: none; }
+  .tool-group + .tool-group { margin-top: 8px; }
+  .group-head { display: block; width: 100%; text-align: left;
+                margin-bottom: 6px; border: none; padding: 2px 4px;
+                background: none; color: var(--muted); font-size: 12px; }
+  .group-head::before { content: "\25BE  "; }
+  .group-head[aria-expanded=false]::before { content: "\25B8  "; }
+  .tool.moving { opacity: 0.5; cursor: grabbing; }
   .tool[aria-pressed=true] {
     border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent);
   }
@@ -318,7 +327,7 @@ middle"></select>
   <aside>
     <div class="panel">
       <h2>Place</h2>
-      <div class="tools" id="tools"></div>
+      <div id="tools"></div>
       <div class="rotate-row">
         <svg viewBox="0 0 34 34" id="preview"></svg>
         <div>
@@ -348,6 +357,10 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       <details class="help-box">
       <summary>Help</summary>
       <ul class="help">
+        <li>The Place cards are in groups, guessed from their names: click
+          a group's name to fold it. Drag a card to move it, into another
+          group too, or right click it to type its group. The number keys
+          follow the order, which this browser keeps.</li>
         <li>Click or drag to place. The peg holes are evenly spaced across
           the floor tiles, so modules go where the pointer is, to the
           nearest half square, and can stand across two tiles.</li>
@@ -878,6 +891,94 @@ function drawPanel() {
   }
 }
 
+// The palette's layout, kept in this browser: the card order as part
+// types, each part's group, and the groups folded shut.
+function palette() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem("arena-editor-palette")) || {};
+  } catch {}
+  return { order: saved.order || [], groups: saved.groups || {},
+           shut: saved.shut || [] };
+}
+function savePalette(changes) {
+  try {
+    localStorage.setItem("arena-editor-palette",
+                         JSON.stringify({ ...palette(), ...changes }));
+  } catch {}
+}
+// A part's group, guessed from its type and name until one is given.
+function toolGroup(type, name) {
+  const given = palette().groups[type];
+  if (given) return given;
+  const text = `${type} ${name}`.toLowerCase();
+  for (const [word, group] of [["ramp", "Ramp"], ["floor", "Floor"],
+       ["tile", "Floor"], ["wall", "Wall"], ["platform", "Platform"],
+       ["thwomp", "Thwomp"], ["rock", "Terrain"], ["wave", "Terrain"],
+       ["terrain", "Terrain"]]) {
+    if (text.includes(word)) return group;
+  }
+  return "Other";
+}
+async function regroupTool(type) {
+  const old = toolGroup(type, label(type));
+  const group = (await askText(`Group for ${label(type)}:`, old,
+                               "Move"))?.trim();
+  if (!group || group === old) return;
+  savePalette({ groups: { ...palette().groups, [type]: group } });
+  buildTools();
+}
+function toggleGroup(group) {
+  const shut = palette().shut;
+  savePalette({ shut: shut.includes(group) ? shut.filter(g => g !== group)
+                                           : [...shut, group] });
+  buildTools();
+}
+
+// Drag a palette card onto another, or onto a group's heading, to move
+// it there; a press that does not move 6 px is a click. The number keys
+// follow the new order.
+let draggedTool = false;
+function dragTool(event, card) {
+  if (event.button !== 0) return;
+  const x0 = event.clientX, y0 = event.clientY;
+  draggedTool = false;
+  const move = e => {
+    if (!draggedTool && Math.hypot(e.clientX - x0, e.clientY - y0) < 6) {
+      return;
+    }
+    draggedTool = true;
+    card.classList.add("moving");
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const head = under?.closest(".group-head");
+    if (head) {
+      head.parentElement.querySelector(".tools").append(card);
+      return;
+    }
+    const over = under?.closest("#tools .tool");
+    if (!over || over === card) return;
+    const cards = [...document.querySelectorAll("#tools .tool")];
+    over[cards.indexOf(over) > cards.indexOf(card) ? "after" : "before"](card);
+  };
+  const up = () => {
+    removeEventListener("pointermove", move);
+    removeEventListener("pointerup", up);
+    card.classList.remove("moving");
+    if (!draggedTool) return;
+    const cards = [...document.querySelectorAll("#tools .tool")];
+    const groups = { ...palette().groups };
+    for (const c of cards) {
+      groups[c.dataset.tool] = c.closest(".tool-group").dataset.group;
+    }
+    savePalette({ order: cards.map(c => c.dataset.tool), groups });
+    buildTools();
+    // The click that ends the drag must not pick the card.
+    setTimeout(() => { draggedTool = false; });
+  };
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", up);
+}
+
 function buildTools() {
   // The CAD's modules by their own names unless renamed, and not those
   // deleted, which layouts still use but are not placed any more.
@@ -886,18 +987,49 @@ function buildTools() {
                                   ? label(type) : name]);
   TOOLS = [...cad, ...Object.keys(info.types).filter(isBlock).sort()
     .map(type => [type, label(type)])];
+  // In the order dragged to, new parts last, then gathered by group, the
+  // groups in the order they first come.
+  const { order, shut } = palette();
+  const at = type => order.includes(type) ? order.indexOf(type)
+                                          : order.length;
+  TOOLS.sort((a, b) => at(a[0]) - at(b[0]));
+  const byGroup = new Map();
+  for (const t of TOOLS) {
+    const group = toolGroup(...t);
+    byGroup.set(group, [...(byGroup.get(group) || []), t]);
+  }
+  TOOLS = [...byGroup.values()].flat();
   if (!TOOLS.some(([type]) => type === tool) && TOOLS.length) {
     tool = TOOLS[0][0];
   }
-  const tools = document.getElementById("tools");
-  tools.replaceChildren();
+  const palettePanel = document.getElementById("tools");
+  palettePanel.replaceChildren();
+  const grids = new Map();
+  for (const [group, list] of byGroup) {
+    const box = document.createElement("div");
+    box.className = "tool-group";
+    box.dataset.group = group;
+    const head = document.createElement("button");
+    head.className = "group-head";
+    head.setAttribute("aria-expanded", !shut.includes(group));
+    head.title = "Fold or unfold. Drop a card here to move it to this group";
+    head.textContent = `${group} (${list.length})`;
+    head.addEventListener("click", () => toggleGroup(group));
+    const grid = document.createElement("div");
+    grid.className = "tools";
+    grid.hidden = shut.includes(group);
+    box.append(head, grid);
+    palettePanel.appendChild(box);
+    grids.set(group, grid);
+  }
   TOOLS.forEach(([type, name], i) => {
     const b = document.createElement("button");
     b.className = "tool";
     b.dataset.tool = type;
     b.setAttribute("aria-pressed",
                    type === tool && !deleting && !paintMode);
-    b.title = `Place a ${label(type)}`;
+    b.title = `Place a ${label(type)}. Drag to move it, right click to ` +
+      "change its group";
     const svg = el("svg", { viewBox: "0 0 30 30", id: `tool-${type}` }, b);
     const img = document.createElement("img");
     img.id = `icon-${type}`;
@@ -911,8 +1043,15 @@ function buildTools() {
     text.textContent = name.replace(/([-_])/g, "$1\u200b");
     b.append(svg, img, text);
     if (i < 9) b.append(kbd);
-    b.addEventListener("click", () => setTool(type));
-    tools.appendChild(b);
+    b.addEventListener("click", () => {
+      if (!draggedTool) setTool(type);
+    });
+    b.addEventListener("pointerdown", event => dragTool(event, b));
+    b.addEventListener("contextmenu", event => {
+      event.preventDefault();
+      regroupTool(type);
+    });
+    grids.get(toolGroup(type, name)).appendChild(b);
   });
 
   sizeEl.replaceChildren();

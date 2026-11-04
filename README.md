@@ -1196,6 +1196,19 @@ the board. Restore puts it back on the palette. Both are kept in
 `layouts/parts/builtin.json`; renaming one back to its own name, or
 deleting that file, undoes them.
 
+The Place palette shows the parts in groups, guessed from their names
+(Ramp, Floor, Wall, Platform, Thwomp, Terrain, or Other). Click a group's
+name to fold it shut. Drag a card onto another card to move it there, into
+another group too, or onto a group's name to put it at that group's end;
+right click a card to type a new group for it. The number keys 1 to 9
+follow the order on screen, folded groups included. The order, groups and
+folds are kept in the browser, so layouts and other browsers do not change.
+
+Checked on 2026-11-04 in headless Chromium: a platform dragged into the
+Ramp group, the floor tile dropped on the Ramp heading, the Wall group
+folded, key 1 picking the new first card, and all of it the same after a
+reload.
+
 Checked on 2026-11-04 with the tests (the ramp renamed to slope, deleted
 with a saved layout still opening, restored under a new name and renamed
 back) and in headless Chromium: the ramp renamed, the wall deleted off the
