@@ -34,6 +34,16 @@ MIN_BUTTONS = 10
 
 MAC_ADDRESS = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
 
+# Devices that can have a js node and enough axes but are not controllers.
+NOT_CONTROLLERS = re.compile(r"keyd|virtual pointer|mouse|touchpad$",
+                             re.IGNORECASE)
+
+
+def is_controller_name(name):
+    """Whether a device's name could be a controller's: keyd's virtual
+    pointer, for one, is not."""
+    return not NOT_CONTROLLERS.search(name or "")
+
 
 def is_virtual(path, address):
     """Whether the js device at sysfs path, links followed, is made by
@@ -83,7 +93,7 @@ def find_gamepads():
         name = _read_sysfs(os.path.join(sysfs, "device", "name"))
         device = os.path.join("/dev/input", os.path.basename(sysfs))
 
-        if name.endswith("Motion Sensors"):
+        if name.endswith("Motion Sensors") or not is_controller_name(name):
             continue
 
         try:
