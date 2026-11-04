@@ -192,6 +192,12 @@
   .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block;
          margin-right: 6px; background: var(--muted); }
   .dot.on { background: var(--good); }
+  .dot.warn { background: #d29a2a; }
+  .dot.bad { background: var(--bad); }
+  .health { font-size: 12.5px; color: var(--muted); }
+  .health.bad { color: var(--bad); }
+  #pairing-head { display: flex; align-items: center; gap: 8px; }
+  #pairing-head h2 { flex: 1; }
 
   .title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .title h3 { margin: 0; font-size: 16px; }
@@ -262,6 +268,12 @@
     <section class="panel">
       <h2>Controllers</h2>
       <div id="controllers"></div>
+    </section>
+    <section class="panel">
+      <div id="pairing-head"><h2>Pairing</h2>
+        <button id="scan" title="Look for controllers in pairing mode">
+          Find controllers</button></div>
+      <div id="pairing"><p class="empty">Checking Bluetooth…</p></div>
     </section>
   </div>
 
@@ -1022,6 +1034,67 @@ function render() {
   drawLive();
 }
 
+// -- pairing -------------------------------------------------------------------
+
+let pairing = null;
+
+function renderPairing() {
+  const box = document.getElementById("pairing");
+  const scan = document.getElementById("scan");
+  const signature = JSON.stringify(pairing);
+  if (built.pairing === signature) return;
+  built.pairing = signature;
+  if (!pairing) return;
+  scan.disabled = !pairing.available || pairing.scanning;
+  scan.textContent = pairing.scanning ? "Looking…" : "Find controllers";
+
+  const rows = [];
+  if (!pairing.available) rows.push(h("p", { class: "empty" },
+    "bluetoothctl is not installed here, so only wired and virtual " +
+    "controllers are listed."));
+  if (pairing.error) rows.push(h("p", { class: "health bad" },
+    pairing.error));
+  if (!pairing.controllers.length) rows.push(h("p", { class: "empty" },
+    "No controllers known. Hold Create and PS until the light flashes, " +
+    "then Find controllers."));
+  rows.push(...pairing.controllers.map(pad => {
+    const action = pad.action && h("button", {
+      disabled: !!pad.busy,
+      onclick: () => sendPairing(`/api/pairing/${pad.action}`,
+                                 { address: pad.address }),
+    }, pad.busy ? `${pad.busy[0].toUpperCase()}${pad.busy.slice(1)}…` :
+       pad.action === "pair" ? "Pair" : "Connect");
+    return h("div", { class: "controller" },
+      h("span", {}, h("span", { class: "dot " + (pad.state === "ok" ? "on" :
+                                                 pad.state) }),
+        pad.name || "Controller"),
+      h("span", { class: "addr" }, pad.address),
+      h("span", { class: "health" + (pad.state === "bad" ? " bad" : "") },
+        pad.problem),
+      action || "");
+  }));
+  box.replaceChildren(...rows);
+}
+
+async function pollPairing() {
+  try {
+    pairing = await api("/api/pairing");
+  } catch { return; }
+  renderPairing();
+}
+
+async function sendPairing(path, body) {
+  try {
+    await api(path, body);
+  } catch (error) {
+    setStatus(error.message, true, 4000);
+  }
+  await pollPairing();
+}
+
+document.getElementById("scan").onclick =
+  () => sendPairing("/api/pairing/scan", {});
+
 // -- polling -------------------------------------------------------------------
 
 let layouts = [];
@@ -1088,6 +1161,8 @@ document.addEventListener("keydown", event => {
   } catch { /* none yet */ }
   await poll();
   setInterval(poll, 150);
+  pollPairing();
+  setInterval(pollPairing, 2000);
 })();
 </script>
 </body>
