@@ -309,7 +309,19 @@ This is not in the editor's Run it command, which stays as the real arena
 runs. There `robot_control.launch.py` binds each controller to the robot
 `controllers.yaml` gives it, on the same `/robot_N/joy` and
 `/robot_N/cmd_vel` topics, and hotplug would bind them in the order they
-connect instead.
+connect instead. With `real:=true`, `controller_robots` binds controllers
+to real robots from the robot console instead (see Robot console).
+
+Checked on 2026-11-04 without ROS, which this machine lacked:
+`test_controller_robots.py` checks which program runs each robot's
+controls and which topics count as real robots, and `controller_robots`
+run with `real:=true` against stand-ins for ROS found robots 2 and 5 by
+their `cmd_vel`, started `controller_input` for a controller given robot
+5, swapped it for `racing_teleop` when its controls were changed, and
+refused to add or remove robots. A new test in `test_robot_console.py`
+gives a controller to a robot with no pose and changes its controls
+through the page's API; it needs ROS, so it was not run here. Not yet
+tried with real robots.
 
 Checked headless on 2026-10-16 on a layout with ramps stacked on a 1"
 platform up to a 2" one: a DualSense was bound to robot 2 with its motion
@@ -548,9 +560,23 @@ drives swaps robots with it; No robot takes it off every robot. This needs
 or `classic` is given. With `controller:=none`, the default, it lists every
 controller connected to the computer the sim runs on and gives none of
 them a robot until one is picked here; with `controller:=hotplug` each new
-controller gets a robot of its own as well. On the real arena
-`robot_control.launch.py` binds controllers from `controllers.yaml`, and
-the page says no `controller_robots` is running.
+controller gets a robot of its own as well.
+
+Real robots: on the real arena no `controller_robots` runs, and Start for
+real robots under Controllers starts one with `real:=true` (or run
+`ros2 run robogame_sim controller_robots --ros-args -p real:=true`). It
+spawns nothing. Each robot whose bridge listens on its `/robot_N/cmd_vel`
+is listed, a robot with no pose from the camera too, and controllers are
+given robots and swapped here as in the sim, with no `controllers.yaml`
+and no restart. Use it in place of `robot_control.launch.py`'s
+controllers, not beside them, or two would drive each robot. Each robot
+keeps its controls until they are changed in the list under its
+controller: Classic, the repo's `controller_input` as
+`robot_control.launch.py` runs it, which real robots start on, or Racing,
+`racing_teleop` with the triggers and wheel steering, which sim robots
+start on. Classic needs `arena_perception` in the workspace. Add robot and
+Remove are hidden for real robots. Stop takes down the `controller_robots`
+the page started, and it stops with the app too.
 
 Robots: with `controller_robots` running, Add robot under the robot list
 spawns a new one on open ground, with its own firmware and bridge,

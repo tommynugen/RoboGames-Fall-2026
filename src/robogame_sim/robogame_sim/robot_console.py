@@ -12,8 +12,11 @@ editor draws it and every robot on it, found by its
 
 On the page:
 
-- Bind controllers to robots. That goes through controller_robots, so it
-  works in a sim launched with controller:=hotplug.
+- Bind controllers to robots. That goes through controller_robots, which
+  the sim launch starts. On the real arena the page's Start button runs it
+  with real:=true, so it binds controllers to the real robots instead of
+  controllers.yaml, and each robot's controls (classic or racing) are
+  picked here.
 - Make a robot autonomous. Its controller is taken off it while it is, and
   this node drives it on /robot_N/cmd_vel, stowing its arm first on
   /robot_N/arm_command, as chase_node does. Its planned path is drawn on
@@ -34,6 +37,8 @@ import math
 import os
 import queue
 import re
+import signal
+import subprocess
 import threading
 import time
 
@@ -49,6 +54,7 @@ from robogame_sim import arena_layout, autopilot
 from robogame_sim.active_arena import LATCHED, TOPIC as ARENA_TOPIC
 from robogame_sim.autopilot import Autopilot
 from robogame_sim.chase import yaw_from_quaternion
+from robogame_sim.controller_robots import die_with_parent, executable
 from robogame_sim.robot_sdf import COLOURS
 from robogame_sim.terrain import HALF_LENGTH, HALF_WIDTH, Terrain
 
@@ -179,8 +185,12 @@ class RobotConsole(Node):
         self.robots = {}
         self.controllers = None
         self.published_arena = None
-        # The robots controller_robots has in the world, when it runs.
+        # The robots controller_robots has in the world, when it runs, and
+        # the rest of what it says: real arena or sim, each robot's controls.
         self.managed = None
+        self.manager_state = {}
+        # The controller_robots the page started, for the real arena.
+        self.manager_process = None
         self.override = p["layout"] or None
 
         # The arena in use, and the one loading.
@@ -242,6 +252,7 @@ class RobotConsole(Node):
         if self.count_publishers(CONTROLLER_STATE) == 0:
             self.controllers = None
             self.managed = None
+            self.manager_state = {}
         if self.count_publishers(ARENA_TOPIC) == 0:
             self.published_arena = None
 
@@ -339,6 +350,7 @@ class RobotConsole(Node):
             self.controllers = state["controllers"]
             self.managed = (set(state["robots"]) if "robots" in state
                             else None)
+            self.manager_state = state
         except (ValueError, KeyError):
             self.get_logger().warning(f"Bad message on {CONTROLLER_STATE}")
 
@@ -516,6 +528,14 @@ class RobotConsole(Node):
             "controllers": self.controllers,
             # Robots can be added and removed, through controller_robots.
             "manager": self.controllers is not None,
+            # Real robots, which are not added or removed here, and the
+            # robots controllers can go to, a real one with no pose too.
+            "real": bool(self.manager_state.get("real")),
+            "managed": sorted(self.managed or []),
+            "controls": self.manager_state.get("controls", {}),
+            "options": self.manager_state.get("options", []),
+            "started": self.manager_process is not None
+            and self.manager_process.poll() is None,
             "arena": {
                 "name": self.arena and self.arena["name"],
                 "source": self.arena and self.arena["source"],
@@ -587,14 +607,48 @@ class RobotConsole(Node):
 
     def change_controller(self, address, robot_id):
         if robot_id is not None:
-            robot = self.robot(int(robot_id))
-            if robot.autopilot is not None:
+            robot_id = int(robot_id)
+            robot = self.robots.get(robot_id)
+            if robot is None and robot_id not in (self.managed or ()):
+                raise KeyError(f"no robot {robot_id}")
+            if robot is not None and robot.autopilot is not None:
                 raise ValueError(
                     f"robot {robot_id} is autonomous, make it manual first")
-            robot_id = robot.id
         if not any(c["address"] == address for c in self.controllers or []):
             raise KeyError(f"no controller {address}")
         self.assign(address, robot_id)
+
+    def change_controls(self, robot_id, controls):
+        self.need_manager()
+        if int(robot_id) not in (self.managed or ()):
+            raise KeyError(f"no robot {robot_id}")
+        if controls not in self.manager_state.get("options", []):
+            raise ValueError(f"no {controls} controls here")
+        self.robots_publisher.publish(String(data=json.dumps(
+            {"robot": int(robot_id), "controls": controls})))
+
+    def start_manager(self):
+        """Runs controller_robots for the real arena, when none runs."""
+        if self.controllers is not None or (
+                self.manager_process is not None
+                and self.manager_process.poll() is None):
+            raise ValueError("controller_robots is running already")
+        self.manager_process = subprocess.Popen(
+            [executable("robogame_sim", "controller_robots"),
+             "--ros-args", "-p", "real:=true"],
+            preexec_fn=die_with_parent)
+        self.get_logger().info("Started controller_robots for real robots")
+
+    def stop_manager(self):
+        process, self.manager_process = self.manager_process, None
+        if process is None or process.poll() is not None:
+            return
+        process.send_signal(signal.SIGINT)
+        try:
+            # Under the page's 2 s wait for an answer.
+            process.wait(1.5)
+        except subprocess.TimeoutExpired:
+            process.kill()
 
     def add_robot_to_world(self):
         self.need_manager()
@@ -626,6 +680,7 @@ class RobotConsole(Node):
         for robot in self.robots.values():
             if robot.autopilot is not None:
                 robot.cmd_publisher.publish(Twist())
+        self.stop_manager()
 
 
 def get(console, path):
@@ -643,6 +698,11 @@ def get(console, path):
 
 def post(console, path, read_body):
     """The console's POST routes. read_body gives the request's JSON."""
+    if path in ("/api/controllers/start", "/api/controllers/stop"):
+        ok, result = console.call(
+            console.start_manager if path.endswith("start")
+            else console.stop_manager)
+        return (200, {"ok": True}) if ok else (400, {"error": result})
     if path == "/api/robots/add":
         ok, result = console.call(console.add_robot_to_world)
         return (200, {"ok": True}) if ok else (400, {"error": result})
@@ -656,6 +716,8 @@ def post(console, path, read_body):
         call = (console.change_robot, int(match.group(1)))
     elif path == "/api/controllers":
         call = (console.change_controller,)
+    elif path == "/api/controls":
+        call = (console.change_controls,)
     elif path == "/api/arena":
         call = (console.pick_arena,)
     else:
@@ -667,6 +729,8 @@ def post(console, path, read_body):
         return 400, {"error": "bad JSON"}
     if path == "/api/controllers":
         call += (asked.get("address"), asked.get("robot"))
+    elif path == "/api/controls":
+        call += (asked.get("robot"), asked.get("controls"))
     elif path == "/api/arena":
         call += (asked.get("layout"),)
     else:

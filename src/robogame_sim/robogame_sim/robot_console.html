@@ -688,7 +688,7 @@ function robotSummary(robot) {
 function renderRobots() {
   const box = document.getElementById("robots");
   const robots = state.robots;
-  document.getElementById("add-robot").hidden = !state.manager;
+  document.getElementById("add-robot").hidden = !state.manager || state.real;
   const signature = JSON.stringify([selected, robots.map(r => [
     r.id, r.colour, r.fresh, r.autonomous, robotSummary(r)])]);
   if (built.robots === signature) return;
@@ -712,27 +712,52 @@ function renderRobots() {
     h("span", { class: "what" }, robotSummary(r)))));
 }
 
+const CONTROLS = {
+  classic: "Classic controls (controller_input)",
+  racing: "Racing controls (triggers, wheel steering)",
+};
+
+function startButton() {
+  return h("button", {
+    title: "Run controller_robots for the real robots, in place of " +
+           "controllers.yaml",
+    onclick: () => send("/api/controllers/start", {}),
+  }, "Start for real robots");
+}
+
 function renderControllers() {
   const box = document.getElementById("controllers");
   const pads = state.controllers;
-  const signature = JSON.stringify([pads, state.robots.map(r => [
-    r.id, r.autonomous])]);
+  // A real robot can take a controller before the camera gives it a pose.
+  const ids = [...new Set([...state.robots.map(r => r.id),
+                           ...(state.managed || [])])].sort((a, b) => a - b);
+  const signature = JSON.stringify([pads, ids, state.robots.map(r => [
+    r.id, r.autonomous]), state.real, state.controls, state.options,
+    state.started]);
   if (built.controllers === signature) return;
   built.controllers = signature;
 
   if (!pads) {
     box.replaceChildren(h("p", { class: "empty" },
-      "No controller_robots running, so controllers cannot be bound to " +
-      "robots here. The sim launch starts it unless ",
-      h("code", {}, "controller:=joy"), " or ",
-      h("code", {}, "classic"), " is given."));
+      state.started ? "Starting controller_robots…" :
+      ["No controller_robots running, so controllers cannot be bound to " +
+       "robots here. The sim launch starts it unless ",
+       h("code", {}, "controller:=joy"), " or ",
+       h("code", {}, "classic"), " is given. On the real arena, start it " +
+       "here."]),
+      state.started ? null : startButton());
     return;
   }
+  const stop = state.started ? h("button", {
+    title: "Stop the controller_robots this page started",
+    onclick: () => send("/api/controllers/stop", {}),
+  }, "Stop") : null;
   if (!pads.length) {
     box.replaceChildren(h("p", { class: "empty" },
-      "No controllers connected yet."));
+      "No controllers connected yet."), stop);
     return;
   }
+  const auto = id => (robotById(id) || {}).autonomous;
   box.replaceChildren(...pads.map(pad => {
     const choose = h("select", {
       "aria-label": `Robot ${pad.name} drives`,
@@ -741,19 +766,30 @@ function renderControllers() {
         robot: event.target.value === "" ? null : +event.target.value,
       }),
     }, h("option", { value: "" }, "No robot"),
-       state.robots.map(r => h("option", {
-         value: r.id, disabled: r.autonomous,
-         selected: pad.robot === r.id,
-       }, `Robot ${r.id}${r.autonomous ? " (autonomous)" : ""}`)));
+       ids.map(id => h("option", {
+         value: id, disabled: auto(id),
+         selected: pad.robot === id,
+       }, `Robot ${id}${auto(id) ? " (autonomous)" : ""}`)));
     if (pad.robot == null) choose.value = "";
+    // Each robot keeps its controls, so they only change when picked here.
+    const options = state.options || [];
+    const controls = pad.robot != null && options.length > 1 ?
+      h("select", {
+        "aria-label": `Robot ${pad.robot} controls`,
+        onchange: event => send("/api/controls", {
+          robot: pad.robot, controls: event.target.value,
+        }),
+      }, options.map(c => h("option", {
+        value: c, selected: (state.controls || {})[pad.robot] === c,
+      }, CONTROLS[c] || c))) : null;
     return h("div", { class: "controller" },
       h("span", {}, h("span", { class: "dot" + (pad.connected ? " on" : ""),
                                 title: pad.connected ? "connected" :
                                   "disconnected" }),
         (pad.name || "Controller") + (pad.virtual ? " (virtual)" : "")),
       h("span", { class: "addr" }, pad.address),
-      choose);
-  }));
+      choose, controls);
+  }), ...(stop ? [stop] : []));
 }
 
 function robotOptions(except, chosen) {
@@ -778,7 +814,7 @@ function renderDetail() {
   const others = state.robots.filter(r => r.id !== robot.id).map(r => r.id);
   const signature = JSON.stringify([robot.id, robot.autonomous,
     pilot && pilot.mode, pilot && pilot.chase_target, others,
-    robot.drivers, robot.controller, state.manager]);
+    robot.drivers, robot.controller, state.manager, state.real]);
   if (built.detail !== signature) {
     built.detail = signature;
     built.queue = null;
@@ -804,7 +840,7 @@ function buildDetail(robot) {
     h("div", { class: "title" },
       h("span", { class: "swatch", style: `background:${robot.colour}` }),
       h("h3", {}, `Robot ${robot.id}`),
-      state.manager ? h("button", {
+      state.manager && !state.real ? h("button", {
         class: "danger", style: "margin-left:auto",
         title: "Take this robot out of the world",
         onclick: async () => {
