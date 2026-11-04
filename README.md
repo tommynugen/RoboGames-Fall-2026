@@ -314,6 +314,17 @@ says whether it sees the four corner tags; it opens the Vision tab. Each
 tab's page title is its tab's name.
 GET `/api/app` gives what the bar shows.
 
+Quit, at the top right, stops the Gamemaster after an OK: the same as
+Ctrl-C in its terminal, so the sim, BLE bridge, controller robots,
+camera, arena_perception nodes and Upkeep or Chase jobs it started stop
+too, and autonomous robots get a stop first. The page then says how to
+start it again and reloads by itself once the app is back. It is POST
+`/api/quit`.
+
+Checked 2026-11-04: `test_setup.py`, and Quit in Chromium (Playwright)
+without ROS: the app exited and the page showed the restart line. The
+ROS loop (spin in 0.25 s steps until Quit) is not yet run with ROS.
+
 Checked 2026-11-04: tests (`test_app_log.py`, `test_sim_runner.py`) and
 the page in Chromium (Playwright) without ROS: the badge and pop-up for a
 404, Alt+3, the tab kept for a bare URL and the red bar once the app was

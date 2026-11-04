@@ -83,7 +83,7 @@ the app again. The arena editor works without it.</p>"""
 
 
 def handler(console=None, sim=None, book=None, bridge=None, vision=None,
-            upkeep=None, chase=None, tags=None, nodes=None):
+            upkeep=None, chase=None, tags=None, nodes=None, quit=None):
     """A request handler for the app. console is the RobotConsole node, or
     None to serve the editor alone. sim is the SimRunner behind the
     editor's Launch buttons, or None for none. book is the LogBook the
@@ -93,7 +93,8 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
     UpkeepRunner behind the Upkeep tab, or None. chase is the ChaseRunner
     behind the Chase tab, or None. tags is the robot tag map
     (perception.TagRobots) and nodes arena_perception's nodes
-    (perception.Perception)."""
+    (perception.Perception). quit, called with no arguments, stops the
+    app, for the Quit button: POST /api/quit."""
     book = book or app_log.LogBook()
     vision = vision or vision_tab.Vision(book)
     tags = tags or perception.TagRobots(
@@ -247,6 +248,12 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
 
         def do_POST(self):
             path = unquote(self.path)
+            if path == "/api/quit" and quit is not None:
+                # Answer first: the page then says the app has stopped.
+                self.reply(200, {"stopping": True})
+                say(book, "Quit from the page: stopping the app.")
+                quit()
+                return
             self.note(self.answer(
                 ("sim", lambda: sim and sim.post(path, self.read_body)),
                 ("bridge", lambda: bridge and bridge.post(
@@ -371,8 +378,11 @@ def main(args=None):
         console.tag_robots = tags
     upkeep = UpkeepRunner()
     chase = ChaseRunner()
+    # The page's Quit button sets this; the finally below then stops it all.
+    quitting = threading.Event()
     server.RequestHandlerClass = handler(console, sim, book, bridge, vision,
-                                         upkeep, chase, tags, nodes)
+                                         upkeep, chase, tags, nodes,
+                                         quitting.set)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     say(book, f"RoboGame Gamemaster on {url}, saving layouts to "
@@ -383,12 +393,13 @@ def main(args=None):
 
     try:
         if console is None:
-            threading.Event().wait()
+            quitting.wait()
         else:
             import rclpy
             from rclpy.executors import ExternalShutdownException
             try:
-                rclpy.spin(console)
+                while rclpy.ok() and not quitting.is_set():
+                    rclpy.spin_once(console, timeout_sec=0.25)
             except ExternalShutdownException:
                 pass
     except KeyboardInterrupt:
