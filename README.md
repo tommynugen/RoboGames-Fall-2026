@@ -1114,8 +1114,7 @@ typed is kept in the STL's header for the editor to show.
 
 The editor's Parts panel lists the dropped parts, each with Rename and
 Delete. Rename renames the file and the part's modules in the layouts
-saved in `layouts`, and refuses a name that is taken or one of the CAD's
-modules, which cannot be renamed or deleted. Rename and Delete also take
+saved in `layouts`, and refuses a name that is taken. Rename and Delete also take
 away the copy of the part that colcon installs in
 `install/robogame_sim/share/robogame_sim/layouts/parts`, which before
 2026-11-03 stayed on as a second module under the old name. Delete moves the file to
@@ -1124,6 +1123,20 @@ taken, and takes the part's modules off the board; layouts that use it
 are left as they are, and do not open until it is back. The Archive, under
 the panel, lists what was deleted and when, and Restore brings a part
 back under its own name, or asks for another if a part has it now.
+
+The six CAD modules (the two platforms, ramp, wall, thwomp and floor tile)
+are in the Parts panel too, with Rename and Delete. They keep their type,
+so renaming one only changes the name the palette and the checks show,
+and no layout is changed. Delete takes one off the palette and puts it in
+the Archive; layouts that use it still open, run in Gazebo and show it on
+the board. Restore puts it back on the palette. Both are kept in
+`layouts/parts/builtin.json`; renaming one back to its own name, or
+deleting that file, undoes them.
+
+Checked on 2026-11-04 with the tests (the ramp renamed to slope, deleted
+with a saved layout still opening, restored under a new name and renamed
+back) and in headless Chromium: the ramp renamed, the wall deleted off the
+palette and restored from the Archive.
 
 Checked on 2026-11-02 with the tests (rename in a saved layout, delete
 twice under one name, restore, and refusing the CAD's modules) and in
