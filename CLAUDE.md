@@ -42,6 +42,7 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `racing_teleop.py`, `drive_controls.py`, `motion_sensor.py` | PS4/PS5 racing controls and wheel steering |
 | `controller_robots.py`, `gamepads.py` | a robot for every controller connected (hotplug); takes rebinds from the console |
 | `robot_console.py` + `robot_console.html` | the robot console, the app's Robot console tab (page at `/console`), its node and `get`/`post` API routes: bind controllers, make robots autonomous, send them places |
+| `ble_bridge.py` | the console's BLE bridge Start/Stop: runs `bridge.launch.py`, reads its log lines for which robots are found or connected |
 | `autopilot.py` | the console's driving: command queue and chase mode, on `Chaser` |
 | `app_log.py` + `app_log.html` | the app's Console tab (`#logs`, page at `/logs`): log lines by source (editor, console, teleop, sim, app) and `/api/logs` |
 | `active_arena.py` | publishes the arena in use on `/arena/layout`, latched; the sim launch starts one |

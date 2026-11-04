@@ -10,6 +10,8 @@ with where it came from:
   racing_teleop), wherever they run.
 - sim: the output of the Gazebo sim started from the editor's Launch
   buttons, read from its log file as it grows.
+- bridge: the output of the BLE bridge started from the console's Bridge
+  button (ble_bridge.py).
 - app: the app itself (start, stop, no ROS).
 
 Route, served by gamemaster.py:
@@ -24,7 +26,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
-SOURCES = ("editor", "console", "teleop", "sim", "app")
+SOURCES = ("editor", "console", "teleop", "sim", "bridge", "app")
 KEEP = 5000  # lines kept, for all sources together
 READ = 1 << 20  # bytes of sim log read at most per poll
 # ROS node names whose log goes to the teleop tab.
