@@ -38,6 +38,7 @@ def test_launch_and_stop(runner):
         runner.start("default")  # one at a time
     status = runner.stop()
     assert not status["running"] and status["exit"] is not None
+    assert status["stopped"]  # by Stop, not a failure
 
 
 def test_refuses_bad_names(runner):

@@ -252,9 +252,30 @@ tests, and the button's Launching…, Running and Stop on hover in Chromium
 releases) is not yet checked against Gazebo; if neither shows, the button
 turns to Running after 90 s.
 
-## The app's Console tab
+## The app's status bar and tabs
 
-The Console tab, right of Arena editor and Robot console, shows the
+Right of the Gamemaster's tabs a status bar shows, every 2 s, whether ROS
+is sourced, the sim's state (No sim, Launching NAME, Sim: NAME, or Sim
+stopped in red when a run ended on its own with an error code), the
+BLE bridge's once it is started (searching, found or lost), how many
+robots the console sees and the arena in use. Click one to open the tab
+that deals with it: the sim's opens the Arena editor and its Launch
+buttons, or Logs after a failed run. The Logs tab shows in red how many
+errors came since it was last looked at, and a new error pops up in the
+bottom corner for 15 s while another tab shows, with Show to open Logs.
+If the app stops answering, a red bar says how to start it again, and
+the page reconnects by itself. Alt+1, Alt+2 and Alt+3 switch tabs, and
+opening http://localhost:8766 with no tab named opens the one shown last.
+GET `/api/app` gives what the bar shows.
+
+Checked 2026-11-04: tests (`test_app_log.py`, `test_sim_runner.py`) and
+the page in Chromium (Playwright) without ROS: the badge and pop-up for a
+404, Alt+3, the tab kept for a bare URL and the red bar once the app was
+stopped. Not yet run with ROS or a sim.
+
+## The app's Logs tab
+
+The Logs tab, right of Arena editor and Robot console, shows the
 app's log lines as they come, once a second. Its own tabs split them by
 where they came from, and All shows them together, each tagged:
 
@@ -588,7 +609,7 @@ until the sim stops, so its number is not used again.
 
 BLE bridge: Start, at the top of the console, runs the real robots'
 bridge, `ros2 launch arena_perception bridge.launch.py`, and Stop stops it
-with Ctrl-C. Its output goes on the Console tab under Bridge, and the
+with Ctrl-C. Its output goes on the Logs tab under Bridge, and the
 panel says whether it is searching, has robots connected, or has lost
 them. `arena_perception` is a synced copy that is not changed here, so the
 console reads the bridge's log lines to tell this (`ble_bridge.py`); if
@@ -680,7 +701,7 @@ game controller on this computer, and what is wrong with it. It reads
 Pair forgets the controller, waits up to 20 s to see it again (hold Create
 and PS until the light flashes fast first), then pairs, trusts and
 connects it. Find controllers scans for 15 s for new ones. Steps and
-errors go to the Console tab. Devices that are not controllers, like
+errors go to the Logs tab. Devices that are not controllers, like
 keyd's virtual pointer or a mouse, are left out here and in
 `controller_robots`. Without bluetoothctl only wired and virtual pads are
 listed.

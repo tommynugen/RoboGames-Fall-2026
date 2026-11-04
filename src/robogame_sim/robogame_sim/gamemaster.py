@@ -10,9 +10,16 @@ Serves http://localhost:8766 with three tabs:
   arena_editor.html.
 - Robot console (#console): every robot in the arena, who drives it and
   where it goes. robot_console.py and robot_console.html.
-- Console (#logs): the log lines of the editor, the robot console, the
+- Logs (#logs): the log lines of the editor, the robot console, the
   controller nodes, the sim and the app, each on its own tab and all
   together on All. app_log.py and app_log.html.
+
+Right of the tabs a status bar shows, every 2 s from GET /api/app,
+whether ROS is on, the sim's state, the BLE bridge's, how many robots
+the console sees and the arena in use; each opens the tab that deals with it. The Logs tab
+counts the errors not yet looked at, and a new one pops up in a corner
+while another tab shows. Alt+1 to Alt+3 switch tabs, and a bare URL
+opens the tab shown last.
 
 Both tabs are live at once, so a layout saved in the editor is the one the
 console draws and plans over at once (when no sim publishes its own), and
@@ -62,7 +69,7 @@ def handler(console=None, sim=None, book=None, bridge=None):
     """A request handler for the app. console is the RobotConsole node, or
     None to serve the editor alone. sim is the SimRunner behind the
     editor's Launch buttons, or None for none. book is the LogBook the
-    Console tab shows, which gets a line for each change asked. bridge
+    Logs tab shows, which gets a line for each change asked. bridge
     is the BridgeRunner behind the console's Bridge buttons, or None."""
     book = book or app_log.LogBook()
     if console is not None:
@@ -96,7 +103,7 @@ def handler(console=None, sim=None, book=None, bridge=None):
 
         def answer(self, *routes):
             """Replies with the first route that takes the path. routes
-            are (source, route): source names the Console tab the
+            are (source, route): source names the Logs tab the
             request's log line goes to."""
             for source, route in routes:
                 result = route()
@@ -141,7 +148,7 @@ def handler(console=None, sim=None, book=None, bridge=None):
             if path == "/logs":
                 return self.file(LOGS_PAGE, HTML)
             if path == "/api/app":
-                return self.reply(200, {"console": console is not None})
+                return self.reply(200, status(console, sim, book, bridge))
             source = self.answer(
                 ("app", lambda: book.get(self.path)),
                 ("sim", lambda: sim and sim.get(path)),
@@ -180,8 +187,30 @@ def handler(console=None, sim=None, book=None, bridge=None):
     return Handler
 
 
+def status(console, sim, book, bridge=None):
+    """What the shell's status bar shows: whether ROS is on, the sim's
+    state, the robots and arena the console sees, and the newest error
+    line."""
+    reply = {"console": console is not None, "sim": None, "robots": None,
+             "arena": None, "bridge": None, "logs": book.summary()}
+    if bridge is not None:
+        state = bridge.status()
+        reply["bridge"] = {"state": state["state"],
+                           "robots": len(state["robots"])}
+    if sim is not None:
+        state = sim.status()
+        reply["sim"] = {key: state.get(key)
+                        for key in ("running", "ready", "layout", "exit",
+                                    "stopped")}
+    if console is not None:
+        snapshot = console.state() or {}
+        reply["robots"] = len(snapshot.get("robots", []))
+        reply["arena"] = (snapshot.get("arena") or {}).get("name")
+    return reply
+
+
 def say(book, text, level="info"):
-    """Prints text and puts it on the Console tab's app log."""
+    """Prints text and puts it on the Logs tab's app log."""
     print(text, flush=True)
     book.add("app", text, level)
 
