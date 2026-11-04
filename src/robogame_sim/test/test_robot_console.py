@@ -338,3 +338,36 @@ def test_height_map_puts_the_top_row_first():
     # Row 0 of the page's image is the arena's +y edge.
     top_left = round(terrain.height[0, ny - 1] * 1000)
     assert heights["mm"][0] == top_left
+
+
+class StubBridge:
+    """A BridgeRunner that has found robot 8 and is connected to it."""
+
+    def robots(self):
+        return {8: "connected"}
+
+    def status(self):
+        return {"running": True, "state": "found",
+                "robots": {"8": "connected"}, "error": ""}
+
+
+def test_robots_the_bridge_found_are_listed_without_a_position(console):
+    url, node, _ = console
+    # A bridge run in a terminal shows by taking robot 7's cmd_vel.
+    bridge = Node("microcontroller_node")
+    bridge.create_subscription(Twist, "/robot_7/cmd_vel", lambda m: None, 10)
+    node.bridge = StubBridge()
+    try:
+        robot = wait_for(lambda: robot_state(url, 7))
+        assert robot["pose"] is None and robot["link"] == "bridge"
+        assert wait_for(lambda: robot_state(url, 8))["link"] == "connected"
+        assert call(url + "/api/state")[1]["bridge"]["state"] == "found"
+
+        # Driven by hand only: autonomy needs the arena camera.
+        code, body = call(url + "/api/robots/7", "POST",
+                          {"autonomous": True})
+        assert code == 400 and "position" in body["error"]
+        assert not robot_state(url, 7)["autonomous"]
+    finally:
+        node.bridge = None
+        bridge.destroy_node()

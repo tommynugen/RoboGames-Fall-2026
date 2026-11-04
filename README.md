@@ -586,6 +586,20 @@ controller is left on no robot, and an autonomous one is made manual
 first. A robot the launch started keeps its firmware and bridge, idle,
 until the sim stops, so its number is not used again.
 
+BLE bridge: Start, at the top of the console, runs the real robots'
+bridge, `ros2 launch arena_perception bridge.launch.py`, and Stop stops it
+with Ctrl-C. Its output goes on the Console tab under Bridge, and the
+panel says whether it is searching, has robots connected, or has lost
+them. `arena_perception` is a synced copy that is not changed here, so the
+console reads the bridge's log lines to tell this (`ble_bridge.py`); if
+the bridge's wording changes, `test_ble_bridge.py` fails until the two
+are matched again. Each robot the bridge finds is listed straight away,
+as is one found by a bridge run in a terminal (it takes the robot's
+`/robot_N/cmd_vel`). Until the arena camera gives it a position it is not
+drawn on the arena and can only be driven by hand: Autonomous is greyed
+out. Checked on 2026-11-04 with the tests (a stand-in ros2 printing the
+bridge's lines), not yet with a real robot or ROS.
+
 Pick a robot in the list, or with keys 1 to 9, and make it Autonomous.
 The console then drives it on `/robot_N/cmd_vel` with `Chaser`, the
 steering `chase_node` uses, so it plans round platforms, lines up for

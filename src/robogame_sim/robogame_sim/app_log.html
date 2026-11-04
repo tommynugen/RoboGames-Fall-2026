@@ -78,7 +78,7 @@
 // The tabs: All, then one for each source app_log.py tags lines with.
 const TABS = [
   ["all", "All"], ["editor", "Arena editor"], ["console", "Robot console"],
-  ["teleop", "Teleop"], ["sim", "Gazebo sim"], ["app", "App"],
+  ["teleop", "Teleop"], ["sim", "Gazebo sim"], ["bridge", "Bridge"], ["app", "App"],
 ];
 const NAMES = Object.fromEntries(TABS);
 const KEEP = 5000;  // lines kept in the page
@@ -89,6 +89,8 @@ const EMPTY = {
   teleop: "The controller nodes' ROS log (controller_robots, racing_teleop)"
     + " shows here, wherever they run.",
   sim: "The output of a sim launched from the editor shows here.",
+  bridge: "The BLE bridge's output shows here, once it is started from"
+    + " the Robot console.",
   app: "The app's own messages show here.",
 };
 

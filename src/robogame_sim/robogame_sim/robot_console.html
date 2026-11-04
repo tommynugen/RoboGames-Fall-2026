@@ -198,6 +198,8 @@
   .health.bad { color: var(--bad); }
   #pairing-head { display: flex; align-items: center; gap: 8px; }
   #pairing-head h2 { flex: 1; }
+  #bridge-row { display: flex; align-items: center; gap: 6px; }
+  #bridge-row #bridge-state { flex: 1; font-size: 13px; }
 
   .title { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .title h3 { margin: 0; font-size: 16px; }
@@ -257,12 +259,24 @@
 <main>
   <div class="column" id="left">
     <section class="panel">
+      <h2>BLE bridge</h2>
+      <div id="bridge-row">
+        <span class="dot" id="bridge-dot"></span>
+        <span id="bridge-state">…</span>
+        <button id="bridge-button"
+                title="Start or stop the real robots' BLE bridge">Start</button>
+      </div>
+      <p class="warn" id="bridge-error" hidden></p>
+      <p class="note">Connects the real robots. Its output is on the
+        Console tab, under Bridge.</p>
+    </section>
+    <section class="panel">
       <h2>Robots</h2>
       <div id="robots"><p class="empty">Looking for robots…</p></div>
       <button id="add-robot" hidden
               title="Spawn a new robot on open ground">Add robot</button>
       <p class="note">Robots are found by their
-        <code>/model/robot_N/odometry</code>. Keys <kbd>1</kbd> to
+        <code>/model/robot_N/odometry</code>, or by the BLE bridge. Keys <kbd>1</kbd> to
         <kbd>9</kbd> pick one.</p>
     </section>
     <section class="panel">
@@ -392,6 +406,43 @@ async function send(path, body) {
 const changeRobot = (id, body) => send(`/api/robots/${id}`, body);
 document.getElementById("add-robot").addEventListener(
   "click", () => send("/api/robots/add", {}));
+document.getElementById("bridge-button").addEventListener("click", () =>
+  state && state.bridge && state.bridge.running ?
+    send("/api/bridge/stop", {}) : send("/api/bridge", {}));
+
+// -- the BLE bridge -----------------------------------------------------------
+
+const LINKS = { found: "found, connecting", connected: "connected",
+                lost: "lost, waiting for it", bridge: "on the bridge" };
+
+function renderBridge() {
+  const bridge = state.bridge;
+  const button = document.getElementById("bridge-button");
+  const dot = document.getElementById("bridge-dot");
+  const error = document.getElementById("bridge-error");
+  if (!bridge) {
+    document.getElementById("bridge-state").textContent = "Not available";
+    button.disabled = true;
+    return;
+  }
+  const count = Object.values(bridge.robots)
+    .filter(link => link === "connected").length;
+  const text = {
+    stopped: bridge.exit != null && bridge.exit !== 0 && bridge.exit !== -2 ?
+      `Stopped (exit ${bridge.exit})` : "Stopped",
+    starting: "Starting…",
+    searching: "Searching for robots…",
+    found: `${count} robot${count === 1 ? "" : "s"} connected`,
+    lost: "Lost its robots, searching again…",
+  }[bridge.state] || bridge.state;
+  document.getElementById("bridge-state").textContent = text;
+  dot.className = "dot" + (bridge.state === "found" ? " on" :
+    bridge.state === "lost" ? " bad" : "");
+  button.disabled = false;
+  button.textContent = bridge.running ? "Stop" : "Start";
+  error.hidden = !bridge.error;
+  error.textContent = bridge.error;
+}
 
 // -- the board ---------------------------------------------------------------
 
@@ -689,6 +740,9 @@ function select(id) {
 }
 
 function robotSummary(robot) {
+  if (!robot.pose && robot.link) {
+    return `${LINKS[robot.link] || robot.link}, no position`;
+  }
   if (!robot.pose) return "no pose yet";
   if (!robot.fresh) return "pose lost";
   if (robot.autonomous) return robot.autopilot.status;
@@ -702,7 +756,7 @@ function renderRobots() {
   const robots = state.robots;
   document.getElementById("add-robot").hidden = !state.manager || state.real;
   const signature = JSON.stringify([selected, robots.map(r => [
-    r.id, r.colour, r.fresh, r.autonomous, robotSummary(r)])]);
+    r.id, r.colour, r.fresh, r.autonomous, robotSummary(r), r.controller])]);
   if (built.robots === signature) return;
   built.robots = signature;
 
@@ -713,7 +767,7 @@ function renderRobots() {
     return;
   }
   box.replaceChildren(...robots.map(r => h("button", {
-    class: "robot" + (r.fresh ? "" : " stale"),
+    class: "robot" + (r.fresh || (!r.pose && r.link) ? "" : " stale"),
     "aria-current": String(r.id === selected),
     onclick: () => select(r.id),
   },
@@ -826,7 +880,7 @@ function renderDetail() {
   const others = state.robots.filter(r => r.id !== robot.id).map(r => r.id);
   const signature = JSON.stringify([robot.id, robot.autonomous,
     pilot && pilot.mode, pilot && pilot.chase_target, others,
-    robot.drivers, robot.controller, state.manager, state.real]);
+    robot.drivers, robot.controller, state.manager, state.real, !robot.pose]);
   if (built.detail !== signature) {
     built.detail = signature;
     built.queue = null;
@@ -838,7 +892,8 @@ function renderDetail() {
   pose.textContent = robot.pose ?
     `x ${fmt(robot.pose[0])} m  y ${fmt(robot.pose[1])} m  ` +
     `heading ${degrees(robot.pose[2])}°` + (robot.fresh ? "" : "  (stale)") :
-    "no pose yet";
+    robot.link ? `BLE ${LINKS[robot.link] || robot.link}, no position ` +
+    "from the arena camera" : "no pose yet";
   if (!pilot) return;
   document.getElementById("pilot-status").textContent = pilot.status;
   document.getElementById("pilot-last").textContent =
@@ -869,6 +924,9 @@ function buildDetail(robot) {
                                                { autonomous: false }) },
         "Manual"),
       h("button", { "aria-pressed": String(robot.autonomous),
+                    disabled: !robot.pose && !robot.autonomous,
+                    title: robot.pose ? "" :
+                      "Needs a position from the arena camera",
                     onclick: () => changeRobot(robot.id,
                                                { autonomous: true }) },
         "Autonomous")),
@@ -885,6 +943,8 @@ function buildDetail(robot) {
     const pad = state.controllers &&
       state.controllers.find(c => c.address === robot.controller);
     parts.push(h("p", { class: "note" },
+      !robot.pose ? "With no position from the arena camera it can only " +
+            "be driven by hand." :
       pad ? `${pad.name || "A controller"} drives it. Making it ` +
             "autonomous takes the controller off it until it is manual " +
             "again." :
@@ -1027,6 +1087,7 @@ function render() {
     }
   }
   renderArenaLabel();
+  renderBridge();
   renderRobots();
   renderControllers();
   renderDetail();
