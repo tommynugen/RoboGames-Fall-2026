@@ -26,6 +26,7 @@ VIEWS = ("top", "front", "front_right", "fpv")
 VIEW_TOPIC = "/robogame/view"
 STATE_TOPIC = "/robogame/view/state"
 STALE = 3.0  # s with no state before the window counts as gone
+WAIT = 1.5  # s to wait for fpv_toggle's answer, which comes once a second
 
 
 class SimCamera:
@@ -37,7 +38,10 @@ class SimCamera:
         self.state = None
         self.seen = 0.0
         self.error = ""
-        self.lock = threading.Lock()
+        # Reentrant: gz-transport hands a subscriber in this same process
+        # the message inside publish(), so on_state can run under look().
+        self.lock = threading.RLock()
+        self.changed = threading.Condition(self.lock)
 
     def connect(self):
         """A gz-transport node in the sim's partition, made again when the
@@ -75,10 +79,22 @@ class SimCamera:
                           "robot": data[1] if len(data) > 1 else "",
                           "robots": data[2:]}
             self.seen = time.monotonic()
+            self.changed.notify_all()
+
+    def wait(self, done):
+        """Waits up to WAIT for a state where done(state) holds. Called
+        with the lock held, which waiting lets go of."""
+        self.changed.wait_for(lambda: self.state is not None
+                              and done(self.state), WAIT)
 
     def status(self):
         with self.lock:
+            new = self.node is None or self.partition() != self.node_partition
             connected = self.connect()
+            if connected and new:
+                # A new node has heard nothing yet: give fpv_toggle a
+                # second to say there is a window before saying there isn't.
+                self.wait(lambda state: True)
             fresh = time.monotonic() - self.seen < STALE
             state = self.state if fresh else None
         reply = {"available": state is not None, "views": list(VIEWS),
@@ -104,7 +120,12 @@ class SimCamera:
             from gz.msgs.stringmsg_pb2 import StringMsg
             message = StringMsg()
             message.data = f"{view} {robot}".strip()
+            asked = time.monotonic()
             self.publisher.publish(message)
+            # Answer with the view it moved to, not the one before.
+            self.wait(lambda state: self.seen >= asked
+                      and state["view"] == view
+                      and (not robot or state["robot"] == robot))
         return self.status()
 
     def get(self, path):
