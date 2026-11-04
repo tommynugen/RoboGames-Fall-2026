@@ -1,6 +1,7 @@
 """The Gamemaster's Setup tab: its page and the camera on the status bar."""
 import json
 import threading
+import time
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -47,6 +48,11 @@ def test_quit_button_stops_the_app():
                                          method="POST")
         with urllib.request.urlopen(request) as reply:
             assert json.load(reply) == {"stopping": True}
+        # The app answers first, then quits: give it a moment.
+        for _ in range(50):
+            if asked:
+                break
+            time.sleep(0.02)
         assert asked == [True]
     finally:
         server.shutdown()

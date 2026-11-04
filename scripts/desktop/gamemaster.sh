@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Starts the RoboGame Gamemaster with ROS and this workspace sourced, and
-# opens it in the browser. If it is already running, the app itself just
-# opens the browser on it and stops. Output goes to
+# Starts the RoboGame Gamemaster with ROS and this workspace sourced, in
+# its own window (closing it quits the app). If it is already running,
+# this just opens another window on it. Output goes to
 # ~/.cache/robogame/gamemaster.log. The desktop entry runs this script.
 repo="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
 log="${XDG_CACHE_HOME:-$HOME/.cache}/robogame/gamemaster.log"
@@ -13,7 +13,10 @@ say() {
 }
 
 # Already up: just show it, without waiting for ROS to source.
+# app_window.py needs no ROS; it ends with 2 if it cannot show a window.
 if command -v curl >/dev/null && curl -s -o /dev/null -m 1 http://localhost:8766/; then
+    python3 "$repo/src/robogame_sim/robogame_sim/app_window.py" \
+        http://localhost:8766/ >>"$log" 2>&1 && exit 0
     exec xdg-open http://localhost:8766/
 fi
 
