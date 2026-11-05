@@ -76,11 +76,18 @@ function topAt(cols, cell) {
   return column && column[column.length - 1];
 }
 
-// How high a module stands: the platforms under it, on one of its cells.
-function standing(m, cols, cell = cellsOf(m)[0]) {
-  return (cols.get(cellKey(cell)) || [])
-    .filter(p => p.level < m.level)
-    .reduce((sum, p) => sum + heightOf(p.type), 0);
+// How high a module stands: on the highest top of the modules under it,
+// over the given cell or any of its own, as arena_layout.stand.
+function standing(m, cols, cell) {
+  let best = 0;
+  for (const c of cell ? [cell] : cellsOf(m)) {
+    for (const p of cols.get(cellKey(c)) || []) {
+      if (p.level < m.level) {
+        best = Math.max(best, standing(p, cols) + heightOf(p.type));
+      }
+    }
+  }
+  return best;
 }
 
 // How high a module stands above the floor under it, the tile or the bare

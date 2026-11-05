@@ -335,7 +335,7 @@ middle"></select>
           <button id="rotate" style="margin-top:4px">Rotate <kbd>R</kbd>
           </button>
           <button id="stack" style="margin-top:4px" aria-pressed="false"
-                  title="Place on top of platforms instead of replacing
+                  title="Place on top of what is there instead of replacing
 them. Shift does the same while held">Stack <kbd>S</kbd></button>
           <button id="delete" style="margin-top:4px" aria-pressed="false"
                   title="Delete mode: click or drag to take modules off.
@@ -367,15 +367,13 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
         <li>Walls and thwomps take one row of two holes, on the line of
           holes under the pointer, so two fit on a tile side by side, or
           one each way.</li>
-        <li>Floor tiles go on whole squares, under whatever is there, as
-          long as it then stands level: a module must be all on tiles or
-          all on the bare plate. Deleting a tile takes what stands on it
-          too.</li>
+        <li>Floor tiles go on whole squares, under whatever is there.
+          Deleting a tile takes what stands on it too.</li>
         <li>Click a ramp, wall or thwomp with its own tool to turn it a
           quarter turn; <kbd>R</kbd> turns the one under the pointer.</li>
         <li>Shift-click, or turn on Stack, to put a module on top of
-          platforms: a ramp, wall, thwomp or another platform, across two
-          if they are as high. The corner shows how high the top is.</li>
+          whatever is there: anything stacks on anything. It rests on the
+          highest top under it. The corner shows how high the top is.</li>
         <li>Right-click to take the top module off, or press <kbd>X</kbd>
           for delete mode, where clicks and drags take modules off;
           <kbd>X</kbd> again or <kbd>Esc</kbd> to go back.</li>
@@ -613,25 +611,8 @@ const moduleKey = m => [m.type, m.col, m.row, Math.max(m.level || 0, 0),
 const onGrid = ([x, y], n = size) => x >= 0 && y >= 0 && x < 2 * n &&
                                       y < 2 * n;
 
-// Whether a module above the floor is on platforms under every cell, and
-// any module all on floor tiles or all on the bare plate, all as high, as
-// arena_layout.normalise wants.
-function supported(m, list, cols) {
-  if (isFloor(m.type)) return true;
-  const cells = cellsOf(m);
-  const level = cell => standing(m, cols, cell);
-  if (!m.level) return cells.every(c => Math.abs(level(c) - level(cells[0]))
-                                        < 1e-4);
-  const on = cell => list.some(p => p.level === m.level - 1 &&
-                                    isPlatform(p.type) &&
-                                    cellsOf(p).some(c => c[0] === cell[0] &&
-                                                         c[1] === cell[1]));
-  if (!cells.every(on)) return false;
-  const heights = cells.map(cell => standing(m, cols, cell));
-  return heights.every(h => Math.abs(h - heights[0]) < 1e-4);
-}
-
-// Whether every module is on the grid, on cells of its own and supported.
+// Whether every module is on the grid and on cells of its own at its
+// level. Anything stacks on anything, so that is all.
 function fits(list) {
   const taken = new Set();
   for (const m of list) {
@@ -641,18 +622,7 @@ function fits(list) {
       taken.add(k);
     }
   }
-  const cols = columns(list);
-  return list.every(m => supported(m, list, cols));
-}
-
-// The modules left standing once those with nothing under them fall off.
-function settle(list) {
-  for (;;) {
-    const cols = columns(list);
-    const kept = list.filter(m => supported(m, list, cols));
-    if (kept.length === list.length) return kept;
-    list = kept;
-  }
+  return true;
 }
 
 function layout() {
@@ -752,7 +722,7 @@ function render() {
     drawPlaced(g, m, "board");
     const tip = [`${label(m.type)} at ${m.col}, ${m.row}`];
     if (m.level > 0) {
-      tip.push(`On platforms ${inches(aboveFloor(m, cols))} inches up`);
+      tip.push(`Stacked ${inches(aboveFloor(m, cols))} inches up`);
     } else if (!isFloor(m.type) && aboveFloor(m, cols) ===
                standing(m, cols)) {
       tip.push("On the bare plate, half an inch lower than on a tile");
@@ -1106,10 +1076,10 @@ function under(point) {
 
 // What a click with the tool does, as {modules, placed, turned}, or null
 // when it does nothing. Erasing takes the top module under the pointer off.
-// Otherwise, while stacking on platforms the module goes on top of them; on
+// Otherwise, while stacking the module goes on top of whatever is there; on
 // a module of its own kind it turns it, and anything else it replaces, at
-// the height of what is there. Whatever stood on what is taken away goes
-// too.
+// the height of what is there. What stood on what is taken away drops onto
+// whatever is left under it.
 function plan(point, erase, stroke) {
   if (paintMode) {
     const m = under(point);
@@ -1124,15 +1094,15 @@ function plan(point, erase, stroke) {
     if (!m) return null;
     // A floor tile takes what stands on it with it.
     const gone = new Set(isFloor(m.type) ? cellsOf(m).map(cellKey) : []);
-    return { modules: settle(modules.filter(p => p !== m &&
-      !cellsOf(p).some(c => gone.has(cellKey(c))))) };
+    return { modules: modules.filter(p => p !== m &&
+      !cellsOf(p).some(c => gone.has(cellKey(c)))) };
   }
 
   const placed = candidate(point);
   const cells = cellsOf(placed);
   if (!cells.every(cell => onGrid(cell))) return null;
   if (isFloor(placed.type)) {
-    // Under whatever is there, if that leaves everything standing level.
+    // Under whatever is there.
     placed.level = -1;
     if (modules.some(m => isFloor(m.type) && m.col === placed.col &&
                           m.row === placed.row)) return null;
@@ -1142,8 +1112,8 @@ function plan(point, erase, stroke) {
   const cols = columns();
   const tops = cells.map(cell => topAt(cols, cell));
 
-  if ((stacking || shiftHeld) && tops.every(t => t && isPlatform(t.type))) {
-    placed.level = Math.max(...tops.map(t => t.level)) + 1;
+  if ((stacking || shiftHeld) && tops.some(t => t && !isFloor(t.type))) {
+    placed.level = Math.max(...tops.filter(Boolean).map(t => t.level)) + 1;
     const next = [...modules, placed];
     return fits(next) ? { modules: next, placed } : null;
   }
@@ -1162,12 +1132,11 @@ function plan(point, erase, stroke) {
   }
 
   const covered = new Set(cells.map(cellKey));
-  const next = settle([
+  const next = [
     ...modules.filter(m => m.level !== placed.level ||
                            !cellsOf(m).some(c => covered.has(cellKey(c)))),
-    placed]);
-  return next.includes(placed) && fits(next) ? { modules: next, placed }
-                                             : null;
+    placed];
+  return fits(next) ? { modules: next, placed } : null;
 }
 
 function apply(point, erase, stroke) {
@@ -1316,9 +1285,9 @@ document.getElementById("halves").addEventListener("click", toggleHalves);
 async function resize(next) {
   if (next === size) return;
   const shift = Math.floor((next - size) / 2);
-  const kept = settle(modules
+  const kept = modules
     .map(m => ({ ...m, col: m.col + shift, row: m.row + shift }))
-    .filter(m => cellsOf(m).every(cell => onGrid(cell, next))));
+    .filter(m => cellsOf(m).every(cell => onGrid(cell, next)));
   const lost = modules.length - kept.length;
   if (lost && !await askYes(`${lost} module${lost === 1 ? " is" : "s are"} ` +
                        `off a ${next} × ${next} grid and will be removed. ` +
@@ -1938,7 +1907,7 @@ function partsChanged(result, old, now) {
   archive = result.archive;
   if (old && modules.some(m => m.type === old)) {
     modules = now ? modules.map(m => m.type === old ? { ...m, type: now } : m)
-                  : settle(modules.filter(m => m.type !== old));
+                  : modules.filter(m => m.type !== old);
     // The board's history may have the old name in it.
     history = [];
   }

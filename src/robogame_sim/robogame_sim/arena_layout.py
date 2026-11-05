@@ -35,18 +35,18 @@ grid: col and row are in steps of a half, and a module at col 5.5 stands
 across the tiles at cols 5 and 6. The holes split the floor into 2 inch
 cells, one hole in the middle of each and four to a tile. A platform or
 ramp covers 2 x 2 cells and a wall or thwomp 1 x 2, and no two modules
-share a cell, so two walls fit side by side on one tile.
+share a cell at one level, so two walls fit side by side on one tile.
 
-A platform can carry more modules: a module with "level": 1 stands on
-platforms at level 0 under every cell it covers, one at level 2 on
-platforms at level 1, and so on, all of them the same height. Ramps,
-walls, thwomps and platforms all stack on either platform, so a ramp on a
-1 inch platform climbs to a 2 inch one. level is left out for modules on
-the floor.
+Anything stacks on anything: a module with "level": 1 stands on top of
+whatever is under it at level 0, one at level 2 on what is under it at
+level 1 or below, and so on. It rests on the highest top under any of
+its cells, so a platform half over a wall sits on the wall's top, and a
+ramp on a 1 inch platform climbs to a 2 inch one. level is left out for
+modules on the floor.
 
 A floor tile lies on the plates under everything else, and a module on
-one stands half an inch higher than one on the bare plate; a module must
-stand all on tiles or all on the plate. Heights here are from the top of
+one stands half an inch higher than one on the bare plate; a module
+partly on tiles stands at the tiles' height. Heights here are from the top of
 the plates, and the world has the tiles' top at z = 0, as the CAD export
 does, so the plates' top is at z = -floor_height(). A layout without "base"
 is from before floor tiles were modules, and gets a tile on every square.
@@ -126,7 +126,7 @@ BUILT_IN = dict(PARTS)
 CAD_LABELS = {kind: part.label for kind, part in BUILT_IN.items()}
 # Dropped STL parts, so they stand out from the CAD's modules.
 BLOCK_COLOUR = (0.910, 0.627, 0.478)
-# What other modules can stand on.
+# The modules robots are meant to drive on top of.
 PLATFORMS = ("platform", "platform_2")
 # The quadrant plates the floor tiles lie on, as plain boxes: the CAD
 # export leaves them out.
@@ -699,21 +699,6 @@ def normalise(layout):
             if other is not m:
                 raise ValueError(f"{where(m)} overlaps the {where(other)}")
 
-    # Only platforms carry anything, and all at one height, so it stands
-    # level.
-    for m in modules:
-        if level(m) <= 0:
-            continue
-        if any(taken.get((cell, level(m) - 1), {}).get("type") not in PLATFORMS
-               for cell in cells(m)):
-            raise ValueError(f"{where(m)} is not on a platform")
-
-    at = columns(modules)
-    for m in modules:
-        if len({round(stand(at, m, cell), 4) for cell in cells(m)}) > 1:
-            raise ValueError(f"{where(m)} stands across floor tiles or "
-                             f"platforms of different heights")
-
     modules.sort(key=lambda m: (m["row"], m["col"], level(m),
                                 m["type"], m.get("rotation", 0)))
     return {"size": size, "base": BASE, "modules": modules}
@@ -901,10 +886,12 @@ def columns(modules):
 
 
 def stand(at, m, cell=None):
-    """How high above the plates a module stands: the floor tile and
-    platforms under it, on the given cell or its first."""
-    return sum(part_height(p["type"])
-               for p in at[cell or cells(m)[0]] if level(p) < level(m))
+    """How high above the plates a module stands: on the highest top of
+    the modules under it, over the given cell or any of its own."""
+    return max((stand(at, p) + part_height(p["type"])
+                for c in ([cell] if cell else cells(m))
+                for p in at.get(c, ()) if level(p) < level(m)),
+               default=0.0)
 
 
 def floor_top(column):
