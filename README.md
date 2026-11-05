@@ -1165,6 +1165,31 @@ module that changes size or height needs no code change; a new kind of
 module needs an entry in `PARTS` in `arena_layout.py` and a tool in
 `arena_editor.html`.
 
+### Sharing the editor with teammates
+
+Share editor, in the Arena editor tab's top bar, downloads
+`robogame-arena-editor.html`: the editor as one file, about 350 KB, that
+opens in any browser with nothing installed. Send it to teammates. Save
+there keeps their layouts in their own browser, and Export downloads one
+as a `.json` file to send back. In the Gamemaster, Import (or dropping the
+file on the page) opens it as a new, unsaved layout named after the file,
+with `-2` added if that name is taken, and Save puts it with the others.
+Export works in the Gamemaster too.
+
+The file has the saved layouts as starting points, the module sizes and
+the CAD meshes in it, so build it again after adding parts or changing the
+editor. Without the Gamemaster there are no ramp and platform checks, sim
+or STL drops; the checks run once the layout is imported. The 3D view gets
+three.js from unpkg.com, so it needs the internet; the top view does not.
+Without the app, `python3 -m robogame_sim.shared_editor OUT.html` from
+`src/robogame_sim` writes the same file.
+
+Checked 2026-11-05: tests (`test_shared_editor.py`), and in headless
+Chromium the file opened from disk, placed a module, saved, reloaded,
+exported and imported again, with the 3D view drawn; then the
+Gamemaster's Share editor downloaded it and Import opened the exported
+layout, which passed its checks.
+
 ### STL parts
 
 Drag an STL file from your desktop onto the editor to add it as a module
