@@ -304,6 +304,14 @@ middle"></select>
   <button id="save" class="primary" title="Ctrl+S">Save</button>
   <button id="clear" title="Remove every module">Clear</button>
   <button id="undo" title="Ctrl+Z">Undo</button>
+  <button id="import" title="Open a layout file, such as one a teammate
+sent. Dropping the file on the page does the same">Import</button>
+  <button id="export" title="Download this layout as a file, to send to
+someone">Export</button>
+  <button id="share" class="server-only" title="Download the editor as one
+file teammates open in a browser, with no install, to draft layouts and
+Export them back to you">Share editor</button>
+  <input type="file" id="import-file" accept=".json,application/json" hidden>
   <span id="status"></span>
 </header>
 
@@ -392,7 +400,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       </details>
     </div>
 
-    <div class="panel">
+    <div class="panel server-only">
       <h2>Parts</h2>
       <ul class="parts" id="parts"></ul>
       <details id="archive-box">
@@ -405,13 +413,13 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       </details>
     </div>
 
-    <div class="panel">
+    <div class="panel server-only">
       <h2>Checks</h2>
       <ul id="problems"></ul>
       <div class="summary" id="summary"></div>
     </div>
 
-    <div class="panel">
+    <div class="panel server-only">
       <h2>Launch options</h2>
       <div class="opts" id="launch-opts">
         <label for="o-robots">Robots</label>
@@ -474,7 +482,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       <div class="row"><button id="o-reset">Defaults</button></div>
     </div>
 
-    <div class="panel">
+    <div class="panel server-only">
       <h2>Run it</h2>
       <pre id="command"></pre>
       <div class="row"><button id="copy" data-from="command">Copy</button>
@@ -483,7 +491,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
       <p class="note" id="folder"></p>
     </div>
 
-    <div class="panel">
+    <div class="panel server-only">
       <h2>Test it</h2>
       <pre id="test-command"></pre>
       <div class="row"><button id="copy-test" data-from="test-command">Copy
@@ -495,7 +503,7 @@ floor tiles too, instead of only on whole squares">Half squares <kbd>H</kbd>
         where controllers are bound to robots by address.</p>
     </div>
 
-    <div class="panel">
+    <div class="panel server-only">
       <h2>Gazebo camera</h2>
       <div id="cam-views">
         <button data-view="top">Top</button>
@@ -1714,7 +1722,7 @@ pollSim();
 setInterval(pollSim, 2000);
 
 async function refreshSaved(selected) {
-  const { layouts, folder } = await api("/api/layouts");
+  const { layouts, folder, note } = await api("/api/layouts");
   savedEl.replaceChildren();
   for (const name of layouts) {
     const option = document.createElement("option");
@@ -1722,7 +1730,7 @@ async function refreshSaved(selected) {
     savedEl.appendChild(option);
   }
   if (selected) savedEl.value = selected;
-  document.getElementById("folder").textContent =
+  document.getElementById("folder").textContent = note ||
     `Layouts are saved in ${folder}. The sim reads them from there, so ` +
     `there is no need to rebuild after saving.`;
   return layouts;
@@ -1781,6 +1789,74 @@ window.addEventListener("beforeunload", event => {
   if (snapshot() !== savedSnapshot) event.preventDefault();
 });
 
+// -- layout files ----------------------------------------------------------
+
+// A layout as a file, to send to someone, or one they sent: the same JSON
+// as in the layouts folder. The shareable editor (shared_editor.py) is this
+// page with no server, so teammates draft layouts there and Export them.
+function layoutText(data) {
+  const rows = data.modules.map(m => "    " + JSON.stringify(m)).join(",\n");
+  return `{\n  "size": ${data.size},\n  "base": "${data.base}",\n` +
+    `  "modules": ${rows ? `[\n${rows}\n  ]` : "[]"}\n}\n`;
+}
+
+function downloadFile(name, data, type) {
+  const url = URL.createObjectURL(new Blob([data], { type }));
+  Object.assign(document.createElement("a"),
+                { href: url, download: name }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+document.getElementById("export").addEventListener("click", () => {
+  const name = fileName() || "layout";
+  downloadFile(`${name}.json`, layoutText(layout()), "application/json");
+  updateStatus(`Downloaded ${name}.json`);
+});
+
+const importInput = document.getElementById("import-file");
+document.getElementById("import").addEventListener("click", () =>
+  importInput.click());
+importInput.addEventListener("change", () => {
+  if (importInput.files[0]) importLayout(importInput.files[0]);
+  importInput.value = "";
+});
+
+// Opens a layout file as a new, unsaved layout, named after the file but
+// not over one already saved, so Save keeps it next to the others.
+async function importLayout(file) {
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+    if (!Array.isArray(data.modules)) throw new Error("no modules");
+  } catch {
+    updateStatus(`${file.name} is not a layout file`, "dirty");
+    return;
+  }
+  if (snapshot() !== savedSnapshot &&
+      !await askYes(`Discard unsaved changes and open ${file.name}?`,
+                    "Discard", true)) return;
+  const stem = file.name.replace(/\.json$/i, "")
+    .replace(/[^A-Za-z0-9_ -]+/g, "_").trim().slice(0, 36) || "imported";
+  const taken = new Set([...savedEl.options].map(o => o.value));
+  let name = stem;
+  for (let n = 2; taken.has(name.split(/\s+/).join("-")); n++) {
+    name = `${stem}-${n}`;
+  }
+  remember();
+  setLayout(data);
+  nameEl.value = name;
+  savedEl.value = "";
+  updateCommand();
+  changed();
+  updateStatus(`Opened ${file.name} as ${name}: Save to keep it`, "dirty");
+}
+
+document.getElementById("share").addEventListener("click", () => {
+  Object.assign(document.createElement("a"), {
+    href: "/api/shared-editor", download: "robogame-arena-editor.html",
+  }).click();
+});
+
 // -- STL parts -------------------------------------------------------------
 
 // A file dragged over the page, which drops onto the board or anywhere.
@@ -1808,10 +1884,16 @@ document.addEventListener("drop", event => {
   event.preventDefault();
   dragDepth = 0;
   document.body.classList.remove("dragging");
-  const file = [...event.dataTransfer.files]
-    .find(f => f.name.toLowerCase().endsWith(".stl"));
+  const files = [...event.dataTransfer.files];
+  const json = files.find(f => f.name.toLowerCase().endsWith(".json"));
+  if (json) {
+    importLayout(json);
+    return;
+  }
+  const file = files.find(f => f.name.toLowerCase().endsWith(".stl"));
   if (!file) {
-    updateStatus("Only STL files can be dropped here", "dirty");
+    updateStatus("Only layout (.json) and STL files can be dropped here",
+                 "dirty");
     return;
   }
   addPart(file, pointFrom(event));

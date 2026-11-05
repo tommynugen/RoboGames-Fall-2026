@@ -21,7 +21,10 @@ function geometry(mesh, done) {
   if (!waiting.has(mesh)) {
     waiting.set(mesh, new Set());
     geometries.set(mesh, null);
-    loader.load(`/api/meshes/${mesh}`, g => {
+    // The shareable editor has the meshes in the page, as meshUrl.
+    const url = window.arenaMeshUrl ? window.arenaMeshUrl(mesh)
+      : `/api/meshes/${mesh}`;
+    loader.load(url, g => {
       geometries.set(mesh, g);
       const calls = waiting.get(mesh);
       waiting.delete(mesh);

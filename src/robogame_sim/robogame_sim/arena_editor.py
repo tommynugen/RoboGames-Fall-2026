@@ -39,6 +39,11 @@ def get(path):
     try:
         if path == "/api/modules":
             return 200, arena_layout.modules_info()
+        if path == "/api/shared-editor":
+            # The editor as one file, for teammates (shared_editor.py).
+            from robogame_sim import shared_editor
+            return 200, shared_editor.build().encode(), \
+                "text/html; charset=utf-8"
         if path == "/api/archive":
             return 200, {"archive": arena_layout.archived_parts()}
         if path == "/api/layouts":
