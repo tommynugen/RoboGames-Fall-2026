@@ -1015,10 +1015,15 @@ evenly spaced across the joins between tiles, so a module can go half a
 square along and stand across two tiles. A wall or thwomp takes one row of
 two holes, so two fit on a tile side by side, or one each way.
 
-Any module can stand on a platform of either height, and platforms stack,
-so a ramp on a 1" platform climbs onto a 2" platform or onto two 1"
-platforms stacked. A module can stand across two platforms if they are as
-high.
+Anything stacks on anything: a platform on a wall, a ramp on a thwomp, a
+wall on a ramp. A stacked module rests on the highest top under any of its
+cells, so one half over a wall and half over nothing sits on the wall, and
+one across a 1" and a 2" platform sits on the 2". A ramp on a 1" platform
+still climbs onto a 2" platform or onto two 1" platforms stacked. Checked
+on 2026-11-05 with the tests (a platform on a wall, a thwomp on a ramp,
+modules across two heights) and in the editor page in Chromium: a platform
+stacked on a wall stands at the wall's top, 2.5 inches up, and a ramp on
+that platform at 3.5 inches.
 
 Map how they are set up on the table in the layout editor:
 
@@ -1035,11 +1040,12 @@ Half squares (H) to keep to whole squares. A wall or thwomp goes on the
 line of peg holes under the pointer, along the way it faces.
 Click a ramp, wall or thwomp with its own tool to turn it a quarter turn,
 or press R over it. A ramp's arrow points uphill.
-Shift-click, or turn on Stack (S), to put the tool on top of platforms
-instead of replacing them; a stack shows how many inches up its top is in
+Shift-click, or turn on Stack (S), to put the tool on top of whatever is
+there instead of replacing it; a stack shows how many inches up its top is in
 its corner. A plain click replaces whatever is in the way, at the height
 of the top of what is there. Right-click takes the top module under the
-pointer off, along with anything standing on it, and Ctrl+Z undoes. X, or
+pointer off, and what stood on it drops onto what is left under it (a
+floor tile takes what stands on it with it); Ctrl+Z undoes. X, or
 the Delete button, is delete mode, where clicks and drags take modules
 off; X again, Esc or picking a tool goes back to placing. P, or the
 Paint button, is paint mode: pick a colour in the box beside it, and
@@ -1087,7 +1093,7 @@ Top, 3D and Both above the grid pick the views (V switches, and the page
 remembers the choice). The 3D view edits as the top view does, with the
 same tools, keys and checks: click or drag on a floor tile or a module to
 place the tool's module there (seen see-through first, red where it does
-not fit), on a platform's top to stack on it, and right-click to take the
+not fit), on any module's top to stack on it, and right-click to take the
 top module off. Right-drag turns the view, middle-drag moves it and the
 wheel zooms. Modules the checks find a problem with glow red. The 3D view
 loads three.js 0.160 from unpkg.com, so it needs the internet when the

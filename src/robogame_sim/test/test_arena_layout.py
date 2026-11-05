@@ -393,15 +393,28 @@ TWO_STOREYS = (
        for r in (7, 8, 9)])
 
 
-def test_stacked_modules_need_a_platform_under_them():
-    for bad in ({"modules": [on(platform(1, 1), 1)]},
-                {"modules": [ramp(1, 1, 0), on(platform(1, 1), 1)]},
-                {"modules": [side("wall", 1, 1, 0), on(ramp(1, 1, 0), 1)]},
-                {"modules": [platform(1, 1), on(ramp(1, 1, 0), 2)]},
-                {"modules": [platform(1, 1), platform(1, 1)]},
+def test_anything_stacks_on_anything():
+    for bad in ({"modules": [platform(1, 1), platform(1, 1)]},
                 {"modules": [on(platform(1, 1), -1)]}):
         with pytest.raises(ValueError):
             al.normalise(bad)
+
+    wall, ramp_ = side("wall", 1, 1, 0), ramp(3, 1, 0)
+    up_wall, up_ramp = on(platform(1, 1), 1), on(side("thwomp", 3, 1, 90), 1)
+    # Half over the wall, half over nothing: it rests on the wall's top.
+    layout = al.normalise({"modules": [wall, up_wall, ramp_, up_ramp,
+                                       on(platform(5, 1), 2)]})
+    at = al.columns(layout["modules"])
+    tile = al.floor_height()
+    found = {(m["type"], m["col"]): al.stand(at, m)
+             for m in layout["modules"] if m["type"] != "floor"}
+    assert found[("platform", 1)] == pytest.approx(
+        tile + al.part_height("wall"))
+    assert found[("thwomp", 3)] == pytest.approx(
+        tile + al.part_height("ramp"))
+    # With nothing at the level under it, it is on the floor tile.
+    assert found[("platform", 5)] == pytest.approx(tile)
+    assert "platform_module_1" in al.model_sdf(layout)
 
     layout = al.normalise({"modules": [
         on(side("thwomp", 1, 1, 90), 2), platform(1, 1, "platform_2"),
@@ -695,11 +708,16 @@ def test_modules_stack_across_platforms_of_one_height():
         platform(5, 5), platform(6, 5), on(platform(5.5, 5), 1),
         on(side("wall", 6.5, 5, 90), 1)]})
 
-    for bad in ([platform(5, 5), on(side("wall", 5.5, 5, 0), 1)],
-                [platform(5, 5), platform(6, 5, "platform_2"),
-                 on(side("wall", 5.5, 5, 0), 1)]):
-        with pytest.raises(ValueError):
-            al.normalise({"modules": bad})
+    # Across platforms of two heights, or half off one, it rests on the
+    # highest.
+    for under, top in (([platform(5, 5)], "platform"),
+                       ([platform(5, 5), platform(6, 5, "platform_2")],
+                        "platform_2")):
+        layout = al.normalise({"modules": [*under,
+                                           on(side("wall", 5.5, 5, 0), 1)]})
+        wall, = [m for m in layout["modules"] if m["type"] == "wall"]
+        assert al.stand(al.columns(layout["modules"]), wall) == (
+            pytest.approx(al.floor_height() + al.part_height(top)))
 
     layout = {"size": 12, "modules": [
         platform(5, 5), platform(6, 5), on(platform(5.5, 5), 1)]}
@@ -1009,11 +1027,14 @@ def test_modules_on_the_bare_plate_stand_a_tile_lower():
 
 
 def test_floor_tiles_go_on_whole_squares_under_everything():
-    for wrong in ([tile(2.5, 2)], [dict(tile(2, 2), level=1)],
-                  # Half on a tile and half on the plate.
-                  [tile(2, 2), platform(2.5, 2)]):
+    for wrong in ([tile(2.5, 2)], [dict(tile(2, 2), level=1)]):
         with pytest.raises(ValueError):
             al.normalise(bare(*wrong))
+    # Half on a tile and half on the plate, it rests on the tile.
+    layout = al.normalise(bare(tile(2, 2), platform(2.5, 2)))
+    at = al.columns(layout["modules"])
+    top, = [m for m in layout["modules"] if m["type"] == "platform"]
+    assert al.stand(at, top) == pytest.approx(al.floor_height())
 
 
 def test_checks_go_by_the_floor_under_a_platform():
