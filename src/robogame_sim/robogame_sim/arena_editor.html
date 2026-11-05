@@ -1761,12 +1761,66 @@ window.addEventListener("beforeunload", event => {
 // -- layout files ----------------------------------------------------------
 
 // A layout as a file, to send to someone, or one they sent: the same JSON
-// as in the layouts folder. The shareable editor (shared_editor.py) is this
-// page with no server, so teammates draft layouts there and Export them.
-function layoutText(data) {
+// as in the layouts folder, and the STL parts it uses under "parts", as
+// base64 of the part's STL in metres, z up. The shareable editor
+// (shared_editor.py) is this page with no server, so teammates draft
+// layouts and add parts there, and Export them.
+function layoutText(data, parts) {
   const rows = data.modules.map(m => "    " + JSON.stringify(m)).join(",\n");
+  const kept = Object.entries(parts || {}).map(([type, part]) =>
+    `    ${JSON.stringify(type)}: ${JSON.stringify(part)}`).join(",\n");
   return `{\n  "size": ${data.size},\n  "base": "${data.base}",\n` +
-    `  "modules": ${rows ? `[\n${rows}\n  ]` : "[]"}\n}\n`;
+    `  "modules": ${rows ? `[\n${rows}\n  ]` : "[]"}` +
+    (kept ? `,\n  "parts": {\n${kept}\n  }` : "") + "\n}\n";
+}
+
+const meshUrl = mesh => window.arenaMeshUrl ? window.arenaMeshUrl(mesh)
+  : `/api/meshes/${mesh}`;
+
+function toBase64(bytes) {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(text);
+}
+
+// The STL parts a layout uses, for its file.
+async function partsUsed(data) {
+  const parts = {};
+  for (const type of new Set(data.modules.map(m => m.type))) {
+    const part = info.types[type];
+    if (!part || part.mount !== "block") continue;
+    const response = await fetch(meshUrl(part.mesh));
+    if (!response.ok) throw new Error(`no mesh for ${part.label}`);
+    parts[type] = { label: part.label, stl: toBase64(
+      new Uint8Array(await response.arrayBuffer())) };
+  }
+  return parts;
+}
+
+// Adds a layout file's parts that this editor does not have, by the same
+// route as a dropped STL. A part already here by that name is kept.
+async function addFileParts(parts) {
+  const added = [], kept = [];
+  for (const [type, part] of Object.entries(parts || {})) {
+    if (info.types[type]) {
+      kept.push(info.types[type].label);
+      continue;
+    }
+    const bytes = Uint8Array.from(atob(part.stl), c => c.charCodeAt(0));
+    const result = await api(
+      `/api/parts/${encodeURIComponent(part.label || type)}?units=m&up=z`,
+      { method: "PUT", body: bytes,
+        headers: { "Content-Type": "application/octet-stream" } });
+    info = result.modules;
+    added.push(result.part.label);
+  }
+  if (added.length) {
+    buildTools();
+    buildParts();
+  }
+  return { added, kept };
 }
 
 function downloadFile(name, data, type) {
@@ -1776,10 +1830,20 @@ function downloadFile(name, data, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-document.getElementById("export").addEventListener("click", () => {
+document.getElementById("export").addEventListener("click", async () => {
   const name = fileName() || "layout";
-  downloadFile(`${name}.json`, layoutText(layout()), "application/json");
-  updateStatus(`Downloaded ${name}.json`);
+  const data = layout();
+  try {
+    const parts = await partsUsed(data);
+    downloadFile(`${name}.json`, layoutText(data, parts),
+                 "application/json");
+    const count = Object.keys(parts).length;
+    updateStatus(`Downloaded ${name}.json` +
+                 (count ? `, with ${count} STL part${count > 1 ? "s" : ""}`
+                  : ""));
+  } catch (error) {
+    updateStatus(`Not exported: ${error.message}`, "dirty");
+  }
 });
 
 const importInput = document.getElementById("import-file");
@@ -1811,13 +1875,26 @@ async function importLayout(file) {
   for (let n = 2; taken.has(name.split(/\s+/).join("-")); n++) {
     name = `${stem}-${n}`;
   }
+  let parts;
+  try {
+    parts = await addFileParts(data.parts);
+  } catch (error) {
+    updateStatus(`Could not add ${file.name}'s parts: ${error.message}`,
+                 "dirty");
+    return;
+  }
   remember();
   setLayout(data);
   nameEl.value = name;
   savedEl.value = "";
   updateCommand();
   changed();
-  updateStatus(`Opened ${file.name} as ${name}: Save to keep it`, "dirty");
+  const notes = [];
+  if (parts.added.length) notes.push(`added ${parts.added.join(", ")}`);
+  if (parts.kept.length) notes.push(`kept this editor's ${parts.kept.join(", ")}`);
+  updateStatus(`Opened ${file.name} as ${name}` +
+               (notes.length ? ` (${notes.join("; ")})` : "") +
+               ": Save to keep it", "dirty");
 }
 
 document.getElementById("share").addEventListener("click", () => {
