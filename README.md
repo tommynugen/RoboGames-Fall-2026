@@ -1170,16 +1170,21 @@ module needs an entry in `PARTS` in `arena_layout.py` and a tool in
 Share editor, in the Arena editor tab's top bar, downloads
 `robogame-arena-editor.html`: the editor as one file, about 350 KB, that
 opens in any browser with nothing installed. Send it to teammates. Save
-there keeps their layouts in their own browser, and Export downloads one
-as a `.json` file to send back. In the Gamemaster, Import (or dropping the
-file on the page) opens it as a new, unsaved layout named after the file,
-with `-2` added if that name is taken, and Save puts it with the others.
-Export works in the Gamemaster too.
+there keeps their layouts in their own browser, an STL file dropped on the
+page is added as a part just as in the Gamemaster (same units and up axis
+questions, same sizes), and Export downloads a layout as a `.json` file to
+send back, with the STL parts it uses inside it under `"parts"`. In the
+Gamemaster, Import (or dropping the file on the page) adds those parts to
+`layouts/parts`, keeping a part of the same name you already have, and
+opens the layout as a new, unsaved one named after the file, with `-2`
+added if that name is taken; Save puts it with the others. Export works in
+the Gamemaster too, so a layout with your parts can go the other way.
 
 The file has the saved layouts as starting points, the module sizes and
 the CAD meshes in it, so build it again after adding parts or changing the
-editor. Without the Gamemaster there are no ramp and platform checks, sim
-or STL drops; the checks run once the layout is imported. The 3D view gets
+editor. Without the Gamemaster there are no ramp and platform checks, sim,
+or renaming and deleting parts; the checks run once the layout is
+imported. The 3D view gets
 three.js from unpkg.com, so it needs the internet; the top view does not.
 Without the app, `python3 -m robogame_sim.shared_editor OUT.html` from
 `src/robogame_sim` writes the same file.
@@ -1189,6 +1194,12 @@ Chromium the file opened from disk, placed a module, saved, reloaded,
 exported and imported again, with the 3D view drawn; then the
 Gamemaster's Share editor downloaded it and Import opened the exported
 layout, which passed its checks.
+
+Checked 2026-11-05, STL parts: in headless Chromium an 8 inch STL dropped
+on the file became a part of the same size, cells and poses as `add_part`
+makes, as did a 3 x 1 x 5 inch ASCII box with y up; it stayed after a
+reload, went out with Export, and Import in the Gamemaster added it to
+`layouts/parts` and opened the layout with it placed.
 
 ### STL parts
 
