@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teams</title>
+<style>
+  /* The colours of the other tabs. */
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2433; --muted: #5d6677;
+    --line: #d9dde4; --accent: #2f5fb4; --accent-ink: #ffffff;
+    --bad: #d23c3c; --good: #2e8b57; --warn: #a86a00; --feed: #0d1117;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+      --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+      --bad: #f06b6b; --good: #5cc28a; --warn: #e0a640; --feed: #000;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+    --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+    --bad: #f06b6b; --good: #5cc28a; --warn: #e0a640; --feed: #000;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  button, input {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); font-weight: 600;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px; display: grid;
+         gap: 16px; grid-template-columns: minmax(260px, 340px) 1fr; }
+  @media (max-width: 700px) { main { grid-template-columns: 1fr; } }
+  section {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px; display: flex;
+    flex-direction: column; gap: 10px; min-width: 0;
+  }
+  h2 { font-size: 14px; margin: 0; }
+  p { margin: 0; color: var(--muted); }
+  #qr { background: #fff; border-radius: 8px; padding: 6px;
+        width: 100%; max-width: 300px; align-self: center; }
+  #qr img { display: block; width: 100%; height: auto; }
+  #url { font: 15px ui-monospace, monospace; color: var(--ink);
+         word-break: break-all; text-align: center; }
+  .bad { color: var(--bad); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row input { flex: 1; min-width: 0; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+         margin-right: 5px; border: 1px solid var(--line); vertical-align: -1px; }
+  td button { padding: 2px 8px; }
+  .wide { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+  <section>
+    <h2>Scan to sign up</h2>
+    <div id="qr"><img alt="QR code for the sign-up page" src="/api/teams/qr.svg"></div>
+    <div id="url"></div>
+    <p id="serving"></p>
+    <p>Phones must be on the same Wi-Fi as this computer. A team can scan
+      again to change its name or points.</p>
+  </section>
+  <section>
+    <h2>Token colours</h2>
+    <form class="row" id="tokens-form">
+      <input id="tokens" aria-label="Token colours" placeholder="red, blue, yellow">
+      <button class="primary">Set colours</button>
+    </form>
+    <p id="tokens-note">Colours the phones give points to, by name, split by commas.</p>
+    <div class="row" style="justify-content: space-between">
+      <h2 id="count">Teams</h2>
+      <button id="clear">Remove all teams</button>
+    </div>
+    <div class="wide"><table>
+      <thead id="head"></thead>
+      <tbody id="list"></tbody>
+    </table></div>
+    <p id="topic"></p>
+  </section>
+</main>
+<script src="dialogs.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let last = null;
+let shownUrl = null;
+
+async function call(path, body) {
+  const reply = await fetch(path, {
+    method: body ? "POST" : "GET", cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await reply.json();
+  if (!reply.ok) throw new Error(data.error || reply.statusText);
+  return data;
+}
+
+const cell = (text, className) => {
+  const td = document.createElement(className === "th" ? "th" : "td");
+  if (className && className !== "th") td.className = className;
+  td.textContent = text;
+  return td;
+};
+
+function paint(state) {
+  last = state;
+  if (state.url !== shownUrl) {
+    shownUrl = state.url;
+    $("url").textContent = state.url;
+    $("qr").firstElementChild.src = `/api/teams/qr.svg?u=${encodeURIComponent(state.url)}`;
+  }
+  $("serving").textContent = state.serving ? ""
+    : `Phone sign-up is off: ${state.error || "not started"}.`;
+  $("serving").className = state.serving ? "" : "bad";
+  if (document.activeElement !== $("tokens")) {
+    $("tokens").value = state.tokens.join(", ");
+  }
+  $("count").textContent = `Teams (${state.teams.length})`;
+  $("clear").disabled = !state.teams.length;
+
+  const head = document.createElement("tr");
+  head.append(cell("Team", "th"));
+  for (const colour of state.tokens) {
+    const th = cell("", "th");
+    th.className = "n";
+    const dot = document.createElement("i");
+    dot.className = "dot";
+    dot.style.background = colour;
+    th.append(dot, colour);
+    head.append(th);
+  }
+  head.append(cell("Signed up", "th"), cell("", "th"));
+  $("head").replaceChildren(head);
+
+  const rows = state.teams.map((team) => {
+    const tr = document.createElement("tr");
+    tr.append(cell(team.name));
+    for (const colour of state.tokens) {
+      tr.append(cell(team.points[colour] ?? 0, "n"));
+    }
+    tr.append(cell(new Date(team.updated * 1000).toLocaleTimeString()));
+    const remove = document.createElement("button");
+    remove.textContent = "Remove";
+    remove.onclick = async () => {
+      if (!await askYes(`Remove team ${team.name}?`, "Remove", true)) return;
+      try { paint(await call("/api/teams/remove", { id: team.id })); }
+      catch (error) { $("tokens-note").textContent = error.message; }
+    };
+    const td = cell("");
+    td.append(remove);
+    tr.append(td);
+    return tr;
+  });
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = cell("No teams yet. Scan the code with a phone to sign one up.");
+    td.colSpan = state.tokens.length + 3;
+    tr.append(td);
+    rows.push(tr);
+  }
+  $("list").replaceChildren(...rows);
+  $("topic").textContent = `Published on ${state.topic} for ROS nodes.`;
+}
+
+async function poll() {
+  try { paint(await call("/api/teams")); }
+  catch (error) { /* the shell's red bar says the app is gone */ }
+  setTimeout(poll, 2000);
+}
+
+$("tokens-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    paint(await call("/api/teams/tokens", { tokens: $("tokens").value }));
+    $("tokens-note").textContent = "Saved. Phones see the new colours when they reload.";
+    $("tokens-note").className = "";
+    $("tokens").blur();
+  } catch (error) {
+    $("tokens-note").textContent = error.message;
+    $("tokens-note").className = "bad";
+  }
+});
+$("clear").addEventListener("click", async () => {
+  if (!await askYes("Remove every team?", "Remove all", true)) return;
+  try { paint(await call("/api/teams/clear", {})); } catch (error) {}
+});
+poll();
+</script>
+</body>
+</html>

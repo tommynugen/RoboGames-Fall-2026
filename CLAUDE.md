@@ -36,7 +36,7 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `chase_node.py` | ROS node around `Chaser` |
 | `chase_sim.py` | 2D stand-in for Gazebo to try `Chaser` against moving targets |
 | `arena_layout.py` (890 lines) | layout JSON load/save, `PARTS`, `check()` (the editor's red outlines), world SDF building, spawn spots |
-| `gamemaster.py` + `gamemaster.html` | RoboGame Gamemaster, the one web app at localhost:8766 (`robogame_gamemaster`): serves the editor and console pages and APIs, tabs `#setup`, `#editor`, `#console`, `#vision`, `#chase`, `#logs`, `#upkeep`. `dialogs.js` is the tabs' shared dialogs (`askYes`, `askText`, `dialogOpen`); use it, not `prompt`/`confirm` |
+| `gamemaster.py` + `gamemaster.html` | RoboGame Gamemaster, the one web app at localhost:8766 (`robogame_gamemaster`): serves the editor and console pages and APIs, tabs `#setup`, `#editor`, `#console`, `#vision`, `#chase`, `#logs`, `#upkeep`, `#teams`. `dialogs.js` is the tabs' shared dialogs (`askYes`, `askText`, `dialogOpen`); use it, not `prompt`/`confirm` |
 | `app_window.py` | the Gamemaster's own window: pywebview, else a Chromium-family app window; standard library only, so the desktop launcher runs it without ROS |
 | `arena_editor.py` + `arena_editor.html` | the layout editor, the app's Arena editor tab (page at `/editor`), its API routes in `get`/`put`/`post`; the html is one big file, grep it. Its module drawing is in `arena_draw.js`, shared with the console, and its 3D view (three.js) in `arena_view3d.js` |
 | `sim_firmware.py`, `firmware_model.py` | stand in for the ESP32 firmware and BLE bridge |
@@ -49,6 +49,7 @@ All in `src/robogame_sim/robogame_sim/` unless given.
 | `vision.py` + `vision.html` | the app's Vision tab (`#vision`, page at `/vision`): arena camera, AprilTags, robot places, `/arena/tags` |
 | `chase_runs.py` + `chase.html` | the app's Chase tab (`#chase`, page at `/chase`): runs `chase_sim --json` and the Gazebo chase suite, scores them, `/api/chase` |
 | `app_log.py` + `app_log.html` | the app's Logs tab (`#logs`, page at `/logs`): log lines by source (editor, console, teleop, vision, sim, bridge, app) and `/api/logs` |
+| `teams.py` + `teams.html`, `signup.html`, `qr.py` | the app's Teams tab (`#teams`): QR code to the phones' team sign-up page (port 8767, open to the network), teams and token points, `/game/teams` |
 | `perception.py` | real robots' places from their camera tags (`/model/robot_N/odometry`), arena_perception's autonomy_node, gazebo_viz_node, assign_controllers and controllers.yaml from the console |
 | `sim_runner.py`, `sim_camera.py` | the editor's Launch in Gazebo with every launch option, and its Gazebo camera panel (talks to `fpv_toggle`) |
 | `active_arena.py` | publishes the arena in use on `/arena/layout`, latched; the sim launch starts one |
