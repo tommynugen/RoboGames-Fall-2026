@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboGame sign-up</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2433; --muted: #5d6677;
+    --line: #d9dde4; --accent: #2f5fb4; --accent-ink: #ffffff;
+    --bad: #d23c3c; --good: #2e8b57;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171d; --panel: #1c2028; --ink: #e6e9ef; --muted: #9aa3b2;
+      --line: #2e3440; --accent: #6d97e6; --accent-ink: #0d1117;
+      --bad: #f06b6b; --good: #5cc28a;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 480px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 24px; margin: 4px 0 4px; }
+  p { margin: 0 0 16px; color: var(--muted); }
+  form {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px; display: grid; gap: 16px;
+  }
+  label.name { display: grid; gap: 6px; font-weight: 600; }
+  input {
+    font: inherit; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
+    width: 100%;
+  }
+  input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; }
+  legend { font-weight: 600; margin-bottom: 8px; }
+  .token {
+    display: grid; grid-template-columns: 28px 1fr 44px 64px 44px;
+    align-items: center; gap: 8px;
+  }
+  .dot {
+    width: 24px; height: 24px; border-radius: 50%;
+    border: 2px solid var(--line);
+  }
+  .token span { text-transform: capitalize; }
+  .token input { text-align: center; padding: 10px 4px; }
+  .token button, button.send {
+    font: inherit; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--ink); height: 44px; cursor: pointer;
+  }
+  button.send {
+    background: var(--accent); color: var(--accent-ink);
+    border-color: var(--accent); font-weight: 700; font-size: 18px;
+    height: 52px;
+  }
+  button:disabled { opacity: .5; }
+  #note { min-height: 1.4em; margin: 0; font-weight: 600; }
+  #note.bad { color: var(--bad); }
+  #note.good { color: var(--good); }
+  .again { margin-top: 16px; text-align: center; font-size: 15px; }
+  .again a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>RoboGame sign-up</h1>
+  <p>Name your team and say how many points each token colour is worth.</p>
+  <form id="form" autocomplete="off">
+    <label class="name">Team name
+      <input id="name" required maxlength="24" placeholder="e.g. Bolt">
+    </label>
+    <fieldset id="tokens"><legend>Points per token</legend></fieldset>
+    <button class="send" id="send" type="submit">Sign up</button>
+    <p id="note" role="status"></p>
+  </form>
+  <p class="again" id="again" hidden>
+    Signed up as another team by mistake?
+    <a href="#" id="fresh">Start a new team</a></p>
+</main>
+<script>
+const KEY = "robogame.team";  // this phone's team id, to edit it later
+const remember = (value) => {
+  try {
+    if (value === undefined) return localStorage.getItem(KEY);
+    if (value === null) localStorage.removeItem(KEY);
+    else localStorage.setItem(KEY, value);
+  } catch (error) { return null; }
+};
+const $ = (id) => document.getElementById(id);
+let teamId = remember();
+let maxPoints = 100;
+
+function note(text, look) {
+  $("note").textContent = text;
+  $("note").className = look || "";
+}
+
+function row(colour, value) {
+  const line = document.createElement("div");
+  line.className = "token";
+  const dot = document.createElement("i");
+  dot.className = "dot";
+  dot.style.background = colour;
+  const name = document.createElement("span");
+  name.textContent = colour;
+  const input = document.createElement("input");
+  input.type = "number"; input.inputMode = "numeric";
+  input.min = 0; input.max = maxPoints; input.value = value;
+  input.dataset.colour = colour;
+  input.setAttribute("aria-label", `${colour} points`);
+  const step = (by, text) => {
+    const button = document.createElement("button");
+    button.type = "button"; button.textContent = text;
+    button.setAttribute("aria-label", `${text === "+" ? "More" : "Fewer"} ${colour} points`);
+    button.onclick = () => {
+      const next = (parseInt(input.value, 10) || 0) + by;
+      input.value = Math.max(0, Math.min(maxPoints, next));
+    };
+    return button;
+  };
+  line.append(dot, name, step(-1, "−"), input, step(1, "+"));
+  return line;
+}
+
+async function load() {
+  const query = teamId ? `?id=${encodeURIComponent(teamId)}` : "";
+  const reply = await fetch(`/api/signup${query}`);
+  const data = await reply.json();
+  maxPoints = data.max_points;
+  const team = data.team;
+  if (teamId && !team) { teamId = null; remember(null); }
+  const set = $("tokens");
+  set.querySelectorAll(".token").forEach((line) => line.remove());
+  for (const colour of data.tokens) {
+    set.append(row(colour, team ? team.points[colour] ?? 0 : 0));
+  }
+  if (team) {
+    $("name").value = team.name;
+    $("send").textContent = "Save changes";
+    $("again").hidden = false;
+  } else {
+    $("send").textContent = "Sign up";
+    $("again").hidden = true;
+  }
+}
+
+$("form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const points = {};
+  for (const input of document.querySelectorAll("#tokens input")) {
+    points[input.dataset.colour] = parseInt(input.value, 10) || 0;
+  }
+  $("send").disabled = true;
+  note("Sending…");
+  try {
+    const reply = await fetch("/api/signup", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({id: teamId, name: $("name").value, points}),
+    });
+    const data = await reply.json();
+    if (!reply.ok) throw new Error(data.error || "that did not go through");
+    teamId = data.id;
+    remember(teamId);
+    $("send").textContent = "Save changes";
+    $("again").hidden = false;
+    note(`${data.name} is in. Change anything and save again.`, "good");
+  } catch (error) {
+    note(error.message.includes("fetch")
+      ? "Could not reach the game. Are you on the same Wi-Fi?"
+      : error.message, "bad");
+  } finally {
+    $("send").disabled = false;
+  }
+});
+
+$("fresh").addEventListener("click", (event) => {
+  event.preventDefault();
+  teamId = null;
+  remember(null);
+  $("name").value = "";
+  note("");
+  load();
+});
+
+load().catch(() => note("Could not reach the game. Are you on the same Wi-Fi?", "bad"));
+</script>
+</body>
+</html>

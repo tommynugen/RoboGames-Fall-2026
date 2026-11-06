@@ -8,7 +8,7 @@ Opens in a window of its own (app_window.py), and closing that window
 quits the app as the Quit button does. --browser opens a browser tab
 instead, and --no-browser neither.
 
-Serves http://localhost:8766 with six tabs:
+Serves http://localhost:8766 with these tabs, and the Setup tab:
 
 - Arena editor (#editor, or #editor/NAME to open a saved layout): maps the
   modules as they are set up on the table. arena_editor.py and
@@ -23,6 +23,10 @@ Serves http://localhost:8766 with six tabs:
 - Logs (#logs): the log lines of the editor, the robot console, the
   controller nodes, the sim and the app, each on its own tab and all
   together on All. app_log.py and app_log.html.
+- Teams (#teams): a QR code that phones scan to sign a team up, its name
+  and how many points each token colour is worth to it, and the teams so
+  far. The sign-up page is open to the network on port 8767 and the teams
+  go out on /game/teams. teams.py, teams.html and signup.html.
 - Upkeep (#upkeep): the repo's jobs, the Onshape export, the
   arena_perception copy and the colcon build, with their output.
   upkeep.py and upkeep.html.
@@ -31,7 +35,7 @@ Right of the tabs a status bar shows, every 2 s from GET /api/app,
 whether ROS is on, the sim's state, the BLE bridge's, how many robots
 the console sees and the arena in use; each opens the tab that deals with it. The Logs tab
 counts the errors not yet looked at, and a new one pops up in a corner
-while another tab shows. Alt+1 to Alt+6 switch tabs, and a bare URL
+while another tab shows. Alt+1 to Alt+8 switch tabs, and a bare URL
 opens the tab shown last.
 
 Both tabs are live at once, so a layout saved in the editor is the one the
@@ -59,7 +63,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
 from robogame_sim import (app_log, app_window, arena_editor, perception,
-                          vision as vision_tab)
+                          teams as teams_tab, vision as vision_tab)
 from robogame_sim.chase_runs import ChaseRunner
 from robogame_sim.ble_bridge import BridgeRunner
 from robogame_sim.sim_runner import SimRunner
@@ -75,7 +79,8 @@ VISION_PAGE = os.path.join(HERE, vision_tab.PAGE_NAME)
 UPKEEP_PAGE = os.path.join(HERE, "upkeep.html")
 CHASE_PAGE = os.path.join(HERE, "chase.html")
 SETUP_PAGE = os.path.join(HERE, "setup.html")
-TABS = ("setup", "editor", "console", "vision", "chase", "logs", "upkeep")
+TABS = ("setup", "editor", "console", "vision", "chase", "logs", "upkeep",
+        "teams")
 # Changes the editor makes as it is used, not worth a log line each.
 QUIET = ("/api/check",)
 PORT = 8766
@@ -90,7 +95,8 @@ the app again. The arena editor works without it.</p>"""
 
 
 def handler(console=None, sim=None, book=None, bridge=None, vision=None,
-            upkeep=None, chase=None, tags=None, nodes=None, quit=None):
+            upkeep=None, chase=None, tags=None, nodes=None, quit=None,
+            teams=None):
     """A request handler for the app. console is the RobotConsole node, or
     None to serve the editor alone. sim is the SimRunner behind the
     editor's Launch buttons, or None for none. book is the LogBook the
@@ -101,12 +107,14 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
     behind the Chase tab, or None. tags is the robot tag map
     (perception.TagRobots) and nodes arena_perception's nodes
     (perception.Perception). quit, called with no arguments, stops the
-    app, for the Quit button: POST /api/quit."""
+    app, for the Quit button: POST /api/quit. teams is the Teams tab's
+    teams_tab.Teams."""
     book = book or app_log.LogBook()
     vision = vision or vision_tab.Vision(book)
     tags = tags or perception.TagRobots(
         side=lambda: vision.settings["arena_cm"], book=book)
     nodes = nodes or perception.Perception(book=book)
+    teams = teams or teams_tab.Teams(book=book)
     if console is not None:
         from robogame_sim import robot_console
         console_page = robot_console.PAGE
@@ -190,6 +198,8 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
                 return self.file(CHASE_PAGE, HTML)
             if path == "/setup":
                 return self.file(SETUP_PAGE, HTML)
+            if path == "/teams":
+                return self.file(teams_tab.TAB_PAGE, HTML)
             if path == "/vision/stream.mjpg":
                 return self.stream()
             if path == "/api/app":
@@ -206,6 +216,7 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
                 ("vision", lambda: tags.get(path)),
                 ("console", lambda: nodes.get(path)),
                 ("chase", lambda: chase and chase.get(path)),
+                ("teams", lambda: teams.get(path)),
                 ("console", lambda: self.console_route("get", path)),
                 ("editor", lambda: arena_editor.get(path)))
             if self.status >= 400:
@@ -271,6 +282,7 @@ def handler(console=None, sim=None, book=None, bridge=None, vision=None,
                 ("vision", lambda: tags.post(path, self.read_body)),
                 ("console", lambda: nodes.post(path, self.read_body)),
                 ("chase", lambda: chase and chase.post(path, self.read_body)),
+                ("teams", lambda: teams.post(path, self.read_body)),
                 ("console", lambda: self.console_route(
                     "post", path, self.read_body)),
                 ("editor", lambda: arena_editor.post(path, self.read_body))),
@@ -382,6 +394,8 @@ def main(args=None):
                         help="open a browser tab, not the app's own window")
     parser.add_argument("--tab", choices=TABS, default="editor",
                         help="the tab it opens on")
+    parser.add_argument("--signup-port", type=int, default=teams_tab.PORT,
+                        help="port of the phones' team sign-up page")
     # ros2 run passes --ros-args on, which rclpy takes.
     options, _ = parser.parse_known_args(args)
     url = f"http://localhost:{options.port}/#{options.tab}"
@@ -418,11 +432,16 @@ def main(args=None):
         console.tag_robots = tags
     upkeep = UpkeepRunner()
     chase = ChaseRunner()
+    teams = teams_tab.Teams(book=book, path=teams_tab.teams_file(),
+                            port=options.signup_port)
+    if console is not None:
+        teams.attach(console)
+    teams.serve()
     # The page's Quit button sets this; the finally below then stops it all.
     quitting = threading.Event()
     server.RequestHandlerClass = handler(console, sim, book, bridge, vision,
                                          upkeep, chase, tags, nodes,
-                                         quitting.set)
+                                         quitting.set, teams)
     server.daemon_threads = True
     threading.Thread(target=server.serve_forever, daemon=True).start()
     say(book, f"RoboGame Gamemaster on {url}, saving layouts to "
@@ -458,6 +477,7 @@ def main(args=None):
         upkeep.stop()
         vision.stop()
         nodes.stop()
+        teams.stop()
         if console is not None:
             import rclpy
             if rclpy.ok():

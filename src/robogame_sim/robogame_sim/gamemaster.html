@@ -124,6 +124,7 @@
   <a href="#logs" data-tab="logs" title="Logs (Alt+6)"><span>Logs</span>
     <span class="badge" id="errors" hidden></span></a>
   <a href="#upkeep" data-tab="upkeep" title="Upkeep (Alt+7)">Upkeep</a>
+  <a href="#teams" data-tab="teams" title="Teams (Alt+8)">Teams</a>
   <div id="status" aria-live="polite">
     <button class="chip" id="ros" data-go="console">ROS</button>
     <button class="chip" id="sim" data-go="editor">Sim</button>
@@ -184,7 +185,7 @@ function remember(key, value) {
 let current = null;
 
 // #setup, #editor, #editor/NAME (opens that layout), #console, #vision,
-// #chase, #logs or #upkeep. With none, the tab shown last, or Setup.
+// #chase, #logs, #upkeep or #teams. With none, the tab shown last, or Setup.
 function show() {
   const [asked, layout] = decodeURIComponent(location.hash.slice(1))
     .split("/");

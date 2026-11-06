@@ -306,9 +306,9 @@ buttons, or Logs after a failed run. The Logs tab shows in red how many
 errors came since it was last looked at, and a new error pops up in the
 bottom corner for 15 s while another tab shows, with Show to open Logs.
 If the app stops answering, a red bar says how to start it again, and
-the page reconnects by itself. Alt+1 to Alt+7 switch tabs, in the
+the page reconnects by itself. Alt+1 to Alt+8 switch tabs, in the
 order Setup, Arena editor, Robot console, Vision, Chase, Logs, Upkeep,
-and opening http://localhost:8766 with no tab named opens the one shown
+Teams, and opening http://localhost:8766 with no tab named opens the one shown
 last (Setup the first time). Once the arena camera is on, a Camera chip
 says whether it sees the four corner tags; it opens the Vision tab. Each
 tab's page title is its tab's name.
@@ -402,7 +402,7 @@ HTTP) and the tab in Chromium without ROS. Not yet run with ROS or a sim.
 
 ## The app's Upkeep tab
 
-The Upkeep tab, last of the Gamemaster's tabs, runs the repo's upkeep
+The Upkeep tab runs the repo's upkeep
 jobs with a button each, one at a time, and shows their output as they
 run:
 
@@ -429,6 +429,49 @@ Checked 2026-11-04: tests (`test_upkeep.py`, with stand-in scripts and
 the app's routes over HTTP) and the tab in Chromium without ROS: the
 missing keys, a failed copy with no checkout and its chip. Not yet run
 against Onshape or a real build.
+
+## The app's Teams tab
+
+The Teams tab, last of the Gamemaster's tabs, signs teams up from their
+phones. It shows a QR code for the sign-up page, at this computer's
+address on its network, port 8767 (`--signup-port` to change it). A
+phone on the same Wi-Fi that scans it opens a page where the team types
+its name and how many points each token colour is worth to it, 0 to 100,
+with + and - buttons, say 5 for red, 3 for blue and 1 for yellow. Sign up
+sends it. The phone keeps its team's id, so scanning again shows the team
+and Save changes edits it; Start a new team on the phone forgets it. Two
+teams cannot share a name (case is ignored), names are at most 24
+letters, and 64 teams at most.
+
+The tab lists the teams with their points and when they signed up, with
+Remove for one and Remove all teams. Token colours (red, blue, yellow at
+first) are set there by CSS colour name, split by commas; teams keep the
+points of the colours that stay. Teams and colours are kept in
+`~/.local/share/robogame_sim/teams.json`, so a restart keeps them, and
+each sign-up or change goes to the Logs tab's Teams source.
+
+With ROS sourced, the teams go out on `/game/teams` (std_msgs/String,
+JSON, latched, so a node started later gets them at once):
+
+```
+{"tokens": ["red", "blue", "yellow"],
+ "teams": [{"name": "Bolt", "points": {"red": 5, "blue": 3, "yellow": 1},
+            "updated": 1793979630.5}]}
+```
+
+Only the sign-up page and `/api/signup` (GET for the colours and a
+team, POST `{"id", "name", "points"}`) are open to the network; the
+Gamemaster itself still answers only this computer. The Teams tab uses
+GET `/api/teams`, GET `/api/teams/qr.svg` and POST
+`/api/teams/tokens`, `/api/teams/remove` and `/api/teams/clear`. The QR
+code is made by `qr.py`, so nothing more needs installing.
+
+Checked 2026-11-06: tests (`test_teams.py`: the QR code matches the
+python qrcode package module for module, the sign-up rules, and a phone
+sign-up over HTTP showing on the tab), opencv decoding the QR codes, and
+both pages in Chromium (Playwright) without ROS, the sign-up page at
+phone size. The `/game/teams` topic is not yet run with ROS, nor the
+page on a real phone.
 
 ## The app's Vision tab
 

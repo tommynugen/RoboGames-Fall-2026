@@ -12,7 +12,8 @@ setup(
                                  'dialogs.js', 'arena_view3d.js',
                                  'robot_console.html', 'gamemaster.html',
                                  'app_log.html', 'vision.html',
-                                 'upkeep.html', 'chase.html', 'setup.html']},
+                                 'upkeep.html', 'chase.html', 'setup.html',
+                                 'teams.html', 'signup.html']},
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
