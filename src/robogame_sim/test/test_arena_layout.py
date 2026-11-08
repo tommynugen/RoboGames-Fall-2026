@@ -248,7 +248,10 @@ def test_editor_serves_saves_and_checks(editor):
     status, body = call(url + "/api/modules")
     modules = json.loads(body)
     assert status == 200 and modules["size"] == al.SIZE
-    assert set(modules["types"]) == set(al.TYPES)
+    # The CAD's modules, and the STL parts kept in layouts/parts.
+    assert set(al.TYPES) <= set(modules["types"])
+    assert all(part["mount"] == "block" for kind, part
+               in modules["types"].items() if kind not in al.TYPES)
     assert modules["types"]["thwomp"]["height"] == pytest.approx(0.1524,
                                                                  abs=1e-3)
 
