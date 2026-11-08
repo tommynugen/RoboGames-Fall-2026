@@ -1221,6 +1221,12 @@ to match the CAD. Like any STL part they are blocks that robots go round,
 not surfaces they drive on. They are in the palette, and in the shared
 editor file built from this checkout.
 
+They replace the old CAD modules (the 1" and 2" platforms, ramp, wall,
+thwomp and floor tile) in the palette: `layouts/parts/builtin.json` marks
+those deleted. They are still module types, so layouts that use them, such
+as default, still open and run, and Restore in the editor's archive brings
+one back.
+
 Checked 2026-11-08: tests, and in headless Chromium the shared editor
 file showed all 19 in the palette and placed them in the top and 3D views
 the right way up.
