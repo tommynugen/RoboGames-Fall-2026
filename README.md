@@ -1208,6 +1208,23 @@ module that changes size or height needs no code change; a new kind of
 module needs an entry in `PARTS` in `arena_layout.py` and a tool in
 `arena_editor.html`.
 
+### The team's modules
+
+`layouts/parts` has the 19 modules from the team's CAD, as STL parts:
+the four BLOCKERs, BRIDGE, the three FLOORs, both HIGH-PLATFORMs, RAMP,
+RAMP-0_5inch, RAMP-1_5inchFLAT and RAMP-3inchFLAT (a `.` cannot be in a
+part's name), both SHIFTING-FLOORs and the three TERRAINs. Each is 8 x 8
+inches. They were exported with y up, so they were turned upright, and the
+4 inch ramps were turned a quarter turn so every ramp rises toward +y at
+rotation 0, as RAMP-0_5inch does; TERRAIN-Waves was turned a quarter turn
+to match the CAD. Like any STL part they are blocks that robots go round,
+not surfaces they drive on. They are in the palette, and in the shared
+editor file built from this checkout.
+
+Checked 2026-11-08: tests, and in headless Chromium the shared editor
+file showed all 19 in the palette and placed them in the top and 3D views
+the right way up.
+
 ### Sharing the editor with teammates
 
 Share editor, in the Arena editor tab's top bar, downloads
